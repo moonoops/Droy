@@ -224,7 +224,10 @@ public class FullDshRuntimeDeviceTest {
         assertEquals("SANDBOX_UNAVAILABLE", result.getString("blockedCode"));
         assertEquals("danger-full-access", result.getString("explicitMode"));
         assertEquals("dsh-shell-device-ok", result.getString("stdout"));
-        assertTrue(result.getJSONArray("presets").length() >= 4);
+        Set<String> presets = new java.util.HashSet<>();
+        for (int index = 0; index < result.getJSONArray("presets").length(); index++)
+            presets.add(result.getJSONArray("presets").getString(index));
+        assertEquals(Set.of("cordis", "standard"), presets);
     }
 
     private JSONObject runNode(String source, long timeoutSeconds) throws Exception {
