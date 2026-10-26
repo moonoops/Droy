@@ -61,6 +61,8 @@ Shizuku 启动和授权说明见[官方指南](https://shizuku.rikka.app/zh-hans
 
 官方版本使用相同签名覆盖升级，保留模型、会话、个性化和权限选择。签名冲突时先检查旧安装与数据迁移，不自动卸载。
 
+日常开发使用独立的 `io.droyagent.app.dev`（Droy 开发版 / Droy Dev）和本地调试签名，构建、安装命令见 [BUILDING.md](BUILDING.md)。开发版与现有正式版并存，配置、会话和权限独立，不自动复制正式版数据。`tools/install.sh` 与独立权限工具默认针对开发版；本文的 `tools/setup.py` 安装计划仍明确针对正式包名 `io.droyagent.app`。只有用户明确要求发布到 GitHub 时才使用正式签名及其凭据。
+
 自定义桌面名称或图标需要重新构建：
 
 ```sh

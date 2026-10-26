@@ -529,7 +529,7 @@ function applyFixture(initial = state(), { deferTheme = false, ready = false, re
     effect: callback => disposers.push(callback())
   };
   const React = { createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
-    Fragment: Symbol('fragment'), useEffect() {}, useState: reactUseState || (value => [value, () => {}]),
+    Fragment: Symbol('fragment'), useId: () => 'droy-model-fixture', useEffect() {}, useState: reactUseState || (value => [value, () => {}]),
     useSyncExternalStore: (_subscribe, get) => get(), ...reactHooks };
   load(window, { React }).apply(ctx);
   return { registrations, requests, themeWrites, window, ctx, listeners, panelSubscribers, acceptTheme,
@@ -556,6 +556,19 @@ test('only incomplete installations render the phone setup flow', async () => {
   }
 });
 
+test('completed setup releases the shared model portal target', async () => {
+  const effects = [], notifications = [];
+  const fixture = applyFixture({ ...state(), setup: { required: false, step: 6 } }, { reactHooks: {
+    useRef: current => ({ current }), useEffect: effect => effects.push(effect),
+  } });
+  fixture.window.addEventListener('droy-setup-step', () => notifications.push('released'));
+  fixture.registrations.find(row => row.options.id === 'droy-setup').component();
+  const cleanup = effects.splice(0).map(effect => effect());
+  assert.deepEqual(notifications, ['released']);
+  for (const dispose of cleanup) dispose?.();
+  fixture.dispose();
+});
+
 test('the recommended phone profile is applied only when the welcome choice is confirmed', async () => {
   const saved = { ...state(), setup: { required: true, step: 1, mode: 'dialogue', modeSelected: false } };
   const fixture = applyFixture(saved, { reactHooks: { useRef: current => ({ current }) } });
@@ -563,6 +576,8 @@ test('the recommended phone profile is applied only when the welcome choice is c
   const tree = fixture.registrations.find(row => row.options.id === 'droy-setup').component();
   const choices = nodes(tree).filter(row => row.props['data-droy-setup-mode']);
   assert.equal(choices.find(row => row.props.value === 'assistant').props.checked, true);
+  assert.deepEqual(choices.map(row => row.props.value), ['assistant', 'dialogue', 'all']);
+  assert.equal(choices.find(row => row.props.value === 'all').props.checked, false);
   assert.equal(fixture.requests.some(row => row.action === 'setupUpdate'), false);
   await nodes(tree).find(row => row.props['data-droy-setup-next']).props.onClick();
   await flush();
@@ -582,6 +597,93 @@ test('model setup requires verified conversation while the final page still uses
     assert.equal(fixture.requests.some(row => row.action === 'setupUpdate'), false);
     fixture.dispose();
   }
+});
+
+test('shared model footer clears unavailable defaults, shows providers and refreshes saved selections', async () => {
+  const effects = [], states = [], refs = [], subscriptions = new Map();
+  let stateIndex = 0, refIndex = 0;
+  const models = [{ provider: 'configured', model: 'text', name: 'Text', providerName: 'Configured provider' }];
+  let response = { ok: true, models, selection: { provider: 'old-route', model: 'text' }, selectionAvailable: false };
+  const fixture = applyFixture(state(), { windowExtra: { AbortController,
+    fetch: async () => ({ ok: true, json: async () => response }) }, reactHooks: {
+    useRef(value) { return refs[refIndex++] ?? (refs[refIndex - 1] = { current: value }); },
+    useState(value) { const index = stateIndex++; if (!(index in states)) states[index] = value;
+      return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }]; },
+    useEffect(effect) { effects.push(effect); },
+  } });
+  fixture.ctx.remote = { $on(event, callback) { subscriptions.set(event, callback); return () => subscriptions.delete(event); } };
+  const footer = fixture.registrations.find(row => row.options.id === 'droy-default-model');
+  assert.equal(footer.options.name, 'settings.models.footer');
+  const render = () => { stateIndex = 0; refIndex = 0; return nodes(footer.component()); };
+  render();
+  const cleanups = effects.splice(0).map(effect => effect());
+  await flush();
+  let tree = render();
+  assert.equal(tree.find(node => node.props['data-droy-setup-model']).props.value, '');
+  assert.equal(tree.find(node => node.props['data-droy-setup-model-test']).props.disabled, true);
+  assert.ok(tree.some(node => node.type === 'option' && node.children[0] === 'Configured provider · Text'));
+  response = { ...response, selection: { provider: 'configured', model: 'text' }, selectionAvailable: true };
+  subscriptions.get('settings/document-updated')(); await flush();
+  tree = render();
+  assert.equal(tree.find(node => node.props['data-droy-setup-model']).props.value, JSON.stringify(['configured', 'text']));
+  assert.equal(tree.find(node => node.props['data-droy-setup-model-test']).props.disabled, false);
+  for (const cleanup of cleanups) cleanup?.();
+  fixture.dispose();
+});
+
+test('a model test result invalidates earlier shared-footer status requests', async () => {
+  const effects = [], states = [], refs = [], responses = [], subscriptions = new Map();
+  let stateIndex = 0, refIndex = 0, hold = false;
+  const status = { ok: true, models: [{ provider: 'configured', model: 'text' }],
+    selection: { provider: 'configured', model: 'text' }, modelVerification: { passed: false } };
+  const fixture = applyFixture(state(), { windowExtra: { AbortController,
+    fetch: () => hold ? new Promise(resolve => responses.push(value => resolve({ ok: true, json: async () => value })))
+      : Promise.resolve({ ok: true, json: async () => status }) }, reactHooks: {
+    useRef(value) { return refs[refIndex++] ?? (refs[refIndex - 1] = { current: value }); },
+    useState(value) { const index = stateIndex++; if (!(index in states)) states[index] = value;
+      return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }]; },
+    useEffect(effect) { effects.push(effect); },
+  } });
+  fixture.ctx.remote = { $on(event, callback) { subscriptions.set(event, callback); return () => subscriptions.delete(event); } };
+  const component = fixture.registrations.find(row => row.options.id === 'droy-default-model').component;
+  const render = () => { stateIndex = 0; refIndex = 0; return nodes(component()); };
+  render(); const cleanups = effects.splice(0).map(effect => effect()); await flush();
+  hold = true; subscriptions.get('settings/document-updated')();
+  const testing = render().find(node => node.props['data-droy-setup-model-test']).props.onClick();
+  assert.equal(responses.length, 2);
+  responses[1]({ ok: true, modelVerification: { passed: true, toolsPassed: true } });
+  await testing; await flush();
+  assert.ok(render().some(node => node.props.role === 'status'));
+  responses[0](status); await flush();
+  assert.ok(render().some(node => node.props.role === 'status'));
+  for (const cleanup of cleanups) cleanup?.(); fixture.dispose();
+});
+
+test('older setup status cannot overwrite a model test that has already passed', async () => {
+  const effects = [], states = [], refs = [], responses = [];
+  let stateIndex = 0, refIndex = 0;
+  const saved = { ...state(), setup: { required: true, step: 2, mode: 'dialogue', modeSelected: true,
+    modelVerification: { passed: false }, identity: {} } };
+  const fixture = applyFixture(saved, { windowExtra: { AbortController,
+    fetch: () => new Promise(resolve => responses.push(value => resolve({ ok: true, json: async () => value }))) }, reactHooks: {
+    useRef(value) { return refs[refIndex++] ?? (refs[refIndex - 1] = { current: value }); },
+    useState(value) { const index = stateIndex++; if (!(index in states)) states[index] = value;
+      return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }]; },
+    useEffect(effect) { effects.push(effect); },
+  } });
+  await flush();
+  const component = fixture.registrations.find(row => row.options.id === 'droy-setup').component;
+  const render = () => { stateIndex = 0; refIndex = 0; return nodes(component()); };
+  render(); const cleanups = effects.splice(0).map(effect => effect());
+  assert.equal(responses.length, 1);
+  saved.setup.modelVerification.passed = true;
+  fixture.window.dispatchEvent(new fixture.window.CustomEvent('droy-model-updated'));
+  assert.equal(responses.length, 2);
+  responses[1]({ ok: true, state: { ...saved.setup, modelVerification: { passed: true } } }); await flush();
+  assert.equal(render().find(node => node.props['data-droy-setup-next']).props.disabled, false);
+  responses[0]({ ok: true, state: { ...saved.setup, modelVerification: { passed: false } } }); await flush();
+  assert.equal(render().find(node => node.props['data-droy-setup-next']).props.disabled, false);
+  for (const cleanup of cleanups) cleanup?.(); fixture.dispose();
 });
 
 test('audio settings keep active work stoppable without listing recording history when tools are paused', async () => {

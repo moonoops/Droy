@@ -70,6 +70,36 @@ def generateBrandResources = tasks.register('generateBrandResources', GenerateBr
     assetsDirectory.set(layout.buildDirectory.dir('generated/droyBranding/assets'))
 }
 
+abstract class GenerateDevelopmentResources extends DefaultTask {
+    @Input abstract Property<String> getAppName()
+    @OutputDirectory abstract DirectoryProperty getResourcesDirectory()
+
+    @TaskAction
+    void generate() {
+        File res = resourcesDirectory.get().asFile
+        project.delete(res)
+        def names = [
+            'values': [appName.get() + ' Dev', 'Droy Dev phone control', 'Droy Dev notification management'],
+            'values-zh': [appName.get() + ' 开发版', 'Droy 开发版手机操作', 'Droy 开发版通知管理']
+        ]
+        names.each { directory, labels ->
+            File values = new File(res, directory)
+            values.mkdirs()
+            def entries = ['droy_app_name', 'droy_accessibility_service', 'droy_notification_service'].withIndex().collect { key, index ->
+                String value = groovy.json.JsonOutput.toJson(labels[index]).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                '<string name="' + key + '" formatted="false">' + value + '</string>'
+            }
+            new File(values, 'droy_development.xml').setText('<resources>' + entries.join('') + '</resources>\n', 'UTF-8')
+        }
+    }
+}
+
+def generateDevelopmentResources = tasks.register('generateDevelopmentResources', GenerateDevelopmentResources) {
+    dependsOn generateBrandResources
+    appName.set(providers.gradleProperty('droyAppName').orElse(brandingSpec.name as String))
+    resourcesDirectory.set(layout.buildDirectory.dir('generated/droyDevelopment/res'))
+}
+
 abstract class VerifyRuntimeRelease extends DefaultTask {
     @InputFile @PathSensitive(PathSensitivity.NONE)
     abstract RegularFileProperty getReleaseManifest()
@@ -183,7 +213,17 @@ android {
         jniLibs { useLegacyPackaging = true; keepDebugSymbols += ['**/*.so'] }
     }
     buildTypes {
+        debug {
+            applicationIdSuffix '.dev'
+            signingConfig signingConfigs.debug
+        }
         release { minifyEnabled false }
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType('debug')) { variant ->
+        variant.sources.res.addGeneratedSourceDirectory(generateDevelopmentResources) { it.resourcesDirectory }
     }
 }
 

@@ -1,4 +1,4 @@
-Droy 0.0.1
+Droy 0.0.2
 Copyright (c) 2026 moonoops
 Source: https://github.com/moonoops/Droy
 License: AGPL-3.0-only

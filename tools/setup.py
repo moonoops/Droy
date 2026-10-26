@@ -18,9 +18,10 @@ import sys
 import xml.etree.ElementTree as ET
 import zipfile
 
-from enable_permissions import (Adb, AdbError, PermissionSetup, SetupError, PACKAGE,
-                                PROVIDER, choose_device, find_adb, permission_is_granted)
+from enable_permissions import (Adb, AdbError, PermissionSetup, SetupError, RELEASE_PACKAGE as PACKAGE,
+                                choose_device, find_adb, permission_is_granted)
 
+PROVIDER = 'content://' + PACKAGE + '.permissions'
 ROOT = Path(__file__).resolve().parents[1]
 SHIZUKU_PACKAGE = 'moe.shizuku.privileged.api'
 SCHEMA = 1
@@ -520,7 +521,7 @@ def apply_plan(adb, plan, approval, serial=None):
         raise SetupError('安装被 Android 拒绝；请检查签名、版本及系统提示。没有卸载或清空数据') from error
     if not re.search(r'(?m)^Success\s*$', output):
         raise SetupError('Android 未确认安装成功；没有卸载或清空数据')
-    setup = PermissionSetup(adb, plan['androidUser'], snapshot['androidApi'])
+    setup = PermissionSetup(adb, plan['androidUser'], snapshot['androidApi'], package_name=PACKAGE)
     setup.open_app()
     configuration = {**plan['configuration'], **plan['identity']}
     provider(adb, plan['androidUser'], 'setup-configure', configuration)

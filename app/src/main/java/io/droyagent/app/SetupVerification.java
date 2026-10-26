@@ -63,27 +63,27 @@ final class SetupVerification {
         }
     }
 
-    private static JSONObject observe(String challenge) throws Exception {
+    private static JSONObject observe(android.content.Context context, String challenge) throws Exception {
         check(challenge);
         JSONObject observed = RuntimeService.executeProductAction("observe", new JSONObject());
         check(challenge);
-        if (!"io.droyagent.app".equals(observed.optString("packageName")))
+        if (!context.getPackageName().equals(observed.optString("packageName")))
             throw new IllegalStateException(io.droyagent.app.NativeLocale.text("当前页面不是 Droy 本地练习页，验证已停止", "This is not the Droy local practice page. Verification has stopped"));
         return observed;
     }
 
-    private static JSONObject target(JSONObject observation, String id) throws Exception {
+    private static JSONObject target(android.content.Context context, JSONObject observation, String id) throws Exception {
         JSONArray nodes = observation.getJSONArray("nodes");
         for (int index = 0; index < nodes.length(); index++) {
             JSONObject node = nodes.getJSONObject(index);
-            if (node.optString("resourceId").equals("io.droyagent.app:id/" + id)) return node;
+            if (node.optString("resourceId").equals(context.getPackageName() + ":id/" + id)) return node;
         }
         throw new IllegalStateException(io.droyagent.app.NativeLocale.text("未找到本地练习控件，请重试", "Local practice controls were not found. Please retry"));
     }
 
-    private static JSONObject arguments(JSONObject observation, String id) throws Exception {
+    private static JSONObject arguments(android.content.Context context, JSONObject observation, String id) throws Exception {
         return new JSONObject().put("snapshotId", observation.getString("snapshotId"))
-            .put("nodeId", target(observation, id).getString("nodeId"));
+            .put("nodeId", target(context, observation, id).getString("nodeId"));
     }
 
     private static void run(android.content.Context context, String challenge) {
@@ -97,17 +97,17 @@ final class SetupVerification {
             }
             // The page starts with an empty input. An observed matching control
             // must exist before any product mutation can be issued.
-            JSONObject before = observe(challenge);
-            target(before, "test_input");
+            JSONObject before = observe(context, challenge);
+            target(context, before, "test_input");
             String choices = SetupManager.status(context).getJSONObject("capabilities").toString();
             boolean control = ProductPermissions.allowed(ProductPermissions.preferences(context), "allowControl");
             if (control) {
                 check(challenge);
-                RuntimeService.executeProductAction("input_text", arguments(before, "test_input").put("text", "Droy 安装验证"));
-                JSONObject entered = observe(challenge);
+                RuntimeService.executeProductAction("input_text", arguments(context, before, "test_input").put("text", "Droy 安装验证"));
+                JSONObject entered = observe(context, challenge);
                 check(challenge);
-                RuntimeService.executeProductAction("tap", arguments(entered, "test_confirm"));
-                JSONObject after = observe(challenge);
+                RuntimeService.executeProductAction("tap", arguments(context, entered, "test_confirm"));
+                JSONObject after = observe(context, challenge);
                 if (!after.getString("text").contains("已确认：Droy 安装验证"))
                     throw new IllegalStateException(io.droyagent.app.NativeLocale.text("操作已返回，但练习结果未匹配，请核实后重试", "The operation returned, but the practice result did not match. Please verify and retry"));
             }

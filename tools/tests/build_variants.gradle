@@ -1,0 +1,37 @@
+// Run: ./gradlew -I tools/tests/build_variants.gradle :app:testBuildVariants
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    def resourceType = app.tasks.named('generateDevelopmentResources').get().getClass().superclass
+    def fixture = app.tasks.register('generateDevelopmentResourcesFixture', resourceType)
+    app.tasks.register('testBuildVariants') {
+        dependsOn app.tasks.named('generateDevelopmentResources')
+        doLast {
+            def android = app.extensions.getByName('android')
+            assert android.defaultConfig.applicationId == 'io.droyagent.app'
+            assert android.buildTypes.debug.applicationIdSuffix == '.dev'
+            assert android.buildTypes.debug.signingConfig == android.signingConfigs.debug
+            assert android.buildTypes.release.applicationIdSuffix == null
+            assert android.buildTypes.release.signingConfig == null
+            File directory = java.nio.file.Files.createTempDirectory('droy-dev-resources-').toFile()
+            try {
+                def generator = fixture.get()
+                generator.appName.set('Fictional & Co.')
+                generator.resourcesDirectory.set(directory)
+                generator.generate()
+                def read = { String locale ->
+                    new XmlParser().parse(new File(directory, "${locale}/droy_development.xml"))
+                        .string.collectEntries { [(it.@name): new groovy.json.JsonSlurper().parseText(it.text())] }
+                }
+                def english = read('values'), chinese = read('values-zh')
+                assert english.keySet() == chinese.keySet()
+                assert english.droy_app_name == 'Fictional & Co. Dev'
+                assert chinese.droy_app_name == 'Fictional & Co. 开发版'
+                assert english.values().every { it.contains('Dev') }
+                assert chinese.values().every { it.contains('开发版') }
+                logger.lifecycle('PASS: distinct application IDs, local debug signing, unsigned release, paired localized development labels and custom name escaping')
+            } finally {
+                directory.deleteDir()
+            }
+        }
+    }
+}

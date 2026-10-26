@@ -16,6 +16,7 @@ source_root = Path(sys.argv.pop(1))
 parser = argparse.ArgumentParser(description='Probe Android ARM64 Landlock/seccomp in an installed debuggable Droy app UID. All inputs are synthetic; positive run-as results do not prove the production SELinux domain.')
 parser.add_argument('--adb', required=True)
 parser.add_argument('--serial', required=True)
+parser.add_argument('--package', choices=['io.droyagent.app.dev', 'io.droyagent.app'], default='io.droyagent.app.dev')
 parser.add_argument('--ndk', type=Path, required=True)
 parser.add_argument('--output-dir', type=Path, required=True, help='Must not exist; stores binary and JSON evidence')
 args = parser.parse_args()
@@ -44,6 +45,7 @@ report = {
     'sourceSha256': hashlib.sha256(source.read_bytes()).hexdigest(),
     'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
     'execution': {
+        'package': args.package,
         'rootUsed': False, 'appInstalled': False, 'settingsChanged': False,
         'productionSelinuxDomainVerified': False,
         'remoteDirectory': remote,
@@ -51,14 +53,14 @@ report = {
 }
 created = False
 try:
-    report['execution']['identity'] = checked(['run-as', 'io.droyagent.app', 'id'], text=True).stdout.strip()
+    report['execution']['identity'] = checked(['run-as', args.package, 'id'], text=True).stdout.strip()
     report['execution']['model'] = checked(['getprop', 'ro.product.model'], text=True).stdout.strip()
     report['execution']['api'] = checked(['getprop', 'ro.build.version.sdk'], text=True).stdout.strip()
-    checked(['run-as', 'io.droyagent.app', 'mkdir', '-m', '700', remote], text=True)
+    checked(['run-as', args.package, 'mkdir', '-m', '700', remote], text=True)
     created = True
-    checked(['run-as', 'io.droyagent.app', 'sh', '-c', 'umask 077; set -C; cat > ' + shlex.quote(remote + '/probe')], input=binary.read_bytes())
-    checked(['run-as', 'io.droyagent.app', 'chmod', '700', remote + '/probe'], text=True)
-    result = shell(['run-as', 'io.droyagent.app', 'sh', '-c', 'cd ' + shlex.quote(remote) + ' && ./probe --files'], text=True)
+    checked(['run-as', args.package, 'sh', '-c', 'umask 077; set -C; cat > ' + shlex.quote(remote + '/probe')], input=binary.read_bytes())
+    checked(['run-as', args.package, 'chmod', '700', remote + '/probe'], text=True)
+    result = shell(['run-as', args.package, 'sh', '-c', 'cd ' + shlex.quote(remote) + ' && ./probe --files'], text=True)
     (output / 'stdout.jsonl').write_text(result.stdout)
     (output / 'stderr.txt').write_text(result.stderr)
     report['exitCode'] = result.returncode
@@ -67,7 +69,7 @@ try:
         raise RuntimeError('Probe execution failed; see captured output')
 finally:
     if created:
-        cleanup = shell(['run-as', 'io.droyagent.app', 'rm', '-r', remote], text=True)
+        cleanup = shell(['run-as', args.package, 'rm', '-r', remote], text=True)
         report['execution']['remoteDirectoryRemoved'] = cleanup.returncode == 0
     (output / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
 

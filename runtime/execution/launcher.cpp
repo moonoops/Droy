@@ -501,7 +501,8 @@ void root_filesystem(Context& c) {
     // the target still contains only the explicitly mounted subtrees above.
     if (c.start.host_uid / 100000 == 0) {
         mkdirs(root + "/data/data");
-        check(symlink("/data/user/0/io.droyagent.app", (root + "/data/data/io.droyagent.app").c_str()), "app_data_alias");
+        std::string app = c.start.files.substr(0, c.start.files.size() - 6);
+        check(symlink(app.c_str(), (root + "/data/data/" + c.start.package()).c_str()), "app_data_alias");
     }
     mkdirs(root + "/tmp"); check(mount("tmpfs", (root + "/tmp").c_str(), "tmpfs", MS_NOSUID | MS_NODEV, "mode=1777,size=256m"), "tmp_mount");
     mkdirs(root + "/home"); check(mount("tmpfs", (root + "/home").c_str(), "tmpfs", MS_NOSUID | MS_NODEV, "mode=0755,size=64m"), "home_mount");
@@ -926,11 +927,16 @@ uid_t process_uid(pid_t pid) {
     require(sscanf(status.c_str() + at, "\nUid:\t%u\t%u\t%u\t%u", &r, &e, &s, &f) == 4, "process_uid_invalid");
     return r;
 }
-void validate_main(uid_t uid, pid_t pid, uint64_t ticks) {
+std::string validate_main(uid_t uid, pid_t pid, uint64_t ticks) {
     require(process_uid(pid) == uid && start_ticks(pid) == ticks, "main_process_changed");
     std::string executable = link_at(AT_FDCWD, ("/proc/" + std::to_string(pid) + "/exe").c_str());
     auto name = executable.substr(executable.find_last_of('/') + 1);
     require(name == "app_process64" || name == "app_process", "main_not_android_java");
+    std::string command = read_small("/proc/" + std::to_string(pid) + "/cmdline", 4096);
+    std::string package = command.substr(0, command.find('\0'));
+    require(supported_package(package), "main_package_unsupported");
+    require(process_uid(pid) == uid && start_ticks(pid) == ticks, "main_process_changed");
+    return package;
 }
 void validate_cleanup_transport(uid_t uid, pid_t main_pid, pid_t client_pid, uint64_t client_ticks) {
     require(client_pid > 1 && client_pid != main_pid && start_ticks(client_pid) == client_ticks, "cleanup_transport_changed");
@@ -959,8 +965,8 @@ int cleanup() {
     uint64_t ticks = std::stoull(ticks_text); require(ticks != 0, "invalid_cleanup_start");
     require(!client_ticks_text.empty() && client_ticks_text.find_first_not_of("0123456789") == std::string::npos, "invalid_cleanup_transport_start");
     uint64_t client_ticks = std::stoull(client_ticks_text); require(client_ticks != 0, "invalid_cleanup_transport_start");
-    std::string files_path = "/data/user/" + std::to_string(uid / 100000) + "/io.droyagent.app/files";
-    Fd files = directory(files_path); owned_by(files, uid); validate_main(uid, main_pid, ticks);
+    std::string package = validate_main(uid, main_pid, ticks);
+    Fd files = directory(app_files_root(uid, package)); owned_by(files, uid);
     validate_cleanup_transport(uid, main_pid, client_pid, client_ticks);
     Fd proc = directory("/proc"); size_t terminated = 0; uint64_t deadline = now_ms() + 5000;
     for (;;) {

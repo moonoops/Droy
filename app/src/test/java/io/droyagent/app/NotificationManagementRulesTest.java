@@ -38,6 +38,8 @@ public class NotificationManagementRulesTest {
         assertFalse(NotificationManagementRules.eligibleApplication("example.dialer", 10123, true, true, "example.droy", protectedApps));
         assertFalse(NotificationManagementRules.eligibleApplication("android", 1000, true, true, "example.droy", protectedApps));
         assertFalse(NotificationManagementRules.eligibleApplication("example.framework", 10123, true, false, "example.droy", protectedApps));
+        assertFalse(NotificationManagementRules.eligibleApplication(DroyPackages.RELEASE, 10123, false, true, DroyPackages.DEVELOPMENT, protectedApps));
+        assertFalse(NotificationManagementRules.eligibleApplication(DroyPackages.DEVELOPMENT, 10124, false, true, DroyPackages.RELEASE, protectedApps));
     }
     private JSONObject rule() throws Exception {
         return new JSONObject().put("packageName", "example.parcel").put("instruction", "只有送达时提醒")

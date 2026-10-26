@@ -27,7 +27,7 @@ public final class BackgroundNotificationSettingsDeviceTest {
     private static final String DETAILS = "[data-droy-notification-details]";
     private static final String CLOUD = ".droy-notification-body > .droy-notification-header [role='switch']";
     private static final String RULE = "notification-ui-fixture";
-    private static final String PACKAGE = "io.droyagent.app.test";
+    private static final String PACKAGE = InstrumentationRegistry.getInstrumentation().getContext().getPackageName();
     private Instrumentation instrumentation;
     private Context context;
     private MainActivity activity;

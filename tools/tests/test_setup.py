@@ -112,8 +112,9 @@ class FakeAdb:
 class FakePermissionSetup:
     instances = []
 
-    def __init__(self, adb, user, api):
+    def __init__(self, adb, user, api, package_name):
         self.adb, self.user, self.api = adb, user, api
+        self.package = package_name
         self.permissions = None
         self.instances.append(self)
 
@@ -185,6 +186,7 @@ class SetupTests(unittest.TestCase):
         result = MODULE.apply_plan(self.adb, plan, plan['approvalDigest'])
         self.assertEqual(result['status'], 'pending_phone')
         self.assertEqual(FakePermissionSetup.instances[-1].permissions, [])
+        self.assertEqual(FakePermissionSetup.instances[-1].package, "io.droyagent.app")
         self.assertFalse(any(self.adb.setup_state['capabilities'].values()))
         self.assertEqual(self.adb.setup_state['userAddress'], '测试用户')
         self.assertFalse(any('setup-complete' in call for call in self.adb.calls))

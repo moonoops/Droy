@@ -38,7 +38,7 @@ import static org.junit.Assert.*;
 /** Real listener callbacks and a separate posting UID, with fictional emulator notifications. */
 @RunWith(AndroidJUnit4.class)
 public final class NotificationManagementDeviceTest {
-    private static final String SOURCE = "io.droyagent.app.test";
+    private static final String SOURCE = InstrumentationRegistry.getInstrumentation().getContext().getPackageName();
     private static final String SOURCE_TAG = "droy-notification-fixture";
     private static final String RECEIVER = SOURCE + "/io.droyagent.app.NotificationManagementDeviceTest$FixtureReceiver";
     private Instrumentation instrumentation;

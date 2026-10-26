@@ -20,6 +20,10 @@ public final class SetupManagerTest {
         assertFalse(configured.getJSONObject("capabilities").getBoolean("allowRoot"));
     }
 
+    @Test public void acceptsAllPermissionsMode() throws Exception {
+        assertEquals("all", SetupManager.validatedUpdate(new JSONObject().put("mode", "all"), CAPABILITIES).getString("mode"));
+    }
+
     @Test public void rejectsSecretsUnknownKeysAndForgedReceipts() throws Exception {
         for (String key : new String[]{"apiKey", "token", "completed", "modelVerification", "deviceVerification", "configFingerprint", "modeSelected"}) {
             assertThrows(key, IllegalArgumentException.class, () ->
@@ -42,7 +46,7 @@ public final class SetupManagerTest {
         for (Object value : new Object[]{0, 7, 1.5, "2", true, JSONObject.NULL})
             assertThrows(IllegalArgumentException.class, () ->
                 SetupManager.validatedUpdate(new JSONObject().put("step", value), CAPABILITIES));
-        for (String value : new String[]{"", "all", "root", "Assistant"})
+        for (String value : new String[]{"", "everything", "root", "Assistant"})
             assertThrows(IllegalArgumentException.class, () ->
                 SetupManager.validatedUpdate(new JSONObject().put("mode", value), CAPABILITIES));
         for (String name : new String[]{"", "name\nnext", "name\u0000", "猫".repeat(41)})

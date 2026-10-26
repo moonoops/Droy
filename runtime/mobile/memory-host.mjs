@@ -44,8 +44,10 @@ const PRIVATE_LOCAL_TOOLS = new Set([
   'android_audio_status', 'android_audio_stop', 'audio_transcript_read', 'audio_transcription_stop',
 ]);
 function hostPaths(value) {
-  if (!value || !/^\/data\/user\/\d+\/io\.droyagent\.app\/files$/.test(value.filesDir)
-      || !value.nativeDir?.startsWith('/data/app/') || !Number.isSafeInteger(value.appUid) || value.appUid < 10000) {
+  const match = /^\/data\/user\/(0|[1-9]\d*)\/io\.droyagent\.app(?:\.dev)?\/files$/.exec(value?.filesDir);
+  if (!match || !value.nativeDir?.startsWith('/data/app/') || !Number.isSafeInteger(value.appUid)
+      || value.appUid % 100000 < 10000 || value.appUid % 100000 > 19999
+      || Number(match[1]) !== Math.floor(value.appUid / 100000)) {
     throw failure('MEMORY_NATIVE_HOST_INVALID');
   }
   return { filesDir: value.filesDir, nativeDir: value.nativeDir, appUid: value.appUid };
@@ -109,8 +111,8 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
   function policy() {
     if (!host) throw failure('MEMORY_HOST_NOT_READY');
     return { workspaceRoot: join(host.filesDir, 'dsh-home', 'workspace'), nodePath: join(host.nativeDir, 'libdroy_node.so'),
-      pathAliases: host.filesDir === '/data/user/0/io.droyagent.app/files'
-        ? [{ from: '/data/data/io.droyagent.app', to: '/data/user/0/io.droyagent.app' }] : [],
+      pathAliases: /^\/data\/user\/0\/io\.droyagent\.app(?:\.dev)?\/files$/.test(host.filesDir)
+        ? [{ from: '/data/data/' + host.filesDir.split('/')[4], to: host.filesDir.slice(0, -6) }] : [],
       workspaceRoots: [join(host.filesDir, 'dsh-home', 'workspace'), join(host.filesDir, 'workspace')],
       readOnlyRoots: [join(host.filesDir, 'runtime'), host.nativeDir],
       privateRoots: ['droy-memory', 'droy-privacy', 'droy-history-spool', 'droy-execution', '.dsh', 'dsh-home']

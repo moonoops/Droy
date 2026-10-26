@@ -66,6 +66,19 @@ public final class SetupStateDeviceTest {
         assertFalse(ProductPermissions.allowed(ProductPermissions.preferences(context), "allowFutureCapability"));
     }
 
+    @Test public void explicitAllPermissionsChoiceEnablesCatalogAndDialogueRevokesIt() throws Exception {
+        SetupManager.initialize(context);
+        SetupManager.update(context, new JSONObject().put("mode", "all"));
+        JSONObject all = SetupManager.status(context);
+        assertEquals("all", all.getString("mode"));
+        assertFalse(ProductPermissions.stopped(context));
+        for (String key : SetupManager.capabilityKeys(context)) assertTrue(key, all.getJSONObject("capabilities").getBoolean(key));
+        SetupManager.update(context, new JSONObject().put("mode", "dialogue"));
+        JSONObject dialogue = SetupManager.status(context);
+        for (String key : SetupManager.capabilityKeys(context)) assertFalse(key, dialogue.getJSONObject("capabilities").getBoolean(key));
+        assertTrue(ProductPermissions.stopped(context));
+    }
+
     @Test public void existingPreferencesMigrateWithoutOverwritingNamesOrRevokedChoices() throws Exception {
         ProductPermissions.preferences(context).edit().putString("petName", "旧伙伴")
             .putString("assistantName", "旧页面").putBoolean("allowRoot", false).putBoolean("allowContacts", false).commit();

@@ -43,6 +43,21 @@ test('another package, mismatched Android user and path traversal cannot select 
   rejects({cwd: '/data/user/0/io.droyagent.app/files/workspace-other'}, 'cwd_outside_workspace');
   rejects({workspaceId: '../private'}, 'invalid_workspace_id');
 });
+test('development and release retain separate exact roots for each Android user', () => {
+  for (const name of ['io.droyagent.app', 'io.droyagent.app.dev']) for (const user of [0, 1]) {
+    const files = `/data/user/${user}/${name}/files`;
+    const result = run(request({ uid: user * 100000 + 10123, files, cwd: files + '/workspace' }));
+    assert.equal(result.status, 0, result.stdout);
+    assert.ok(result.stdout.endsWith(`\n${name}\n`));
+    const other = name === 'io.droyagent.app' ? 'io.droyagent.app.dev' : 'io.droyagent.app';
+    rejects({ files, uid: user * 100000 + 10123, cwd: `/data/user/${user}/${other}/files/workspace` }, 'cwd_outside_workspace');
+  }
+  for (const name of ['io.droyagent.app.developer', 'io.droyagent.app.dev.other', 'other.io.droyagent.app']) {
+    rejects({ files: `/data/user/0/${name}/files` }, 'invalid_files_root');
+  }
+  rejects({ files: '/data/user/1/io.droyagent.app.dev/files' }, 'invalid_files_root');
+  rejects({ files: '/data/data/io.droyagent.app.dev/files' }, 'invalid_files_root');
+});
 test('unknown flags, invalid dimensions, unbounded lifetimes and private host env are rejected', () => {
   rejects({flags: 4}, 'invalid_terminal_options'); rejects({cols: 1001}, 'invalid_terminal_options');
   rejects({timeout: 86400001}, 'invalid_timeout'); rejects({proxy: 65536}, 'invalid_proxy_port');

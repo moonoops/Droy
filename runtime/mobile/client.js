@@ -1806,6 +1806,6 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         bridge.dispose();
       }, 'droy-mobile: native settings bridge');
     }
-    return { apply, inject: ['locale', 'slots', 'theme', 'layout', 'configForms', 'sidebarRight', 'sessions', 'workspaces', 'uiWorkspace'], createNativeBridge, createBrowserNavigation, createController, brandingSnapshot, logoBackgroundsFromPixels, installBranding, createTouchController, createMicrophoneGuard, permissionRows, createBackHandler, createSettingsOpenHandler, observePanelNavigation, observePetContext, createNotificationPluginApi, createPetApi, petAssetUrl, petPreviewFrame, createPetPreview, setThemeDurably, readThemeBackground, observeUiReady };
+    return { apply, inject: ['locale', 'remote', 'slots', 'theme', 'layout', 'configForms', 'sidebarRight', 'sessions', 'workspaces', 'uiWorkspace'], createNativeBridge, createBrowserNavigation, createController, brandingSnapshot, logoBackgroundsFromPixels, installBranding, createTouchController, createMicrophoneGuard, permissionRows, createBackHandler, createSettingsOpenHandler, observePanelNavigation, observePetContext, createNotificationPluginApi, createPetApi, petAssetUrl, petPreviewFrame, createPetPreview, setThemeDurably, readThemeBackground, observeUiReady };
   }
 });

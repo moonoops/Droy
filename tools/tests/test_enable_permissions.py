@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 
@@ -24,6 +25,8 @@ args = sys.argv[1:]
 with open(os.environ["MOCK_ADB_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
 config = json.loads(os.environ["MOCK_ADB_CONFIG"])
+package = config.get("package", "io.droyagent.app.dev")
+accessibility = package + "/io.droyagent.androiduse.DroyAccessibilityService"
 state_path = os.environ["MOCK_ADB_STATE"]
 with open(state_path) as stream:
     state = json.load(stream)
@@ -57,8 +60,8 @@ if remote == ["am", "get-current-user"]:
     respond(config.get("user", "0"))
 if remote[:2] == ["am", "start"]:
     if config.get("browser_task_on_top") and "--activity-reorder-to-front" not in remote:
-        respond("Status: ok\nActivity: io.droyagent.app/.BrowserActivity\nComplete")
-    respond(config.get("launch_output", "Status: ok\nActivity: io.droyagent.app/.MainActivity\nComplete"),
+        respond("Status: ok\nActivity: io.droyagent.app.dev/io.droyagent.app.BrowserActivity\nComplete")
+    respond(config.get("launch_output", "Status: ok\nActivity: " + package + "/io.droyagent.app.MainActivity\nComplete"),
             config.get("launch_exit", 0))
 if remote[:2] == ["pm", "path"]:
     respond("package:/data/app/mock/base.apk" if config.get("installed", True) else "")
@@ -70,7 +73,7 @@ if remote[:2] == ["dumpsys", "package"]:
     current = config.get("user", "0")
     permissions = ["android.permission.READ_CALENDAR", "android.permission.READ_CONTACTS", "android.permission.RECORD_AUDIO", "android.permission.POST_NOTIFICATIONS"]
     development = ["android.permission.WRITE_SECURE_SETTINGS", "android.permission.DUMP", "android.permission.PACKAGE_USAGE_STATS"]
-    lines = ["Packages:", "  Package [io.droyagent.app] (mock):", "    requested permissions:"]
+    lines = ["Packages:", "  Package [" + package + "] (mock):", "    requested permissions:"]
     lines.extend("      " + p for p in development)
     if not config.get("omit_install_grants"):
         lines.append("    install permissions:")
@@ -95,7 +98,7 @@ if remote[:1] == ["settings"]:
         respond(state["settings"].get(key, "null"))
     if operation == "put":
         if key not in config.get("unconfirmed_settings", []):
-            if key == "enabled_accessibility_services" and "io.droyagent.app/io.droyagent.androiduse.DroyAccessibilityService" in state["settings"].get(key, "") and "io.droyagent.app/io.droyagent.androiduse.DroyAccessibilityService" not in remote[6]:
+            if key == "enabled_accessibility_services" and accessibility in state["settings"].get(key, "") and accessibility not in remote[6]:
                 state["accessibility_rebound"] = True
             state["settings"][key] = remote[6]
         respond()
@@ -118,7 +121,7 @@ if remote[:3] == ["cmd", "notification", "allow_listener"]:
 if remote[:2] == ["content", "call"]:
     if remote[-1] == "enable-all" and not config.get("unconfirmed_product"):
         state["product"] = True
-    connected = "io.droyagent.app/io.droyagent.androiduse.DroyAccessibilityService" in state["settings"].get("enabled_accessibility_services", "") and state["settings"].get("accessibility_enabled") == "1"
+    connected = accessibility in state["settings"].get("enabled_accessibility_services", "") and state["settings"].get("accessibility_enabled") == "1"
     connected = connected and not config.get("accessibility_never_connects") and (not config.get("accessibility_crashed") or state.get("accessibility_rebound"))
     if state.get("accessibility_reads", 0) < config.get("accessibility_delay_reads", 0):
         connected = False
@@ -206,6 +209,45 @@ class PermissionSetupTests(unittest.TestCase):
         self.assertFalse(state["product"])
         self.assertEqual(state["settings"]["enabled_accessibility_services"], "other.app/other.app.Reader:" + MODULE.ACCESSIBILITY)
         self.assertNotIn("android.permission.RECORD_AUDIO", state["permissions"])
+
+
+    def test_default_package_targets_only_development_app(self):
+        self.assertEqual(MODULE.PACKAGE, "io.droyagent.app.dev")
+        official_accessibility = "io.droyagent.app/io.droyagent.androiduse.DroyAccessibilityService"
+        official_notification = "io.droyagent.app/io.droyagent.app.DroyNotificationService"
+        self.initial_state["settings"]["enabled_accessibility_services"] = official_accessibility
+        self.initial_state["settings"]["enabled_notification_listeners"] = official_notification
+        self.state_path.write_text(json.dumps(self.initial_state))
+        result = self.run_setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        commands = self.remote_calls()
+        self.assertIn(["pm", "path", "--user", "0", MODULE.PACKAGE], commands)
+        self.assertIn(["cmd", "notification", "allow_listener",
+                       "io.droyagent.app.dev/io.droyagent.app.DroyNotificationService", "0"], commands)
+        self.assertTrue(any("content://io.droyagent.app.dev.permissions" in command for command in commands))
+        self.assertFalse(any("io.droyagent.app" in command for command in commands))
+        settings = json.loads(self.state_path.read_text())["settings"]
+        self.assertEqual(settings["enabled_accessibility_services"], official_accessibility + ":" + MODULE.ACCESSIBILITY)
+        self.assertEqual(settings["enabled_notification_listeners"], official_notification + ":" + MODULE.NOTIFICATION)
+
+    def test_explicit_official_package_uses_official_authorities_and_class_names(self):
+        result = self.run_setup("--package", "io.droyagent.app", config={"package": "io.droyagent.app"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        commands = self.remote_calls()
+        self.assertIn(["pm", "path", "--user", "0", "io.droyagent.app"], commands)
+        self.assertIn(["cmd", "notification", "allow_listener",
+                       "io.droyagent.app/io.droyagent.app.DroyNotificationService", "0"], commands)
+        self.assertTrue(any("content://io.droyagent.app.permissions" in command for command in commands))
+        self.assertFalse(any("io.droyagent.app.dev" in command for command in commands))
+        state = json.loads(self.state_path.read_text())
+        self.assertIn("io.droyagent.app/io.droyagent.androiduse.DroyAccessibilityService",
+                      state["settings"]["enabled_accessibility_services"])
+
+    def test_unrelated_package_is_rejected_before_adb(self):
+        result = self.run_setup("--package", "unrelated.app")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.calls(), [])
+        self.assert_no_mutation()
 
     def test_all_permissions_verified_and_other_services_preserved(self):
         result = self.run_setup()
@@ -518,7 +560,7 @@ class PermissionSetupTests(unittest.TestCase):
         result = self.run_setup()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         commands = self.remote_calls()
-        launch = commands.index(["am", "start", "--user", "0", "-W", "--activity-reorder-to-front", "-n", "io.droyagent.app/.MainActivity"])
+        launch = commands.index(["am", "start", "--user", "0", "-W", "--activity-reorder-to-front", "-n", "io.droyagent.app.dev/io.droyagent.app.MainActivity"])
         for permission in ("android.permission.WRITE_SECURE_SETTINGS", "android.permission.DUMP"):
             self.assertLess(commands.index(["pm", "grant", "--user", "0", MODULE.PACKAGE, permission]), launch)
         provider_calls = [i for i, command in enumerate(commands) if command[:2] == ["content", "call"]]
@@ -538,7 +580,7 @@ class PermissionSetupTests(unittest.TestCase):
         configurations = [
             {"launch_exit": 1},
             {"launch_output": "Error: Activity not started"},
-            {"launch_output": "Status: timeout\nActivity: io.droyagent.app/.MainActivity"},
+            {"launch_output": "Status: timeout\nActivity: io.droyagent.app.dev/io.droyagent.app.MainActivity"},
             {"launch_output": "Status: ok\nActivity: other.app/.MainActivity"},
             {"launch_output": "Status: ok\nComplete"},
         ]
@@ -554,13 +596,14 @@ class PermissionSetupTests(unittest.TestCase):
                 self.assertFalse(json.loads(self.state_path.read_text())["product"])
 
     def test_existing_activity_full_component_is_accepted(self):
-        result = self.run_setup(config={"launch_output": "Warning: Activity not started, its current task has been brought to the front\nStatus: ok\nActivity: io.droyagent.app/io.droyagent.app.MainActivity\nComplete"})
+        result = self.run_setup(config={"launch_output": "Warning: Activity not started, its current task has been brought to the front\nStatus: ok\nActivity: io.droyagent.app.dev/io.droyagent.app.MainActivity\nComplete"})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.summary(result)["ok"])
 
     def test_installer_grants_only_after_successful_install_and_before_launch(self):
         apk = self.root / "test app.apk"
-        apk.write_bytes(b"mock APK")
+        with zipfile.ZipFile(apk, "w") as archive:
+            archive.writestr("AndroidManifest.xml", '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.droyagent.app.dev" android:versionCode="5"/>')
         result = subprocess.run(["/bin/sh", str(TOOLS / "install.sh"), "--apk", str(apk),
                                  "--serial", "phone-1", "--grant-permissions", "--launch"],
                                 env=self.environment(), capture_output=True, text=True, timeout=20)
@@ -574,7 +617,8 @@ class PermissionSetupTests(unittest.TestCase):
 
     def test_default_installer_grants_recovery_without_changing_accessibility_after_install(self):
         apk = self.root / "test app.apk"
-        apk.write_bytes(b"mock APK")
+        with zipfile.ZipFile(apk, "w") as archive:
+            archive.writestr("AndroidManifest.xml", '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.droyagent.app.dev" android:versionCode="5"/>')
         result = subprocess.run(["/bin/sh", str(TOOLS / "install.sh"), "--apk", str(apk), "--serial", "phone-1"],
                                 env=self.environment(), capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -592,7 +636,8 @@ class PermissionSetupTests(unittest.TestCase):
 
     def test_installer_reports_partial_permission_failure_without_launch_or_data_loss(self):
         apk = self.root / "test app.apk"
-        apk.write_bytes(b"mock APK")
+        with zipfile.ZipFile(apk, "w") as archive:
+            archive.writestr("AndroidManifest.xml", '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.droyagent.app.dev" android:versionCode="5"/>')
         result = subprocess.run(["/bin/sh", str(TOOLS / "install.sh"), "--apk", str(apk), "--grant-permissions", "--launch"],
                                 env=self.environment({"unconfirmed_product": True}),
                                 capture_output=True, text=True, timeout=20)
@@ -766,7 +811,7 @@ class ReadbackParserTests(unittest.TestCase):
     def test_development_permissions_accept_only_granted_install_entries_of_droy(self):
         permission = "android.permission.WRITE_SECURE_SETTINGS"
         dump = """Packages:
-  Package [io.droyagent.app] (mock):
+  Package [io.droyagent.app.dev] (mock):
     requested permissions:
       android.permission.WRITE_SECURE_SETTINGS
     install permissions:
@@ -778,13 +823,13 @@ class ReadbackParserTests(unittest.TestCase):
 """
         self.assertTrue(MODULE.development_permission_is_granted(dump, permission))
         self.assertFalse(MODULE.development_permission_is_granted(dump, "android.permission.DUMP"))
-        self.assertFalse(MODULE.development_permission_is_granted(dump.replace("[io.droyagent.app]", "[other.app]"), permission))
+        self.assertFalse(MODULE.development_permission_is_granted(dump.replace("[io.droyagent.app.dev]", "[other.app]"), permission))
         self.assertFalse(MODULE.development_permission_is_granted(dump.replace("    install permissions:\n", ""), permission))
         self.assertFalse(MODULE.development_permission_is_granted(dump.replace("granted=true, flags=[]", "granted=trueish"), permission))
 
     def test_development_grant_is_not_inferred_from_a_later_package(self):
         dump = """Packages:
-  Package [io.droyagent.app] (mock):
+  Package [io.droyagent.app.dev] (mock):
     requested permissions:
       android.permission.DUMP
     User 0: installed=true

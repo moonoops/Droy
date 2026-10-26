@@ -32,12 +32,13 @@ def strings(values):
 
 
 class Device:
-    def __init__(self, adb, serial):
+    def __init__(self, adb, serial, package_name='io.droyagent.app.dev'):
         self.adb = [adb, '-s', serial]
-        package = self.call('shell', 'dumpsys', 'package', 'io.droyagent.app')
+        self.package = package_name
+        package = self.call('shell', 'dumpsys', 'package', self.package)
         self.native = re.search(r'legacyNativeLibraryDir=(\S+)', package).group(1) + '/arm64'
         self.uid = int(re.search(r'appId=(\d+)', package).group(1))
-        self.files = '/data/user/{}/io.droyagent.app/files'.format(self.uid // 100000)
+        self.files = '/data/user/{}/{}/files'.format(self.uid // 100000, self.package)
         self.helper = self.native + '/libdroy_exec.so'
         self.node = self.native + '/libdroy_node.so'
         self.workspaces = []
@@ -49,7 +50,7 @@ class Device:
         return self.call('shell', 'su -c ' + shlex.quote(command))
 
     def app(self, *args):
-        return self.call('shell', ' '.join(shlex.quote(x) for x in ['run-as', 'io.droyagent.app'] + list(args)))
+        return self.call('shell', ' '.join(shlex.quote(x) for x in ['run-as', self.package] + list(args)))
 
     def workspace(self):
         identity = hashlib.sha256(uuid.uuid4().bytes).hexdigest()
@@ -164,10 +165,11 @@ def main():
     args = argparse.ArgumentParser()
     args.add_argument('--adb', required=True)
     args.add_argument('--serial', required=True)
+    args.add_argument('--package', choices=['io.droyagent.app.dev', 'io.droyagent.app'], default='io.droyagent.app.dev')
     args.add_argument('--allow-synthetic-root-tests', action='store_true', required=True)
     args.add_argument('--case', choices=['standard', 'unknown-uid', 'preclone'], default='standard')
     value = args.parse_args()
-    device = Device(value.adb, value.serial)
+    device = Device(value.adb, value.serial, value.package)
     jobs = []
     results = []
     def passed(name, **facts):

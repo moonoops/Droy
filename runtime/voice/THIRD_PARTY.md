@@ -25,7 +25,7 @@ The Android native libraries include eSpeak NG/ucd-tools, Piper, Kaldi, OpenFst,
 Eigen and other static dependencies. Their full notices and fixed sources are
 listed in APK assets `licenses/sherpa-static/sources.json`. Matching source and
 build materials are available in the
-[sherpa source attachment](https://github.com/moonoops/Droy/releases/download/v0.0.1/sherpa-source-materials-v0.0.1.tar.gz).
+[sherpa source attachment](https://github.com/moonoops/Droy/releases/download/v0.0.2/sherpa-source-materials-v0.0.2.tar.gz).
 
 Download URLs and file hashes are pinned in
 [audio-models.json](../../app/src/main/assets/audio-models.json),

@@ -47,7 +47,7 @@ final class NotificationManagementRules {
     static boolean eligibleApplication(String name, int uid, boolean system, boolean launchable,
                                        String owner, Set<String> protectedApps) {
         int appId = uid % 100000;
-        return appId >= 10000 && appId <= 19999 && !name.equals(owner) && !protectedApps.contains(name)
+        return appId >= 10000 && appId <= 19999 && !name.equals(owner) && !DroyPackages.contains(name) && !protectedApps.contains(name)
                 && (!system || launchable);
     }
 

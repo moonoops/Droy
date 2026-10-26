@@ -164,7 +164,7 @@ public final class NotificationChannelShell {
 
     private static void checkPackage(String name, int uid) {
         if (!name.matches("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+") || uid < 10000
-                || name.equals("io.droyagent.app") || name.equals("com.android.systemui") || name.equals("com.android.phone"))
+                || DroyPackages.contains(name) || name.equals("com.android.systemui") || name.equals("com.android.phone"))
             throw new SecurityException("protected_package");
     }
 }

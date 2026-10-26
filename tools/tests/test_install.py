@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 
 
 INSTALLER = Path(__file__).resolve().parents[1] / "install.sh"
@@ -47,6 +48,8 @@ with open(os.environ["MOCK_PYTHON_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
 config = json.loads(os.environ["MOCK_ADB_CONFIG"])
 if args[:1] == ["-c"]:
+    if "from setup import apk_info" in args[1]:
+        sys.exit(config.get("apk_validation_exit", 0))
     sys.exit(config.get("python_version_exit", 0))
 if args and args[0] == os.environ["MOCK_PERMISSION_RUNNER"]:
     print(config.get("permission_output", "Accessibility connection verified"))
@@ -103,13 +106,13 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(any("uninstall" in call or "clear" in call for call in self.calls()))
         self.assertEqual(self.python_calls()[0], ["-c", "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"])
         self.assertEqual(self.permission_calls(), [[str(PERMISSION_RUNNER), "--adb", str(self.adb),
-                                                  "--serial", "phone-1", "--preserve-accessibility"]])
+                                                  "--serial", "phone-1", "--package", "io.droyagent.app.dev", "--preserve-accessibility"]])
 
     def test_grant_permissions_uses_full_permission_mode(self):
         result = self.run_installer("--grant-permissions", "--serial", "chosen-device")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.permission_calls(), [[str(PERMISSION_RUNNER), "--adb", str(self.adb),
-                                                  "--serial", "chosen-device"]])
+                                                  "--serial", "chosen-device", "--package", "io.droyagent.app.dev"]])
 
     def test_permission_failure_keeps_install_and_reports_matching_retry_mode(self):
         for arguments in ([], ["--grant-permissions"]):
@@ -152,14 +155,14 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(["-s", serial, "install", "-r", str(self.apk)], self.calls())
         self.assertEqual(self.permission_calls(), [[str(PERMISSION_RUNNER), "--adb", str(self.adb),
-                                                  "--serial", serial, "--preserve-accessibility"]])
+                                                  "--serial", serial, "--package", "io.droyagent.app.dev", "--preserve-accessibility"]])
 
     def test_explicit_serial_overrides_environment_and_uses_waited_launch(self):
         result = self.run_installer("--serial", "chosen-device", "--launch", serial="other-device")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(all(call[:2] == ["-s", "chosen-device"] for call in self.calls()))
         self.assertIn(["-s", "chosen-device", "shell", "am", "start", "-W", "-n",
-                       "io.droyagent.app/.MainActivity"], self.calls())
+                       "io.droyagent.app.dev/io.droyagent.app.MainActivity"], self.calls())
 
     def test_environment_serial_is_used(self):
         result = self.run_installer(serial="environment-device")
@@ -216,8 +219,38 @@ class InstallerTests(unittest.TestCase):
         result = self.run_installer("--launch", config={"launch_output": "Warning: Activity not started, its current task has been brought to the front\r\nStatus: ok\r\nComplete\r"})
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_official_package_requires_explicit_selection_and_forwards_target(self):
+        result = self.run_installer("--package", "io.droyagent.app", "--launch")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(["-s", "phone-1", "shell", "am", "start", "-W", "-n",
+                       "io.droyagent.app/io.droyagent.app.MainActivity"], self.calls())
+        self.assertEqual(self.permission_calls(), [[str(PERMISSION_RUNNER), "--adb", str(self.adb),
+            "--serial", "phone-1", "--package", "io.droyagent.app", "--preserve-accessibility"]])
+
+    def test_invalid_package_is_rejected_before_adb_or_install(self):
+        result = self.run_installer("--package", "unrelated.app")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unsupported Droy package", result.stderr)
+        self.assertEqual(self.calls(), [])
+
+    def test_apk_validation_failure_stops_before_installation(self):
+        result = self.run_installer(config={"apk_validation_exit": 1})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Nothing was installed", result.stderr)
+        self.assert_not_installed()
+        self.assertEqual(self.permission_calls(), [])
+
+    def test_real_manifest_validation_rejects_official_apk_for_default_dev_target(self):
+        with zipfile.ZipFile(self.apk, "w") as archive:
+            archive.writestr("AndroidManifest.xml", '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="io.droyagent.app" android:versionCode="5"/>')
+        result = self.run_installer(python=Path(sys.executable))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("APK 包名与所选组件不一致", result.stderr)
+        self.assertIn("Nothing was installed", result.stderr)
+        self.assert_not_installed()
+
     def test_option_cannot_be_consumed_as_another_options_value(self):
-        for option in ("--serial", "--apk"):
+        for option in ("--serial", "--apk", "--package"):
             for suffix in ([], ["--launch"]):
                 with self.subTest(option=option, suffix=suffix):
                     result = self.run_installer(option, *suffix)

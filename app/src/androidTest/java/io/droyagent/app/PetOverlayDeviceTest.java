@@ -644,13 +644,13 @@ public final class PetOverlayDeviceTest {
     }
 
     @Test public void activityDisplayAndPreviewWorkWithOverlayPermissionActuallyRevoked() throws Exception {
-        String current = shellOutput("appops get io.droyagent.app SYSTEM_ALERT_WINDOW");
+        String current = shellOutput("appops get " + context.getPackageName() + " SYSTEM_ALERT_WINDOW");
         var match = java.util.regex.Pattern.compile("SYSTEM_ALERT_WINDOW: (allow|ignore|deny|default|foreground)").matcher(current);
         String originalMode = match.find() ? match.group(1) : "default";
         try {
             context.startActivity(new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
             DeviceUi.await("Droy did not resume for permission isolation", 8000, this::activityFocused);
-            shellOutput("appops set io.droyagent.app SYSTEM_ALERT_WINDOW ignore");
+            shellOutput("appops set " + context.getPackageName() + " SYSTEM_ALERT_WINDOW ignore");
             DeviceUi.await("Test did not actually revoke overlay permission", 3000, () -> !Settings.canDrawOverlays(context));
             assertTrue(preferences.edit().putString("petExternalDisplay", "always").putString("petInternalDisplay", "always").commit());
             PetOverlay.refresh(context);
@@ -669,7 +669,7 @@ public final class PetOverlayDeviceTest {
             assertFalse(Settings.canDrawOverlays(context));
             capture("21-internal-preview-with-overlay-permission-revoked");
         } finally {
-            shellOutput("appops set io.droyagent.app SYSTEM_ALERT_WINDOW " + originalMode);
+            shellOutput("appops set " + context.getPackageName() + " SYSTEM_ALERT_WINDOW " + originalMode);
             DeviceUi.await("Overlay grant was not restored after isolated test", 3000, () -> Settings.canDrawOverlays(context));
         }
     }

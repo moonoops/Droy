@@ -140,6 +140,18 @@ export function patchSettings(source) {
     'const documentController = ctx.remote.$host.isLoopback ? new SettingsDocumentStore(ctx, ctx.configForms.describe()) : void 0;',
     'const documentController = ctx.remote.$host.isLoopback && !document.documentElement.hasAttribute("data-droy-mobile") && typeof window.DroyNative === "undefined" ? new SettingsDocumentStore(ctx, ctx.configForms.describe()) : void 0;');
   source = replaceFunction(source, 'SettingsRoot', text => {
+    text = replaceOnce(text, 'const { close, openSection } = actions;', `const { close, openSection } = actions;
+            const [droySetupTarget, setDroySetupTarget] = (0, react.useState)(null);
+            (0, react.useLayoutEffect)(() => {
+                const refresh = () => setDroySetupTarget(document.querySelector('[data-droy-setup-model-settings]'));
+                window.addEventListener('droy-setup-step', refresh);
+                refresh();
+                return () => window.removeEventListener('droy-setup-step', refresh);
+            }, []);`);
+    // The settings owner retains slot authorization; the wizard supplies a portal target.
+    text = replaceOnce(text, 'return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [',
+      `return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+                droySetupTarget && (0, react_dom.createPortal)(renderSlot("settings.section", {}, { only: "models" }), droySetupTarget),`);
     text = replaceOnce(text, 'const onboardingStep = requestedOnboarding !== void 0 ?',
       'const onboardingStep = (document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined") && requestedOnboarding === void 0 ? void 0 : requestedOnboarding !== void 0 ?');
     text = replaceOnce(text, 'const { close, openSection } = actions;',

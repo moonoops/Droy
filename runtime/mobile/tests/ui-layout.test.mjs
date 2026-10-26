@@ -87,16 +87,16 @@ test('Droy owns phone onboarding while desktop onboarding and explicit phone set
     const jsx = (type, props) => ({ type, props });
     const react = {
       useRef(value) { return refs[refIndex++] ?? (refs[refIndex - 1] = { current: value }); },
-      useState(value) { const values = [undefined, new Set(), false, false]; return [values[stateIndex++], () => {}]; },
+      useState(value) { const values = [null, undefined, new Set(), false, false]; return [values[stateIndex++], () => {}]; },
       useEffect(effect) { effects.push(effect); }, useLayoutEffect(effect) { effects.push(effect); },
       useCallback: callback => callback,
     };
-    const document = { documentElement: { hasAttribute: name => mobile && name === 'data-droy-mobile' } };
+    const document = { documentElement: { hasAttribute: name => mobile && name === 'data-droy-mobile' }, querySelector: () => null };
     const Root = new Function('react', 'react_jsx_runtime', '_deepseek_ai_dsh_client_ui_primitives', 'SettingsRoot_module_css_default',
       'clsx', 'SettingsPanel', 'DesktopUpdateIndicator', 'document', 'window', `${code};return SettingsRoot;`)(react,
       { jsx, jsxs: jsx, Fragment: 'fragment' }, { Tooltip: 'tooltip', ConnectionIndicator: 'connection' },
       new Proxy({}, { get: (_target, key) => String(key) }), (...classes) => classes.filter(Boolean).join(' '),
-      'settings-panel', 'desktop-update', document, {});
+      'settings-panel', 'desktop-update', document, { addEventListener() {}, removeEventListener() {} });
     const render = () => {
       refIndex = 0; stateIndex = 0;
       const tree = Root({ wide: true, reconnect() {}, useConnectionState: () => 'connected', useSections: () => [],
@@ -119,6 +119,13 @@ test('Droy owns phone onboarding while desktop onboarding and explicit phone set
         'Leaving settings must return to the Droy setup flow without another automatic wizard');
     }
   }
+});
+
+test('the settings owner portals the shared model section into the wizard without redeclaring its slot', () => {
+  const patched = patchSettings(settings);
+  assert.ok(patched.includes('react_dom.createPortal)(renderSlot("settings.section", {}, { only: "models" }), droySetupTarget)'));
+  assert.ok(patched.includes("window.addEventListener('droy-setup-step', refresh)"));
+  assert.equal(patched.split('"settings.section": {').length, 2);
 });
 
 test('phone settings omits the unsupported Host configuration document action', () => {

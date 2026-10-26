@@ -249,7 +249,7 @@ final class NotificationManagement {
     }
 
     void posted(StatusBarNotification item, NotificationListenerService.RankingMap ranking) {
-        if (item == null || item.getPackageName().equals(context.getPackageName())) return;
+        if (item == null || item.getPackageName().equals(context.getPackageName()) || DroyPackages.contains(item.getPackageName())) return;
         worker.execute(() -> {
             try {
                 if (needsChannelSync(item, ranking)) synchronizeChannels();

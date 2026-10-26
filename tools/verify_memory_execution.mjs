@@ -25,7 +25,7 @@ function argumentsOf(argv) {
     value[argv[index].slice(2)] = argv[index + 1];
   }
   const filesDir = value['files-dir'], nativeDir = value['native-dir'], runtimeDir = value['runtime-dir'] ?? join(filesDir ?? '/', 'runtime');
-  if (!/^\/data\/user\/\d+\/io\.droyagent\.app\/files$/.test(filesDir ?? '') || !isAbsolute(nativeDir ?? '') || runtimeDir !== join(filesDir, 'runtime')) throw new Error('VERIFY_INVALID_PATHS');
+  if (!/^\/data\/user\/(0|[1-9]\d*)\/io\.droyagent\.app(?:\.dev)?\/files$/.test(filesDir ?? '') || !isAbsolute(nativeDir ?? '') || runtimeDir !== join(filesDir, 'runtime')) throw new Error('VERIFY_INVALID_PATHS');
   return { filesDir, nativeDir, runtimeDir, onlyStep: value['only-step'] };
 }
 function errorCode(error) {
@@ -69,8 +69,8 @@ export async function verifyMemoryExecution({ filesDir, nativeDir, runtimeDir, o
   const host = {
     status: async () => ({ ready: true }),
     policy: () => ({ workspaceRoot: workspace, nodePath: native('node'), readOnlyRoots: [runtimeDir, nativeDir], privateRoots: [privateFixture],
-      pathAliases: filesDir === '/data/user/0/io.droyagent.app/files'
-        ? [{ from: '/data/data/io.droyagent.app', to: '/data/user/0/io.droyagent.app' }] : [] }),
+      pathAliases: /^\/data\/user\/0\/io\.droyagent\.app(?:\.dev)?\/files$/.test(filesDir)
+        ? [{ from: '/data/data/' + filesDir.split('/')[4], to: filesDir.slice(0, -6) }] : [] }),
     executor: { spawn(spec) {
       const launch = { control: spec.stdio?.control === 'pipe', command: spec.argv[0] === native('node') ? 'node' : 'other', protected: !!spec.workspaceId };
       launches.push(launch); const handle = executor.spawn(spec);

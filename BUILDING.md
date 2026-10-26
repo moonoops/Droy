@@ -45,6 +45,23 @@ app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 The command does not install an APK. `--skip-deps` reuses installed npm
 dependencies for local iteration; release validation uses the full checks.
 
+The debug app uses package `io.droyagent.app.dev`, the launcher label **Droy Dev**
+(**Droy 开发版** in Chinese), and the Android toolchain's local debug signing key.
+It installs alongside the official `io.droyagent.app` app with independent data,
+configuration and permissions. Keep the local debug keystore stable to update the
+development app without losing its data. Development builds and instrumentation
+APKs do not use the official keystore or 1Password credentials.
+
+Install a development build on an explicitly selected device:
+
+```sh
+./tools/install.sh --serial YOUR_DEVICE_SERIAL --launch
+```
+
+The installer defaults to the development package and checks the APK package
+before installing. It never uninstalls or clears either app. Configure the new
+development app separately; the existing official app is retained.
+
 | Variable | Purpose |
 | --- | --- |
 | `DROY_NDK_DIR` | Select the pinned NDK installation |
@@ -56,6 +73,9 @@ dependencies for local iteration; release validation uses the full checks.
 After preparing the runtime assets, `./gradlew :app:assembleRelease` builds an
 unsigned release APK. Sign release builds with your own securely stored key;
 the official signing key and credentials are not part of this repository.
+Use official signing credentials only when the user explicitly requests a GitHub
+release, within that release's authorized scope. Ordinary development, testing,
+and unsigned release builds do not authorize official signing.
 
 ## Project layout
 

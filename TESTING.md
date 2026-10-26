@@ -20,6 +20,7 @@ node --expose-internals runtime/mobile/tests/profile-smoke.mjs
 node --expose-internals runtime/mobile/tests/profile-memory-active-smoke.mjs
 ./gradlew --no-daemon :app:testDebugUnitTest
 ./gradlew --no-daemon -I tools/tests/runtime_release_binding.gradle :app:testRuntimeReleaseBinding
+./gradlew --no-daemon -I tools/tests/build_variants.gradle :app:testBuildVariants
 ```
 
 主机回归使用本地模型与执行器夹具，不需要模型 API Key。源码变化后重新运行 `node tools/prepare_dsh.mjs --refresh-mobile`，再构建并安装对应 APK。
@@ -28,7 +29,11 @@ node --expose-internals runtime/mobile/tests/profile-memory-active-smoke.mjs
 
 构建脚本生成 App 和 instrumentation APK。设备连接与安装见 [INSTALLATION.md](INSTALLATION.md)。检查首次配置、模型连接、所选权限、手机动作、停止、撤权、重启与升级后配置保留。
 
+日常设备验收只安装 `io.droyagent.app.dev` 与 `io.droyagent.app.dev.test`，使用默认调试签名，不重新签为正式证书。显式选择设备，保留已安装的 `io.droyagent.app` 及数据；测试组件使用开发包名加原有 Java 类全名（如 `io.droyagent.app.dev/io.droyagent.app.MainActivity`），不能用开发包名拼出不存在的 Java 类。设备测试不得借用正式版配置或修改其权限。开发版与正式版的发布策略见 [AGENTS.md](AGENTS.md#开发版与正式发布)。
+
 仪器测试入口位于 `app/src/androidTest/`，各类声明了所需的显式 fixture 参数。仅在满足其前置条件时运行；缺少授权、已有私人数据或存在未恢复的 fixture 清单时，不要绕过保护条件。
+
+首次安装引导夹具默认在模拟器运行。专用真机仅允许独立开发版，并须显式传入 `setupDevelopmentPhoneFixture=true`；夹具使用本地测试模型并保留、恢复原配置，不得在正式版运行。
 
 - 个人记忆与采集测试需要已授权 Root、执行隔离资格和空白测试环境，不得覆盖现有私人记忆库。
 - 麦克风、相机、位置与通知测试只使用受控材料；会改变权限或设置的用例结束后核对恢复。

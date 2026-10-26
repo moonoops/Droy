@@ -165,7 +165,7 @@ final class NotificationChannelControl {
     }
 
     private void addApp(Map<String, Integer> apps, String name) throws Exception {
-        if (name.equals(context.getPackageName()) || name.equals("android") || name.equals("com.android.systemui") || name.equals("com.android.phone")) return;
+        if (name.equals(context.getPackageName()) || DroyPackages.contains(name) || name.equals("android") || name.equals("com.android.systemui") || name.equals("com.android.phone")) return;
         try {
             ApplicationInfo app = context.getPackageManager().getApplicationInfo(name, 0);
             if (app.uid >= 10000) apps.put(name, app.uid);

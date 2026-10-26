@@ -7,6 +7,18 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public final class MemoryExecutionQualificationTest {
+    @Test public void variantFilesRootsKeepPackageAndAndroidUserBoundaries() {
+        for (String name : new String[]{"io.droyagent.app", "io.droyagent.app.dev"}) {
+            assertEquals("/data/user/0/" + name + "/files", MemoryExecutionQualification.filesDirectory(name, 10123));
+            assertEquals("/data/user/1/" + name + "/files", MemoryExecutionQualification.filesDirectory(name, 110123));
+        }
+        for (String name : new String[]{"other.app", "io.droyagent.app.dev.other", "io.droyagent.app/../other.app"}) {
+            try { MemoryExecutionQualification.filesDirectory(name, 10123); fail(); }
+            catch (IllegalStateException expected) { assertEquals("MEMORY_EXECUTION_PACKAGE_UNSUPPORTED", expected.getMessage()); }
+        }
+        try { MemoryExecutionQualification.filesDirectory("io.droyagent.app.dev", 65534); fail(); }
+        catch (IllegalStateException expected) { assertEquals("MEMORY_EXECUTION_PACKAGE_UNSUPPORTED", expected.getMessage()); }
+    }
     private JSONObject ready() throws Exception {
         JSONObject value = new JSONObject().put("verified",true).put("uid",80000).put("gid",10123)
             .put("workloadPid",877).put("pid",876).put("topLevelPid",876).put("initDumpable",false).put("guestProxyPort",0)

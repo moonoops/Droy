@@ -104,10 +104,15 @@ final class MemoryExecutionQualification {
         }
     }
     static String filesDirectory(Context context) throws Exception {
-        if (!context.getPackageName().equals("io.droyagent.app")) throw new IllegalStateException("MEMORY_EXECUTION_PACKAGE_UNSUPPORTED");
-        String files = "/data/user/" + (android.os.Process.myUid()/100000) + "/io.droyagent.app/files";
+        String files = filesDirectory(context.getPackageName(), android.os.Process.myUid());
         if (!Files.isSameFile(Paths.get(files),context.getFilesDir().toPath())) throw new IllegalStateException("MEMORY_EXECUTION_PACKAGE_UNSUPPORTED");
         return files;
+    }
+    static String filesDirectory(String packageName, int uid) {
+        if ((!packageName.equals("io.droyagent.app") && !packageName.equals("io.droyagent.app.dev"))
+                || uid % 100000 < 10000 || uid % 100000 > 19999)
+            throw new IllegalStateException("MEMORY_EXECUTION_PACKAGE_UNSUPPORTED");
+        return "/data/user/" + (uid/100000) + "/" + packageName + "/files";
     }
     static void cleanup(Context context) throws Exception {
         int uid = android.os.Process.myUid(), pid = android.os.Process.myPid();

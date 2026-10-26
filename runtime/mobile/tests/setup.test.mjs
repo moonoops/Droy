@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createSetupService, installSetupServices, SetupError } from '../setup.mjs';
 
 const provider = 'fixture-provider', model = 'fixture-text';
@@ -76,6 +79,19 @@ test('model setup uses two isolated one-shot requests and records independently 
   assert.deepEqual(status.models.map(row => [row.provider, row.model]), [[provider, model]]);
 });
 
+test('status distinguishes an unavailable saved default from configured models without replacing it', async () => {
+  const f = fixture();
+  f.saved.provider = 'old-unconfigured-route';
+  const status = await f.service.status();
+  assert.deepEqual(status.selection, { provider: 'old-unconfigured-route', model });
+  assert.equal(status.selectionAvailable, false);
+  assert.deepEqual(status.models.map(row => row.provider), [provider]);
+  assert.equal(f.saved.provider, 'old-unconfigured-route');
+  assert.equal(f.requests.length, 0);
+  f.saved.provider = provider;
+  assert.equal((await f.service.status()).selectionAvailable, true);
+});
+
 test('a text-only response may pass dialogue but never reports phone tools as available', async () => {
   const f = fixture({ script: () => greeting });
   const result = await f.service.test();
@@ -130,6 +146,13 @@ test('provider failures are classified without leaking messages or secret values
     assert.ok(!error.message.includes(key)); return true;
   });
   assert.equal(f.native.modelVerification.passed, false);
+});
+
+test('missing credentials and service denials keep distinct actionable messages', async () => {
+  for (const [failure, expected] of [[{ code: 'MISSING_CREDENTIAL' }, /尚未配置/], [{ status: 403 }, /HTTP 403/]]) {
+    const f = fixture({ script: () => [{ type: 'finish', reason: { kind: 'error', failure } }] });
+    await assert.rejects(f.service.test(), error => error.code === 'MODEL_CREDENTIAL_REQUIRED' && expected.test(error.message));
+  }
 });
 
 test('incomplete and oversized greetings never record passed status', async () => {
@@ -246,4 +269,79 @@ test('disposing setup interrupts a stalled adapter without waiting for its next 
   assert.equal(f.native.modelVerification.passed, false);
   release(); await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.requests.length, 1);
+});
+
+
+test('REAL official DeepSeek adapter uses stored credentials for both setup requests and classifies HTTP 401', async t => {
+  const { createRequire } = await import('node:module');
+  const { pathToFileURL } = await import('node:url');
+  const installed = createRequire(new URL('../../dsh/package.json', import.meta.url));
+  const load = name => import(pathToFileURL(installed.resolve(name)).href);
+  const [{ Context }, { default: LlmRuntime }, official] = await Promise.all([
+    load('@deepseek-ai/cordis'), load('@deepseek-ai/dsh-llm'), load('@deepseek-ai/dsh-llm-deepseek-api-key'),
+  ]);
+  const home = await mkdtemp(join(tmpdir(), 'droy-setup-official-'));
+  const previousHome = process.env.DSH_HOME; process.env.DSH_HOME = home;
+  t.after(async () => {
+    if (previousHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previousHome;
+    await rm(home, { recursive: true, force: true });
+  });
+  const received = [];
+  let unauthorized = false;
+  const server = createServer(async (req, res) => {
+    let text = ''; for await (const part of req) text += part;
+    const body = JSON.parse(text);
+    received.push({ path: req.url, authenticated: req.headers['x-api-key'] === key, body });
+    if (unauthorized) {
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'Fictional invalid credential' } }));
+      return;
+    }
+    const tools = Array.isArray(body.tools) && body.tools.some(tool => tool.name === 'droy_setup_echo');
+    const events = [{ type: 'message_start', message: { id: 'fixture', role: 'assistant', model: 'deepseek-flash', content: [], usage: { input_tokens: 1, output_tokens: 0 } } }];
+    if (tools) {
+      const userText = body.messages.at(-1).content.find(part => part.type === 'text').text;
+      const value = JSON.parse(userText).value;
+      events.push({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'official-echo', name: 'droy_setup_echo', input: {} } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ value }) } });
+    } else events.push({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello from the local official adapter fixture.' } });
+    events.push({ type: 'content_block_stop', index: 0 },
+      { type: 'message_delta', delta: { stop_reason: tools ? 'tool_use' : 'end_turn' }, usage: { output_tokens: 1 } }, { type: 'message_stop' });
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end(events.map(event => 'event: ' + event.type + '\ndata: ' + JSON.stringify(event) + '\n\n').join(''));
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const configValue = { baseURL: `http://127.0.0.1:${server.address().port}/anthropic`, apiKeyEnv: 'FICTIONAL_OFFICIAL_KEY', retryPolicy: { mode: 'normal', maxRetries: 0 } };
+  const ctx = new Context(); await ctx.plugin(LlmRuntime); t.after(() => ctx.fiber.dispose());
+  const saved = { provider: 'old-route', model: 'old-model' };
+  let credentialWrites = 0;
+  const credentials = { async resolve(ref) {
+    assert.equal(ref, 'FICTIONAL_OFFICIAL_KEY'); return { value: key };
+  }, async readRecord() { return undefined; }, async set() { credentialWrites++; } };
+  ctx.provide('credentials', credentials);
+  ctx.provide('settings', { configure: () => () => {}, describe: () => [
+    { ns: 'llm-deepseek-api-key', value: configValue }, { ns: 'locale', value: { preference: 'en' } },
+  ] });
+  ctx.provide('agentDefaultModel', { currentSelection: () => ({ ...saved }), async saveSelection(next) { Object.assign(saved, next); } });
+  const config = official.Config(configValue);
+  await ctx.plugin({ name: 'setup-official-fixture', inject: ['llm'], apply: child => official.apply(child, config) });
+  const f = fixture();
+  const service = createSetupService(ctx, f.bridge);
+  t.after(() => service.dispose());
+  assert.equal((await service.status()).selectionAvailable, false);
+  const result = await service.test({ provider: 'deepseek-official', model: 'deepseek-flash' });
+  assert.equal(result.test.passed, true);
+  assert.equal(result.test.toolsPassed, true);
+  assert.deepEqual(saved, { provider: 'deepseek-official', model: 'deepseek-flash' });
+  assert.equal(credentialWrites, 0);
+  assert.equal(received.length, 2);
+  assert.ok(received.every(row => row.authenticated && row.path === '/anthropic/v1/messages'));
+  assert.equal((await service.status()).selectionAvailable, true);
+  unauthorized = true;
+  await assert.rejects(service.test(), error => error.code === 'MODEL_CREDENTIAL_REQUIRED' && error.message.includes('HTTP 401') && !error.message.includes(key));
+  assert.equal(received.length, 3);
+  assert.equal(f.native.modelVerification.passed, false);
+  assert.equal(credentialWrites, 0);
 });

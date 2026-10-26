@@ -20,6 +20,13 @@ struct Error : std::runtime_error {
     explicit Error(const std::string& code) : std::runtime_error(code) {}
 };
 inline void require(bool value, const char* code) { if (!value) throw Error(code); }
+inline bool supported_package(const std::string& package) {
+    return package == "io.droyagent.app" || package == "io.droyagent.app.dev";
+}
+inline std::string app_files_root(uint32_t uid, const std::string& package) {
+    require(supported_package(package), "unsupported_package");
+    return "/data/user/" + std::to_string(uid / 100000) + "/" + package + "/files";
+}
 inline void put32(Bytes& out, uint32_t value) {
     out.push_back(value >> 24); out.push_back(value >> 16);
     out.push_back(value >> 8); out.push_back(value);
@@ -88,6 +95,9 @@ struct Start {
     std::vector<std::string> argv, env;
     bool pty() const { return (flags & 1) != 0; }
     bool control() const { return (flags & 2) != 0; }
+    std::string package() const {
+        return files == app_files_root(host_uid, "io.droyagent.app.dev") ? "io.droyagent.app.dev" : "io.droyagent.app";
+    }
     std::string workspace() const {
         return under(cwd, files + "/dsh-home/workspace") ? files + "/dsh-home/workspace" : files + "/workspace";
     }
@@ -102,7 +112,8 @@ struct Start {
         s.files = in.text(4096); s.workspace_id = in.text(64); s.cwd = in.text(4096); s.executable = in.text(4096);
         s.argv = in.strings(256); s.env = in.strings(256); in.end();
         require(s.host_uid % 100000 >= 10000 && s.host_uid % 100000 <= 19999, "invalid_host_uid");
-        require(s.files == "/data/user/" + std::to_string(s.host_uid / 100000) + "/io.droyagent.app/files", "invalid_files_root");
+        require(s.files == app_files_root(s.host_uid, "io.droyagent.app") ||
+                s.files == app_files_root(s.host_uid, "io.droyagent.app.dev"), "invalid_files_root");
         require(s.workspace_id.empty() || (s.workspace_id.size() == 64 &&
             s.workspace_id.find_first_not_of("0123456789abcdef") == std::string::npos), "invalid_workspace_id");
         require(s.timeout_ms >= 100 && s.timeout_ms <= 86400000, "invalid_timeout");

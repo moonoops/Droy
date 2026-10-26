@@ -25,9 +25,11 @@ import time
 from typing import List, Optional
 
 
-PACKAGE = "io.droyagent.app"
+RELEASE_PACKAGE = "io.droyagent.app"
+PACKAGE = RELEASE_PACKAGE + ".dev"
+SUPPORTED_PACKAGES = (PACKAGE, RELEASE_PACKAGE)
 ACCESSIBILITY = PACKAGE + "/io.droyagent.androiduse.DroyAccessibilityService"
-NOTIFICATION = PACKAGE + "/.DroyNotificationService"
+NOTIFICATION = PACKAGE + "/io.droyagent.app.DroyNotificationService"
 PROVIDER = "content://" + PACKAGE + ".permissions"
 TIMEOUT_SECONDS = 20
 NOTIFICATION_READY_SECONDS = 3.0
@@ -178,13 +180,13 @@ def permission_is_granted(dump: str, user: str, permission: str) -> bool:
                           "\n".join(selected)))
 
 
-def development_permission_is_granted(dump: str, permission: str) -> bool:
+def development_permission_is_granted(dump: str, permission: str, package_name=PACKAGE) -> bool:
     """Development grants live in the target package's install-permission block."""
     package_indent = None
     permission_indent = None
     grant = re.compile(re.escape(permission) + r":\s+granted=true(?:[,\s]|$)")
     for line in dump.splitlines():
-        package = re.match(r"^(\s*)Package \[" + re.escape(PACKAGE) + r"\]", line)
+        package = re.match(r"^(\s*)Package \[" + re.escape(package_name) + r"\]", line)
         if package:
             package_indent = len(package.group(1))
             permission_indent = None
@@ -225,7 +227,14 @@ def accessibility_is_connected(output: str) -> bool:
 
 
 class PermissionSetup:
-    def __init__(self, adb: Adb, user: str, api: int):
+    def __init__(self, adb: Adb, user: str, api: int, package_name=PACKAGE):
+        if package_name not in SUPPORTED_PACKAGES:
+            raise ValueError("Unsupported Droy package / 不支持的 Droy 包名")
+        self.package = package_name
+        self.accessibility_component = package_name + "/io.droyagent.androiduse.DroyAccessibilityService"
+        self.notification = package_name + "/io.droyagent.app.DroyNotificationService"
+        self.provider = "content://" + package_name + ".permissions"
+        self.activity = package_name + "/io.droyagent.app.MainActivity"
         self.adb = adb
         self.user = user
         self.api = api
@@ -244,15 +253,15 @@ class PermissionSetup:
         return self.adb.shell("settings", "--user", self.user, "get", "secure", key)
 
     def runtime_permission(self, permission: str):
-        self.adb.shell("pm", "grant", "--user", self.user, PACKAGE, permission)
-        dump = self.adb.shell("dumpsys", "package", PACKAGE)
+        self.adb.shell("pm", "grant", "--user", self.user, self.package, permission)
+        dump = self.adb.shell("dumpsys", "package", self.package)
         if not permission_is_granted(dump, self.user, permission):
             raise ValueError("系统未确认此权限，请检查手机限制后重试")
 
     def development_permission(self, permission: str):
-        self.adb.shell("pm", "grant", "--user", self.user, PACKAGE, permission)
-        dump = self.adb.shell("dumpsys", "package", PACKAGE)
-        if not development_permission_is_granted(dump, permission):
+        self.adb.shell("pm", "grant", "--user", self.user, self.package, permission)
+        dump = self.adb.shell("dumpsys", "package", self.package)
+        if not development_permission_is_granted(dump, permission, self.package):
             raise ValueError("系统未确认此系统权限，请检查手机限制及 APK 版本后重试")
 
     def accessibility_recovery(self):
@@ -264,10 +273,10 @@ class PermissionSetup:
     def enable_accessibility(self):
         before = components(self.settings_get("enabled_accessibility_services"))
         expected = {component_key(value) for value in before}
-        expected.add(component_key(ACCESSIBILITY))
-        if component_key(ACCESSIBILITY) not in {component_key(value) for value in before}:
+        expected.add(component_key(self.accessibility_component))
+        if component_key(self.accessibility_component) not in {component_key(value) for value in before}:
             self.adb.shell("settings", "--user", self.user, "put", "secure",
-                           "enabled_accessibility_services", ":".join([*before, ACCESSIBILITY]))
+                           "enabled_accessibility_services", ":".join([*before, self.accessibility_component]))
         self.adb.shell("settings", "--user", self.user, "put", "secure", "accessibility_enabled", "1")
         actual = {component_key(value) for value in components(self.settings_get("enabled_accessibility_services"))}
         if not expected.issubset(actual) or self.settings_get("accessibility_enabled") != "1":
@@ -280,7 +289,7 @@ class PermissionSetup:
             if remaining <= 0:
                 return False
             try:
-                output = self.adb.shell("content", "call", "--user", self.user, "--uri", PROVIDER,
+                output = self.adb.shell("content", "call", "--user", self.user, "--uri", self.provider,
                                         "--method", "status", timeout_seconds=remaining)
             except AdbTimeout:
                 if time.monotonic() >= deadline:
@@ -301,12 +310,12 @@ class PermissionSetup:
         # Updates and instrumentation can leave an enabled service disconnected.
         # Rebind only Droy once, using a fresh list to retain other services.
         current = components(self.settings_get("enabled_accessibility_services"))
-        others = [value for value in current if component_key(value) != component_key(ACCESSIBILITY)]
+        others = [value for value in current if component_key(value) != component_key(self.accessibility_component)]
         try:
             self.adb.shell("settings", "--user", self.user, "put", "secure",
                            "enabled_accessibility_services", ":".join(others))
             actual = {component_key(value) for value in components(self.settings_get("enabled_accessibility_services"))}
-            if component_key(ACCESSIBILITY) in actual or not {component_key(value) for value in others}.issubset(actual):
+            if component_key(self.accessibility_component) in actual or not {component_key(value) for value in others}.issubset(actual):
                 raise ValueError("系统未确认无障碍重新绑定，或其他服务列表发生变化，请检查后重试")
             # The settings observer runs asynchronously; allow it to process
             # removal before re-enabling, including an already crashed service.
@@ -317,8 +326,8 @@ class PermissionSetup:
             raise ValueError("无障碍开关已开启，但服务仍未连接。请在手机系统无障碍设置中关闭再开启 DroyAgent 手机操作，然后重试")
 
     def appop(self, operation: str):
-        self.adb.shell("cmd", "appops", "set", "--user", self.user, PACKAGE, operation, "allow")
-        state = self.adb.shell("cmd", "appops", "get", "--user", self.user, PACKAGE, operation)
+        self.adb.shell("cmd", "appops", "set", "--user", self.user, self.package, operation, "allow")
+        state = self.adb.shell("cmd", "appops", "get", "--user", self.user, self.package, operation)
         if not appop_is_allowed(state, operation):
             raise ValueError("系统未确认此权限，请检查手机限制后重试")
 
@@ -329,7 +338,7 @@ class PermissionSetup:
         self.appop("GET_USAGE_STATS")
 
     def notifications(self):
-        self.adb.shell("cmd", "notification", "allow_listener", NOTIFICATION, self.user)
+        self.adb.shell("cmd", "notification", "allow_listener", self.notification, self.user)
         # Android may persist listener access after allow_listener returns.
         # Poll only the readback; repeatedly granting can restart the listener.
         deadline = time.monotonic() + NOTIFICATION_READY_SECONDS
@@ -340,7 +349,7 @@ class PermissionSetup:
             raw = self.adb.shell("settings", "--user", self.user, "get", "secure",
                                  "enabled_notification_listeners", timeout_seconds=remaining)
             listeners = components(raw)
-            if component_key(NOTIFICATION) in {component_key(value) for value in listeners}:
+            if component_key(self.notification) in {component_key(value) for value in listeners}:
                 return
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -356,18 +365,18 @@ class PermissionSetup:
         # An existing in-app browser can otherwise remain on top of the task.
         # Reordering brings MainActivity forward without clearing that activity.
         launch = self.adb.shell("am", "start", "--user", self.user, "-W",
-                                "--activity-reorder-to-front", "-n", PACKAGE + "/.MainActivity")
+                                "--activity-reorder-to-front", "-n", self.activity)
         activity = re.search(r"(?m)^Activity:\s*(\S+)\s*$", launch)
         if not re.search(r"(?m)^Status:\s*ok\s*$", launch) or not activity or \
-                component_key(activity.group(1)) != component_key(PACKAGE + "/.MainActivity"):
+                component_key(activity.group(1)) != component_key(self.activity):
             raise ValueError("系统未确认 DroyAgent 已打开，请检查手机后重试")
         self.app_started = True
 
     def product(self):
         self.open_app()
-        self.adb.shell("content", "call", "--user", self.user, "--uri", PROVIDER,
+        self.adb.shell("content", "call", "--user", self.user, "--uri", self.provider,
                        "--method", "enable-all")
-        state = self.adb.shell("content", "call", "--user", self.user, "--uri", PROVIDER,
+        state = self.adb.shell("content", "call", "--user", self.user, "--uri", self.provider,
                                "--method", "status")
         if not product_is_enabled(state):
             raise ValueError("App 未确认能力已全部开启，请安装当前版本后重试")
@@ -444,12 +453,12 @@ def run_setup(arguments):
         user = adb.shell("am", "get-current-user")
         if not user.isdigit():
             raise SetupError("无法确定当前 Android 用户，未修改权限")
-        installed = adb.shell("pm", "path", "--user", user, PACKAGE)
+        installed = adb.shell("pm", "path", "--user", user, arguments.package)
         if not re.search(r"(?m)^package:.+\.apk$", installed):
             raise SetupError("当前手机用户尚未安装 DroyAgent，请先安装 APK")
     except AdbError as error:
         raise SetupError(str(error)) from error
-    results = PermissionSetup(adb, user, int(api_raw)).apply(arguments.accessibility_only, arguments.preserve_accessibility)
+    results = PermissionSetup(adb, user, int(api_raw), arguments.package).apply(arguments.accessibility_only, arguments.preserve_accessibility)
     return serial, user, results
 
 
@@ -458,6 +467,8 @@ def main(argv=None):
                                      "需先允许 USB 调试；保留 App 数据与其他无障碍服务。")
     parser.add_argument("--serial", help="指定手机编号；也可使用 ANDROID_SERIAL，或自动选择唯一设备")
     parser.add_argument("--adb", help="指定 ADB 路径；也可使用 DROY_ADB、自动查找 SDK 或 PATH")
+    parser.add_argument("--package", choices=SUPPORTED_PACKAGES, default=PACKAGE,
+                        help="目标包名 / target package (default: io.droyagent.app.dev)")
     parser.add_argument("--json", action="store_true", help="输出 JSON 检查结果")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--accessibility-only", action="store_true",

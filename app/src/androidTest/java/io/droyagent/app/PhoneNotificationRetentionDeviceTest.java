@@ -41,7 +41,7 @@ import static org.junit.Assume.assumeTrue;
 /** Explicitly approved phone evaluation: existing model, fictional independent-UID sources, real wall-clock waits. */
 @RunWith(AndroidJUnit4.class)
 public final class PhoneNotificationRetentionDeviceTest {
-    private static final String SOURCE = "io.droyagent.app.test";
+    private static final String SOURCE = InstrumentationRegistry.getInstrumentation().getContext().getPackageName();
     private static final String TAG = "droy-phone-retention-fixture";
     private static final String RECEIVER = SOURCE + "/io.droyagent.app.PhoneNotificationFixtureReceiver";
     private static final String[] KEYS = {"notificationManagementData", "notificationManagementEnabled",
@@ -95,8 +95,8 @@ public final class PhoneNotificationRetentionDeviceTest {
             if (!DroyNotificationService.status(context).optBoolean("connected")) {
                 assertTrue("Never re-enable notification access the user revoked", DroyNotificationService.hasAccess(context));
                 progress("Rebinding already granted access after instrumentation force-stop", null);
-                shell("cmd notification disallow_listener io.droyagent.app/io.droyagent.app.DroyNotificationService");
-                shell("cmd notification allow_listener io.droyagent.app/io.droyagent.app.DroyNotificationService");
+                shell("cmd notification disallow_listener " + context.getPackageName() + "/io.droyagent.app.DroyNotificationService");
+                shell("cmd notification allow_listener " + context.getPackageName() + "/io.droyagent.app.DroyNotificationService");
                 outcomes.put(new JSONObject().put("case", "listener_recovery").put("instrumentationRebindAssisted", true));
                 DeviceUi.await("The granted notification listener could not be rebound", 10000,
                         () -> DroyNotificationService.status(context).optBoolean("connected"));

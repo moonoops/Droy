@@ -54,10 +54,10 @@ public final class AppDiagnosticsDeviceTest {
         assertEquals(fixture, nonLauncher.getJSONArray("items").getJSONObject(0).getString("packageName"));
         JSONObject platform = tools.execute("app_info", new JSONObject().put("packageName", "android"), ACTIVE);
         assertEquals("android", platform.getJSONArray("items").getJSONObject(0).getString("packageName"));
-        JSONObject first = tools.execute("app_info", new JSONObject().put("query", "io.droyagent.app").put("limit", 1), ACTIVE);
+        JSONObject first = tools.execute("app_info", new JSONObject().put("query", context.getPackageName()).put("limit", 1), ACTIVE);
         assertTrue(first.getInt("totalMatches") >= 2);
         assertEquals(1, first.getInt("nextOffset"));
-        JSONObject second = tools.execute("app_info", new JSONObject().put("query", "io.droyagent.app")
+        JSONObject second = tools.execute("app_info", new JSONObject().put("query", context.getPackageName())
                 .put("limit", 1).put("offset", first.getInt("nextOffset")), ACTIVE);
         assertEquals(first.getInt("totalMatches"), second.getInt("totalMatches"));
         assertNotEquals(first.getJSONArray("items").getJSONObject(0).getString("packageName"),

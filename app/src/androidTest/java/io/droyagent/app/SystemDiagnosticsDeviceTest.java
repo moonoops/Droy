@@ -39,13 +39,14 @@ public final class SystemDiagnosticsDeviceTest {
     @Test public void syntheticCameraAppOpIsReadAsARealSystemRecord() throws Exception {
         String hardware = Build.HARDWARE.toLowerCase(Locale.ROOT);
         assertTrue("Synthetic AppOps fixtures run only on an emulator", hardware.contains("ranchu") || hardware.contains("goldfish"));
-        assertEquals("io.droyagent.app", context.getPackageName());
+        assertTrue("Only supported Droy packages may own synthetic records",
+                context.getPackageName().equals("io.droyagent.app") || context.getPackageName().equals("io.droyagent.app.dev"));
         assertTrue("Run with DUMP and usage access granted",
                 tools.capabilities().getJSONObject("privacy_usage").getBoolean("available"));
         // This records a synthetic AppOp; it neither opens a camera nor changes the op mode.
         long startedAt = System.currentTimeMillis();
         try {
-            String output = shell("cmd appops start io.droyagent.app CAMERA");
+            String output = shell("cmd appops start " + context.getPackageName() + " CAMERA");
             assertFalse(output, output.contains("Error:"));
             JSONObject privacy = tools.execute("privacy_usage", new JSONObject()
                     .put("packageName", context.getPackageName()).put("resource", "camera"), ACTIVE);
@@ -62,7 +63,7 @@ public final class SystemDiagnosticsDeviceTest {
             }
             assertTrue("A synthetic start/rejection must be visible through the normal App-UID parser", recorded);
             assertFalse(privacy.getBoolean("historyComplete"));
-        } finally { shell("cmd appops stop io.droyagent.app CAMERA"); }
+        } finally { shell("cmd appops stop " + context.getPackageName() + " CAMERA"); }
     }
 
     @Test public void grantedQueriesReturnOnlyOwnPackageAndExplicitStatistics() throws Exception {

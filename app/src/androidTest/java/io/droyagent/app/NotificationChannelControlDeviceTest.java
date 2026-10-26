@@ -28,7 +28,7 @@ import static org.junit.Assume.assumeTrue;
 /** Runs the actual app-UID su path, changing only independently owned fictional test channels. */
 @RunWith(AndroidJUnit4.class)
 public final class NotificationChannelControlDeviceTest {
-    private static final String SOURCE = "io.droyagent.app.test";
+    private static final String SOURCE = InstrumentationRegistry.getInstrumentation().getContext().getPackageName();
     private static final String RECEIVER = SOURCE + "/io.droyagent.app.NotificationChannelControlDeviceTest$FixtureReceiver";
 
     @Test public void appRootSilencesAndRestoresOnlyOwnedChannelSettings() throws Exception {

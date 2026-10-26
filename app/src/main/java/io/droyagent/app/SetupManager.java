@@ -108,7 +108,7 @@ final class SetupManager {
             if (!value.has(key)) continue;
             Object raw = value.get(key);
             Set<String> allowed = key.equals("source") ? Set.of("phone", "usb")
-                : key.equals("mode") ? Set.of("dialogue", "assistant", "custom") : Set.of("skip", "install", "use");
+                : key.equals("mode") ? Set.of("dialogue", "assistant", "all", "custom") : Set.of("skip", "install", "use");
             if (!(raw instanceof String) || !allowed.contains(raw)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("安装选项无效", "Invalid installation option"));
         }
         for (String key : new String[]{"companionName", "userAddress", "personality"}) {
@@ -150,7 +150,7 @@ final class SetupManager {
             String mode = value.getString("mode");
             installation.putString("mode", mode).putBoolean("modeSelected", true);
             if (!mode.equals("custom")) for (String key : capabilityKeys(context))
-                settings.putBoolean(key, mode.equals("assistant") && ASSISTANT.contains(key));
+                settings.putBoolean(key, mode.equals("all") || mode.equals("assistant") && ASSISTANT.contains(key));
             settings.putBoolean(ProductPermissions.STOPPED, mode.equals("dialogue"));
         } else if (capabilitiesChanged) {
             installation.putString("mode", "custom").putBoolean("modeSelected", true);
@@ -371,7 +371,7 @@ final class SetupManager {
         add(checks, "webView", io.droyagent.app.NativeLocale.text("系统 WebView", "System WebView"), true, environment.getJSONObject("webView").optBoolean("supported"),
             io.droyagent.app.NativeLocale.text("系统浏览组件需要支持对话与安全设置接口", "The system browser component must support chat and secure settings interfaces"), "webView");
         add(checks, "model", io.droyagent.app.NativeLocale.text("模型真实回复", "Actual model reply"), true, model.optBoolean("passed"), io.droyagent.app.NativeLocale.text("在模型页保存配置并测试连接", "Save configuration and test the connection on the Models page"), null);
-        add(checks, "mode", io.droyagent.app.NativeLocale.text("使用方式", "Usage mode"), true, store(context).getBoolean("modeSelected", false), io.droyagent.app.NativeLocale.text("在欢迎页选择仅对话或手机助手", "Choose chat-only or phone assistant on the welcome page"), null);
+        add(checks, "mode", io.droyagent.app.NativeLocale.text("使用方式", "Usage mode"), true, store(context).getBoolean("modeSelected", false), io.droyagent.app.NativeLocale.text("在欢迎页选择使用方式", "Choose a usage mode on the welcome page"), null);
         boolean any = false;
         for (String key : keys(capabilities)) any |= capabilities.getBoolean(key);
         if (any) add(checks, "modelTools", io.droyagent.app.NativeLocale.text("模型工具调用", "Model tool calling"), true, model.optBoolean("toolsPassed"), io.droyagent.app.NativeLocale.text("所选手机能力需要模型通过安全工具调用测试", "Selected phone capabilities require the model to pass the safe tool-calling test"), null);

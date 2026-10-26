@@ -33,8 +33,10 @@ function modelFailure(error, signal) {
   if (signal?.aborted) return new SetupError('MODEL_TEST_INTERRUPTED', '模型验证已取消或超时，请检查网络后重试。', 503);
   const code = typeof error?.code === 'string' ? error.code : '';
   const status = error?.status;
-  if (['MISSING_CREDENTIAL', 'INVALID_API_KEY', 'NO_CREDENTIAL_STORE'].includes(code) || status === 401 || status === 403)
-    return new SetupError('MODEL_CREDENTIAL_REQUIRED', '模型未授权，请在模型设置中检查 API Key 和访问权限。', 422);
+  if (status === 401) return new SetupError('MODEL_CREDENTIAL_REQUIRED', '模型服务拒绝了 API Key（HTTP 401），请在模型设置中更新。', 422);
+  if (status === 403) return new SetupError('MODEL_CREDENTIAL_REQUIRED', '模型服务拒绝访问（HTTP 403），请检查 API Key 的权限或服务限制。', 422);
+  if (['MISSING_CREDENTIAL', 'INVALID_API_KEY', 'NO_CREDENTIAL_STORE'].includes(code))
+    return new SetupError('MODEL_CREDENTIAL_REQUIRED', '尚未配置有效的 API Key，请在模型设置中填写。', 422);
   if (status === 429 || ['RATE_LIMIT', 'RATE_LIMITED', 'QUOTA_EXCEEDED'].includes(code))
     return new SetupError('MODEL_QUOTA_LIMITED', '模型额度不足或请求过多，请检查额度后重试。', 422);
   if (['NO_ADAPTER', 'INVALID_MODEL', 'MODEL_NOT_FOUND', 'UNSUPPORTED_MODEL'].includes(code) || status === 404)
@@ -181,8 +183,10 @@ export function createSetupService(ctx, bridge) {
 
   async function envelope(state, current, includeModels = false, signal) {
     const safe = publicState(state);
+    const catalog = includeModels ? await models(signal) : undefined;
     return { ok: true, state: safe, selection: current ? { provider: current.provider, model: current.model } : null,
-      modelVerification: safeReceipt(safe.modelVerification), ...(includeModels ? await models(signal) : {}) };
+      modelVerification: safeReceipt(safe.modelVerification), ...catalog,
+      ...(catalog ? { selectionAvailable: catalog.models.some(row => row.provider === current?.provider && row.model === current?.model) } : {}) };
   }
 
   return {

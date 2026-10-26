@@ -35,7 +35,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
-/** Fresh-install UI and selected-permission checks in a disposable emulator profile. */
+/** Fresh-install checks in an emulator or an explicitly selected development-app fixture. */
 @RunWith(AndroidJUnit4.class)
 public final class SetupFlowDeviceTest {
     private static final String ROOT = "[data-droy-setup]";
@@ -54,8 +54,12 @@ public final class SetupFlowDeviceTest {
     @Before public void prepare() throws Exception {
         instrumentation = InstrumentationRegistry.getInstrumentation();
         context = instrumentation.getTargetContext();
-        assertTrue("Installation fixtures require a dedicated emulator", Build.FINGERPRINT.startsWith("generic")
-            || Build.FINGERPRINT.contains("emulator") || Build.MODEL.contains("sdk_gphone"));
+        boolean emulator = Build.FINGERPRINT.startsWith("generic")
+            || Build.FINGERPRINT.contains("emulator") || Build.MODEL.contains("sdk_gphone");
+        boolean developmentPhone = context.getPackageName().equals("io.droyagent.app.dev")
+            && (context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            && "true".equals(InstrumentationRegistry.getArguments().getString("setupDevelopmentPhoneFixture"));
+        assertTrue("Installation fixtures require an emulator or an explicitly selected development app", emulator || developmentPhone);
         assertTrue("Stop tasks and the engine before installation tests", RuntimeService.canManageHistory());
         assertTrue("Do not interrupt audio capture", AudioCapture.get(context).uiStatus().isNull("active"));
         product = ProductPermissions.preferences(context);
@@ -142,7 +146,7 @@ public final class SetupFlowDeviceTest {
     @Test public void dialogueCompletesSixPagesAndResumesWithoutGrantingPhoneCapabilities() throws Exception {
         captureAndCheck("welcome");
         selectMode("dialogue");
-        openAndReturnFromModelSettings();
+        inspectEmbeddedModelSettings();
         testModel();
         next(3);
         captureAndCheck("environment");
@@ -154,6 +158,9 @@ public final class SetupFlowDeviceTest {
         type("#droy-setup-address", "Friend");
         type("#droy-setup-personality", "Calm and clear.");
         ui.hideKeyboard();
+        DeviceUi.await("The web setup did not receive the closed keyboard insets", 5000,
+            () -> ui.truth("document.documentElement.getAttribute('data-droy-ime-visible')!=='true'"
+                + "&&parseFloat(document.documentElement.style.getPropertyValue('--droy-ime-bottom')||'0')===0"));
         ui.awaitPaint();
         next(5);
         assertEquals("Momo", product.getString("petName", ""));
@@ -282,21 +289,19 @@ public final class SetupFlowDeviceTest {
         awaitStep(expected);
     }
 
-    private void openAndReturnFromModelSettings() throws Exception {
-        ui.tap("[data-droy-setup-model-settings]");
-        DeviceUi.await("The existing DSH model settings did not open", 15000,
-            () -> ui.truth("!!document.querySelector('[data-droy-settings-panel]')&&document.querySelector('[data-droy-settings-section=models]')?.getAttribute('aria-current')==='true'"));
-        DeviceUi.await("The existing DSH model provider directory did not load", 15000,
-            () -> ui.truth("Array.from(document.querySelectorAll('[data-droy-settings-panel] button')).some(b=>!b.disabled&&['Add model provider','添加模型提供商'].includes(b.textContent.trim()))"));
+    private void inspectEmbeddedModelSettings() throws Exception {
+        String panel = "[data-droy-setup-model-settings]";
+        DeviceUi.await("The shared DSH model provider directory did not load", 15000,
+            () -> ui.truth("Array.from(document.querySelectorAll('" + panel + " button')).some(b=>!b.disabled&&['Add model provider','添加模型提供商'].includes(b.textContent.trim()))"));
+        assertFalse("Embedding models must not open a second settings shell", ui.truth("!!document.querySelector('[data-droy-settings-panel]')"));
         capture("existing-model-settings");
-        ui.evaluate("Array.from(document.querySelectorAll('[data-droy-settings-panel] button')).find(b=>!b.disabled&&['Add model provider','添加模型提供商'].includes(b.textContent.trim())).setAttribute('data-droy-test-add-provider','true')");
+        ui.evaluate("Array.from(document.querySelectorAll('" + panel + " button')).find(b=>!b.disabled&&['Add model provider','添加模型提供商'].includes(b.textContent.trim())).setAttribute('data-droy-test-add-provider','true')");
         ui.tap("[data-droy-test-add-provider]");
         DeviceUi.await("DSH did not open a model provider configuration form", 10000,
-            () -> ui.truth("!!document.querySelector('[data-droy-settings-panel] select[aria-label]')&&!!document.querySelector('[data-droy-settings-panel] input')"));
+            () -> ui.truth("!!document.querySelector('" + panel + " select[aria-label]')&&!!document.querySelector('" + panel + " input')"));
         capture("existing-model-provider-form");
-        ui.pressBack();
-        DeviceUi.await("Closing model settings did not return to installation", 5000,
-            () -> !ui.truth("!!document.querySelector('[data-droy-settings-panel]')"));
+        ui.evaluate("Array.from(document.querySelectorAll('" + panel + " button')).find(b=>!b.disabled&&['Cancel','取消'].includes(b.textContent.trim())).setAttribute('data-droy-test-cancel-provider','true')");
+        ui.tap("[data-droy-test-cancel-provider]");
         awaitStep(2);
     }
 
@@ -331,7 +336,12 @@ public final class SetupFlowDeviceTest {
 
     private void type(String selector, String value) throws Exception {
         ui.awaitPaint();
-        ui.showKeyboard(selector);
+        try { ui.showKeyboard(selector); }
+        catch (AssertionError failure) {
+            report("DROY_SETUP_INPUT_GEOMETRY " + ui.evaluate("(()=>{const e=document.querySelector(" + JSONObject.quote(selector)
+                + "),s=e&&getComputedStyle(e),r=document.documentElement;return {ime:r.getAttribute('data-droy-ime-visible'),imeBottom:r.style.getPropertyValue('--droy-ime-bottom'),safeTop:r.style.getPropertyValue('--droy-safe-top'),viewport:visualViewport&&{height:visualViewport.height,offsetTop:visualViewport.offsetTop,scale:visualViewport.scale},rootHeight:document.querySelector('[data-droy-setup]')?.getBoundingClientRect().height,style:s&&{height:s.height,minHeight:s.minHeight,margin:s.scrollMarginBlock,zoom:s.zoom},landscape:matchMedia('(orientation:landscape)').matches}})()"));
+            throw failure;
+        }
         DeviceUi.await("The installation field did not receive touch focus", 5000,
             () -> ui.truth("document.activeElement===document.querySelector(" + JSONObject.quote(selector) + ")"));
         int existing = ((String) ui.evaluate("document.querySelector(" + JSONObject.quote(selector) + ").value")).length();

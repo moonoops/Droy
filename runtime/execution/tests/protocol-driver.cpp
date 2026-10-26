@@ -6,7 +6,7 @@ int main() {
     try {
         auto request = droy_exec::Start::parse(input);
         std::cout << request.host_uid << '\n' << request.source_workspace() << '\n'
-                  << request.cwd << '\n' << request.argv.size() << '\n';
+                  << request.cwd << '\n' << request.argv.size() << '\n' << request.package() << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cout << error.what() << '\n'; return 2;
