@@ -10,13 +10,17 @@ English | [简体中文](README.zh-CN.md)
 
 ## What is Droy?
 
-Droy is an Android AI agent built on DeepSeek Harness (DSH). Describe a task in natural language, connect your own model service, and let Droy interact with your phone through the capabilities you authorize.
+Droy is an Android AI agent built on [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). It brings ChatGPT-style conversations and the task execution experience of desktop agents such as Claude Code to your phone. Chat with Droy, or ask it to plan a task and operate your phone through the capabilities you authorize.
+
+For example, ask Droy to install and configure GKD on your phone, or create scheduled tasks to open DingTalk for a daily attendance check-in or claim coupons at a set time. Execution depends on app rules, login state, device permissions and background availability. Login, verification and other steps that need human input are handed back to you.
 
 The agent runtime runs on the phone and can be used without a connected computer after setup. Cloud models require network access and your own model configuration.
 
 ## How Droy works
 
-DSH plans tasks and calls models. Droy manages permissions, task state and data policy; Android Use observes and operates apps through the available authorized channels.
+DSH provides task planning, model calls and the conversation engine. On top of it, we built **Android Use**, a toolset similar to Computer Use that lets the agent observe pages, tap, type, swipe and check the results of its actions.
+
+Following DSH's “everything is a plugin” philosophy, mobile adaptation, voice interaction and memory connect through plugins, backed by Android native executors. Droy manages permissions, task state, data policy and stop controls, giving DSH the tools to act in an Android environment.
 
 ![Droy architecture](assets/droy-architecture.en.png)
 
@@ -27,6 +31,18 @@ Captured on a Redmi K90 Ultra.
 | Start a conversation | Capabilities and permissions | Local speech |
 | :---: | :---: | :---: |
 | <img src="assets/screenshots/chat.en.png" width="260" alt="Droy English conversation home" /> | <img src="assets/screenshots/permissions.en.png" width="260" alt="Droy phone capability permissions" /> | <img src="assets/screenshots/voice.en.png" width="260" alt="Droy local speech and readout settings" /> |
+
+### A cat companion on your screen
+
+When needed, Droy appears on your screen as a little cat. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
+
+| Task progress | Asking for your help |
+| :---: | :---: |
+| <img src="assets/screenshots/companion-progress.png" width="280" alt="Cat companion reporting that it is checking the changed page" /> | <img src="assets/screenshots/companion-help.png" width="280" alt="Cat companion asking for the next step with view and stop task controls" /> |
+
+Companion examples use existing Android emulator demo captures with Chinese UI.
+
+You can also make Droy your own: give a desktop agent your appearance requirements and the [project URL](https://github.com/moonoops/Droy). Ask it to follow the existing character package format, generate and replace assets, then build and install your customized Droy. Image generation requires an available image generation service.
 
 ## Capabilities
 
@@ -45,11 +61,11 @@ Captured on a Redmi K90 Ultra.
 
 ### Device and compatibility
 
-**Droy is developed on a rooted Redmi K90 Ultra. Other devices, system versions and non-rooted environments need separate verification.**
+**Droy is developed on a rooted Redmi K90 Ultra, with implementation paths for both rooted and non-rooted devices. Other devices, system versions and permission combinations need separate compatibility checks.**
 
 - ARM64 Android 11 / API 30 or later, with an up-to-date system WebView.
-- Your own compatible model configuration. Screenshot understanding requires image input.
-- Root is optional for conversations and basic phone interaction. Personal memory requires Root and execution-isolation qualification.
+- Without Root, accessibility services provide basic phone interaction; authorized Shizuku can enable some additional operations. Root enables enhanced capabilities. Available features depend on the in-app permission and capability checks. Personal memory requires Root and execution-isolation qualification.
+- Both vision and text-only models are supported, including compatible services such as DeepSeek Flash. Text-only models operate through page text and control structure. Screenshot understanding requires image input support from the selected model and API, declared in its configuration. Check the [provider's current capabilities](https://api-docs.deepseek.com/guides/vision/) and your actual configuration.
 
 For compatibility problems, an agent can help investigate, modify the source and verify a fix. Share reproduction steps in an [issue](https://github.com/moonoops/Droy/issues) or submit a [pull request](https://github.com/moonoops/Droy/pulls).
 
@@ -77,6 +93,8 @@ After setup, try:
 - "Summarize the current page in three key points."
 
 ## Permissions and data
+
+**Droy is experimental. Despite detailed permission, data authorization and stop controls, model errors, software defects or system differences may still cause unintended actions, data loss or disclosure. Assess the risks, back up important data, grant only necessary permissions and use sensitive accounts with care. The project is provided as is; to the extent permitted by applicable law, its authors and contributors accept no liability for data loss, disclosure or other damage arising from its use.**
 
 - Task context, page text, screenshots and attachments may be sent to your selected model. Provider terms and charges apply.
 - Voice recognition runs locally; recognized text goes to the conversation model. Readout uses your selected speech engine.
