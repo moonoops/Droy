@@ -1,12 +1,26 @@
-# Droy
+<p align="center">
+  <img src="assets/droy-promo-banner.png" width="100%" alt="Droy — A personal AI companion on Android." />
+</p>
+
+<div align="center">
 
 **A personal AI companion on Android.**
 
-English | [简体中文](README.zh-CN.md)
+<strong>English</strong> · [简体中文](README.zh-CN.md)
 
-[Download APK](https://github.com/moonoops/Droy/releases) · [Installation](INSTALLATION.md) · [Issues](https://github.com/moonoops/Droy/issues) · [@moonoops](https://github.com/moonoops)
+<p>
+<a href="https://github.com/moonoops/Droy/releases/latest"><img src="https://img.shields.io/github/v/release/moonoops/Droy?style=flat-square&amp;label=Release&amp;color=8a6c00" alt="Latest release" /></a>
+<a href="#get-started"><img src="https://img.shields.io/badge/Android-11%2B-333333?style=flat-square" alt="Android 11 or later" /></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0--only-333333?style=flat-square" alt="AGPL-3.0-only" /></a>
+</p>
 
-![Droy](assets/droy-promo-banner.png)
+**[Download APK](https://github.com/moonoops/Droy/releases/latest)** &nbsp; · &nbsp; [Installation](INSTALLATION.md) &nbsp; · &nbsp; [Issues](https://github.com/moonoops/Droy/issues)
+
+<a href="#preview">Preview</a> &nbsp; / &nbsp; <a href="#get-started">Get&nbsp;started</a> &nbsp; / &nbsp; <a href="#capabilities">Capabilities</a> &nbsp; / &nbsp; <a href="#how-it-works">How&nbsp;it&nbsp;works</a> &nbsp; / &nbsp; <a href="#permissions">Permissions&nbsp;&amp;&nbsp;data</a> &nbsp; / &nbsp; <a href="#development">Development</a>
+
+</div>
+
+---
 
 ## What is Droy?
 
@@ -16,46 +30,21 @@ For example, ask Droy to install and configure GKD on your phone, or create sche
 
 The agent runtime runs on the phone and can be used without a connected computer after setup. Cloud models require network access and your own model configuration.
 
-## How Droy works
+<a id="preview"></a>
 
-DSH provides task planning, model calls and the conversation engine. On top of it, we built **Android Use**, a toolset similar to Computer Use that lets the agent observe pages, tap, type, swipe and check the results of its actions.
+## Preview
 
-Following DSH's “everything is a plugin” philosophy, mobile adaptation, voice interaction and memory connect through plugins, backed by Android native executors. Droy manages permissions, task state, data policy and stop controls, giving DSH the tools to act in an Android environment.
+<p align="center">
+  <a href="assets/screenshots/chat.en.png"><img src="assets/screenshots/chat.en.png" width="30%" alt="Droy English conversation home" /></a>
+  <a href="assets/screenshots/permissions.en.png"><img src="assets/screenshots/permissions.en.png" width="30%" alt="Droy phone capability and permission settings" /></a>
+  <a href="assets/screenshots/voice.en.png"><img src="assets/screenshots/voice.en.png" width="30%" alt="Droy local speech and readout settings" /></a>
+</p>
 
-![Droy architecture](assets/droy-architecture.en.png)
+<p align="center"><sub>Conversations · Phone permissions · Local speech</sub></p>
 
-### Interface preview
+Real screens from Redmi K90 Ultra. Select an image to view it at full size.
 
-Captured on a Redmi K90 Ultra.
-
-| Start a conversation | Capabilities and permissions | Local speech |
-| :---: | :---: | :---: |
-| <img src="assets/screenshots/chat.en.png" width="260" alt="Droy English conversation home" /> | <img src="assets/screenshots/permissions.en.png" width="260" alt="Droy phone capability permissions" /> | <img src="assets/screenshots/voice.en.png" width="260" alt="Droy local speech and readout settings" /> |
-
-### A cat companion on your screen
-
-When needed, Droy appears on your screen as a little cat. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
-
-| Task progress | Asking for your help |
-| :---: | :---: |
-| <img src="assets/screenshots/companion-progress.png" width="280" alt="Cat companion reporting that it is checking the changed page" /> | <img src="assets/screenshots/companion-help.png" width="280" alt="Cat companion asking for the next step with view and stop task controls" /> |
-
-Companion examples use existing Android emulator demo captures with Chinese UI.
-
-You can also make Droy your own: give a desktop agent your appearance requirements and the [project URL](https://github.com/moonoops/Droy). Ask it to follow the existing character package format, generate and replace assets, then build and install your customized Droy. Image generation requires an available image generation service.
-
-## Capabilities
-
-| Capability | Description |
-| --- | --- |
-| Conversations | Streaming replies, history, attachments and configurable models. |
-| Phone interaction | Open apps, observe pages, take screenshots, tap, swipe and enter text. |
-| Voice | Hold to talk, local speech recognition, voice conversations and optional readout. |
-| Companion | An animated character with configurable appearance, personality and task updates. |
-| Notifications | Content rules, model-assisted analysis and reminders. |
-| Personal memory | Optional local records and retrieval, with separate source and processing controls. |
-| Extensions | Skills, plugins, MCP and automations through DSH. |
-| Languages | Chinese and English. |
+<a id="get-started"></a>
 
 ## Get started
 
@@ -92,9 +81,62 @@ After setup, try:
 - "Open Calculator and calculate 128 × 24."
 - "Summarize the current page in three key points."
 
-## Permissions and data
+<a id="capabilities"></a>
 
-**Droy is experimental. Despite detailed permission, data authorization and stop controls, model errors, software defects or system differences may still cause unintended actions, data loss or disclosure. Assess the risks, back up important data, grant only necessary permissions and use sensitive accounts with care. The project is provided as is; to the extent permitted by applicable law, its authors and contributors accept no liability for data loss, disclosure or other damage arising from its use.**
+## Capabilities
+
+| Capability | Description |
+| --- | --- |
+| Conversations | Streaming replies, history, attachments and configurable models. |
+| Phone interaction | Open apps, observe pages, take screenshots, tap, swipe and enter text. |
+| Voice | Hold to talk, local speech recognition, voice conversations and optional readout. |
+| Companion | An animated character with configurable appearance, personality and task updates. |
+| Notifications | Content rules, model-assisted analysis and reminders. |
+| Personal memory | Optional local records and retrieval, with separate source and processing controls. |
+| Extensions | Skills, plugins, MCP and automations through DSH. |
+| Languages | Chinese and English. |
+
+### A cat companion on your screen
+
+When needed, Droy appears on your screen as a little cat. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
+
+<details>
+<summary><strong>View companion task updates and handoff</strong></summary>
+
+<p align="center">
+  <a href="assets/screenshots/companion-progress.png"><img src="assets/screenshots/companion-progress.png" width="36%" alt="Cat companion reporting that it is checking the changed page" /></a>
+  <a href="assets/screenshots/companion-help.png"><img src="assets/screenshots/companion-help.png" width="36%" alt="Cat companion asking for the next step with view and stop task controls" /></a>
+</p>
+
+Companion examples use existing Android emulator demo captures with Chinese UI.
+
+</details>
+
+You can also make Droy your own: give a desktop agent your appearance requirements and the [project URL](https://github.com/moonoops/Droy). Ask it to follow the existing character package format, generate and replace assets, then build and install your customized Droy. Image generation requires an available image generation service.
+
+<a id="how-it-works"></a>
+
+## How it works
+
+DSH provides task planning, model calls and the conversation engine. On top of it, we built **Android Use**, a toolset similar to Computer Use that lets the agent observe pages, tap, type, swipe and check the results of its actions.
+
+Following DSH's “everything is a plugin” philosophy, mobile adaptation, voice interaction and memory connect through plugins, backed by Android native executors. Droy manages permissions, task state, data policy and stop controls, giving DSH the tools to act in an Android environment.
+
+<details>
+<summary><strong>View the architecture diagram</strong></summary>
+
+<p align="center">
+  <a href="assets/droy-architecture.en.png"><img src="assets/droy-architecture.en.png" width="100%" alt="Droy architecture: DSH engine, product services and Android Use native executors" /></a>
+</p>
+
+</details>
+
+<a id="permissions"></a>
+
+## Permissions & data
+
+> [!WARNING]
+> Droy is experimental. Despite detailed permission, data authorization and stop controls, model errors, software defects or system differences may still cause unintended actions, data loss or disclosure. Assess the risks, back up important data, grant only necessary permissions and use sensitive accounts with care. The project is provided as is; to the extent permitted by applicable law, its authors and contributors accept no liability for data loss, disclosure or other damage arising from its use.
 
 - Task context, page text, screenshots and attachments may be sent to your selected model. Provider terms and charges apply.
 - Voice recognition runs locally; recognized text goes to the conversation model. Readout uses your selected speech engine.
@@ -103,31 +145,41 @@ After setup, try:
 
 You can stop tasks and change capabilities in settings. Background work depends on Android process availability. Before uninstalling, turn off notification management normally so it can restore settings it changed.
 
-## Build from source
+<a id="development"></a>
+
+## Development
+
+### Build from source
 
 See [BUILDING.md](BUILDING.md) for the toolchain and build commands, and [TESTING.md](TESTING.md) for checks. Build and runtime versions are pinned in [runtime/release.json](runtime/release.json).
 
-## Feedback and contributions
+### Feedback and contributions
 
 Use [Issues](https://github.com/moonoops/Droy/issues) for problems and [pull requests](https://github.com/moonoops/Droy/pulls) for verified fixes. Include the Droy version, device, Android version, Root status and reproduction steps. Remove credentials and personal data from shared logs and screenshots.
+
+## Community & acknowledgements
+
+- **[DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness):** Droy is built on its agent engine. Thanks to the DeepSeek team and contributors for their open-source work.
+- **LINUX DO Community:** [linux.do](https://linux.do)
+
+[Maintained by @moonoops](https://github.com/moonoops)
+
+## Star history
+
+<div align="center">
+
+<a href="https://www.star-history.com/?repos=moonoops%2FDroy&amp;type=date&amp;legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;theme=dark&amp;legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;legend=top-left" />
+    <img width="100%" alt="GitHub star history for moonoops/Droy" src="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;legend=top-left" />
+  </picture>
+</a>
+
+</div>
 
 ## License
 
 Droy's own code is licensed under **GNU AGPL v3.0 only** ([LICENSE](LICENSE)). Use, modification and commercial use are permitted under its terms; applicable source-sharing obligations remain in effect.
 
 Third-party components retain their respective licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## 🤝 Community & Acknowledgements
-
-- **[DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness):** Droy is built on its agent engine. Thanks to the DeepSeek team and contributors for their open-source work.
-- **LINUX DO Community:** [linux.do](https://linux.do)
-
-## Star history
-
-<a href="https://www.star-history.com/?repos=moonoops%2FDroy&amp;type=date&amp;legend=top-left">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;theme=dark&amp;legend=top-left" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;legend=top-left" />
-    <img alt="GitHub star history for moonoops/Droy" src="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;legend=top-left" />
-  </picture>
-</a>
