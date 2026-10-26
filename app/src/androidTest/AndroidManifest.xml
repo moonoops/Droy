@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <application android:allowAudioPlaybackCapture="true">
+        <activity android:name="io.droyagent.app.history.HistorySourceFixtureActivity"
+            android:exported="true" android:launchMode="singleTop" />
+        <activity android:name="io.droyagent.app.AudioPlaybackFixtureActivity"
+            android:exported="true" android:launchMode="singleTop" />
+        <service android:name="io.droyagent.app.DiagnosticExitFixtureService"
+            android:exported="true" android:process=":diagnostic_exit_fixture"
+            android:permission="android.permission.DUMP" />
+        <receiver android:name="io.droyagent.app.NotificationManagementDeviceTest$FixtureReceiver"
+            android:exported="true" />
+        <receiver android:name="io.droyagent.app.PhoneNotificationFixtureReceiver"
+            android:exported="true" />
+        <receiver android:name="io.droyagent.app.NotificationChannelControlDeviceTest$FixtureReceiver"
+            android:exported="true" />
+    </application>
+</manifest>

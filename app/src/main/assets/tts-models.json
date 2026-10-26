@@ -1,0 +1,78 @@
+{
+  "models": [
+    {
+      "provider": "melo",
+      "name": "MeloTTS 中文",
+      "version": "a0d5c6a264c0ef92d70d8661d8cc502d79627cd6",
+      "directory": "melo-zh-fp32",
+      "license": "MIT",
+      "source": "https://huggingface.co/csukuangfj/vits-melo-tts-zh_en",
+      "files": [
+        {
+          "name": "LICENSE",
+          "bytes": 1053,
+          "sha256": "88a50e5a02bbc2a5c2f084dc19da751aa97b1690f5fda76cd8005c8634d1ca70",
+          "url": "https://huggingface.co/csukuangfj/vits-melo-tts-zh_en/resolve/a0d5c6a264c0ef92d70d8661d8cc502d79627cd6/LICENSE"
+        },
+        {
+          "name": "date.fst",
+          "bytes": 59154,
+          "sha256": "eb8aa079ae3cb81d8f4404992f39d61a0cb990947512b5b8d1e54d1f6980e718",
+          "url": "https://huggingface.co/csukuangfj/vits-melo-tts-zh_en/resolve/a0d5c6a264c0ef92d70d8661d8cc502d79627cd6/date.fst"
+        },
+        {
+          "name": "lexicon.txt",
+          "bytes": 6837671,
+          "sha256": "7236884b02435ac5d10cf69b4be40a61b45aa676b5300f0e412f185748fee528",
+          "url": "https://huggingface.co/csukuangfj/vits-melo-tts-zh_en/resolve/a0d5c6a264c0ef92d70d8661d8cc502d79627cd6/lexicon.txt"
+        },
+        {
+          "name": "model.onnx",
+          "bytes": 170429550,
+          "sha256": "bf30582eb1b012250a35b1a4a80e7dfbcf8485e7bb9de0d95efbbeef0e4ad86d",
+          "url": "https://huggingface.co/csukuangfj/vits-melo-tts-zh_en/resolve/a0d5c6a264c0ef92d70d8661d8cc502d79627cd6/model.onnx"
+        },
+        {
+          "name": "number.fst",
+          "bytes": 64482,
+          "sha256": "743f402181fcfebf76cc2f0546b71fa26476e626fbe4e460fb7b4c3a7a8bd5bd",
+          "url": "https://huggingface.co/csukuangfj/vits-melo-tts-zh_en/resolve/a0d5c6a264c0ef92d70d8661d8cc502d79627cd6/number.fst"
+        },
+        {
+          "name": "phone.fst",
+          "bytes": 88630,
+          "sha256": "1ac2b6fa56b1442320c4de7db08353bab8963a2b57f365eebcdd3a2d3562f8d7",
+          "url": "https://huggingface.co/csukuangfj/vits-melo-tts-zh_en/resolve/a0d5c6a264c0ef92d70d8661d8cc502d79627cd6/phone.fst"
+        },
+        {
+          "name": "tokens.txt",
+          "bytes": 655,
+          "sha256": "d18664a7e12bd7ea1022ddaf951e534e136815016c5a809d6b64156bffb4369d",
+          "url": "https://huggingface.co/csukuangfj/vits-melo-tts-zh_en/resolve/a0d5c6a264c0ef92d70d8661d8cc502d79627cd6/tokens.txt"
+        }
+      ]
+    },
+    {
+      "provider": "qwen3",
+      "name": "Qwen3-TTS 中文",
+      "version": "b7ee2e8c7459c3bea99da23e3d178125a7d1713c",
+      "directory": "qwen3-customvoice-q4",
+      "license": "Apache-2.0",
+      "source": "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF",
+      "files": [
+        {
+          "name": "qwen-talker-0.6b-customvoice-Q4_K_M.gguf",
+          "bytes": 604878080,
+          "sha256": "b3a7e6613d80f8a703c06267fc1e94d48ce91932ab82ab6e31c50f4ca4868e1e",
+          "url": "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/b7ee2e8c7459c3bea99da23e3d178125a7d1713c/qwen-talker-0.6b-customvoice-Q4_K_M.gguf"
+        },
+        {
+          "name": "qwen-tokenizer-12hz-Q4_K_M.gguf",
+          "bytes": 254974752,
+          "sha256": "cf3788b4d50aaa665fb6e57c170396aae03a3555fea52d2b5d0cda902d658039",
+          "url": "https://huggingface.co/Serveurperso/Qwen3-TTS-GGUF/resolve/b7ee2e8c7459c3bea99da23e3d178125a7d1713c/qwen-tokenizer-12hz-Q4_K_M.gguf"
+        }
+      ]
+    }
+  ]
+}

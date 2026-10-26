@@ -1,0 +1,4 @@
+<resources>
+    <string name="droy_accessibility_description">After you authorize and start a phone task, Droy can read the current screen, take screenshots, tap, swipe and enter text. Screen content may be sent to your configured model service. Stop tasks in the app or notification at any time, or disable this service in system settings.</string>
+    <string name="droy_accessibility_service">Droy phone operations</string>
+</resources>

@@ -1,0 +1,33 @@
+.droy-memory{display:flex;flex-direction:column;gap:14px;min-width:0;max-width:100%;line-height:1.55}
+.droy-memory *{box-sizing:border-box}.droy-memory h3{font-size:1em;margin:0 0 10px}.droy-memory p{margin:0 0 8px;overflow-wrap:anywhere}
+.droy-memory-intro,.droy-memory-hint,.droy-memory-metadata,.droy-memory small{color:var(--dsw-alias-label-secondary);font-size:.9em}
+.droy-memory-blocked,.droy-memory-confirm{padding:14px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base))}
+.droy-memory-blocked strong{display:block;margin-bottom:6px}.droy-memory-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--dsw-alias-border-l2);padding-bottom:8px}
+.droy-memory-tabs button{color:inherit;background:transparent;border:1px solid transparent;border-radius:8px;min-height:44px;flex:1;padding:8px 12px;cursor:pointer;font:inherit}
+.droy-memory-tabs button[aria-selected=true]{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base));font-weight:600}
+.droy-memory button:focus-visible,.droy-memory input:focus-visible,.droy-memory textarea:focus-visible,.droy-memory select:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}
+.droy-memory-search,.droy-memory-editor,.droy-memory-settings section{display:flex;flex-direction:column;gap:12px;min-width:0}
+.droy-memory-search label,.droy-memory-editor>label,.droy-memory-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.droy-memory input:not([type=checkbox]),.droy-memory textarea,.droy-memory select{width:100%;min-width:0;max-width:100%;font:inherit;color:inherit;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:9px 10px}
+.droy-memory textarea{resize:vertical;min-height:84px}.droy-memory select{min-height:44px}.droy-memory input:disabled,.droy-memory textarea:disabled{opacity:.55}
+.droy-memory-dates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.droy-memory-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.droy-memory-error{color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-label-primary));padding:10px;border:1px solid currentColor;border-radius:8px}.droy-memory-notice{padding:10px;background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base));border-radius:8px}
+.droy-memory-records{display:flex;flex-direction:column;gap:8px}.droy-memory-record{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;color:inherit;background:transparent;border:1px solid var(--dsw-alias-border-l2);border-radius:9px;padding:12px;font:inherit;cursor:pointer;min-width:0}
+.droy-memory-record[aria-pressed=true]{border-color:var(--dsw-alias-state-business-primary)}.droy-memory-record strong{font-weight:500;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.droy-memory-kind{font-size:.8em;color:var(--dsw-alias-label-secondary)}.droy-memory-empty{padding:18px 0;color:var(--dsw-alias-label-secondary)}
+.droy-memory-editor{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:14px}.droy-memory-metadata{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 10px;margin:0}
+.droy-memory-metadata dt{font-weight:500}.droy-memory-metadata dd{margin:0;overflow-wrap:anywhere}.droy-memory-confirm{display:flex;gap:8px;flex-wrap:wrap}.droy-memory-confirm p{width:100%}
+.droy-memory-settings{display:flex;flex-direction:column;gap:24px}.droy-memory-settings section+section{border-top:1px solid var(--dsw-alias-border-l2);padding-top:20px}
+.droy-memory-toggle{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:44px}.droy-memory-toggle>div{min-width:0}.droy-memory-toggle p{margin-top:4px;font-size:.88em;color:var(--dsw-alias-label-secondary)}
+.droy-memory-endpoint{display:flex;flex-direction:column;gap:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:12px;min-width:0}.droy-memory-endpoint-url{font-size:.85em;overflow-wrap:anywhere}
+.droy-memory-endpoint fieldset{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:8px 14px}.droy-memory-endpoint legend{padding:0;margin-bottom:8px;font-size:.9em}.droy-memory-endpoint fieldset label{display:flex;align-items:center;gap:6px;min-height:36px}
+.droy-memory-apps{max-height:300px;overflow:auto;overscroll-behavior:contain;border:1px solid var(--dsw-alias-border-l2);border-radius:8px}.droy-memory-app{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;padding:10px;align-items:center}.droy-memory-app+.droy-memory-app{border-top:1px solid var(--dsw-alias-border-l2)}.droy-memory-app>span{overflow-wrap:anywhere}.droy-memory-app label{display:flex;align-items:center;gap:4px;min-height:32px;white-space:nowrap}
+@media(max-width:420px){.droy-memory-dates{grid-template-columns:minmax(0,1fr)}.droy-memory-tabs button{padding:8px;min-width:64px}.droy-memory-editor{padding:10px}}
+
+.droy-memory{color:var(--dsw-alias-label-primary)}.droy-memory button:not([role=switch]){min-height:48px;height:auto;white-space:normal;overflow-wrap:anywhere;line-height:1.45}
+.droy-memory-touch-switch[role=switch][aria-checked]{width:48px;height:48px;padding:0;background:transparent;border-radius:8px}.droy-memory-touch-switch[role=switch]:before{content:"";position:absolute;left:6px;top:14px;width:36px;height:20px;border-radius:999px;background:var(--dsw-alias-border-l3);pointer-events:none}.droy-memory-touch-switch[role=switch][aria-checked=true]:before{background:var(--dsw-alias-brand-primary)}.droy-memory-touch-switch[role=switch]>span{position:absolute;left:8px;top:16px}
+.droy-memory-record-row{display:flex;flex-direction:column;gap:4px;min-width:0}.droy-memory-backup-choice{display:flex;gap:8px;align-items:center;align-self:flex-start;min-height:44px;font-size:.9em}.droy-memory-backup-choice input{width:20px;height:20px}
+.droy-memory-held{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:12px;min-width:0}.droy-memory-held strong{display:block;margin-bottom:6px}
+.droy-memory-archive h4{font-size:1em;margin:12px 0 0}
+.droy-memory .droy-memory-tabs button{white-space:nowrap;overflow-wrap:normal;flex-basis:max-content;min-width:max-content}
+@media(max-width:420px){.droy-memory:lang(en) .droy-memory-tabs button{flex-basis:calc(50% - 3px)}}

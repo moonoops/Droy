@@ -1,0 +1,49 @@
+// Run: ./gradlew -I tools/tests/runtime_release_binding.gradle :app:testRuntimeReleaseBinding
+// Reuses the production task against isolated fixtures; never edits packaged assets.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    def verifierType = app.tasks.named('verifyRuntimeRelease').get().getClass().superclass
+    def fixtureVerifier = app.tasks.register('verifyRuntimeReleaseFixture', verifierType)
+    app.tasks.register('testRuntimeReleaseBinding') {
+        doLast {
+            File directory = java.nio.file.Files.createTempDirectory('droy-release-binding-').toFile()
+            try {
+                File release = new File(directory, 'release.json')
+                File manifest = new File(directory, 'manifest.json')
+                File archive = new File(directory, 'runtime.zip')
+                archive.bytes = 'fictional runtime bytes'.getBytes('UTF-8')
+                def expected = [droyVersion: '0.3.0-test', versionCode: 4, dshVersion: '1.2.3', mobileVersion: '4.5.6']
+                def packaged = expected + [sha256: java.security.MessageDigest.getInstance('SHA-256').digest(archive.bytes).encodeHex().toString()]
+                release.text = groovy.json.JsonOutput.toJson(expected)
+                def verifier = fixtureVerifier.get()
+                verifier.releaseManifest.set(release)
+                verifier.assetManifest.set(manifest)
+                verifier.runtimeArchive.set(archive)
+                manifest.text = groovy.json.JsonOutput.toJson(packaged)
+                verifier.verify()
+                def reject = { String diagnostic ->
+                    try {
+                        verifier.verify()
+                        throw new AssertionError("Expected rejection: ${diagnostic}")
+                    } catch (GradleException rejected) {
+                        assert rejected.message.contains(diagnostic): rejected.message
+                    }
+                }
+                for (String field : ['droyVersion', 'versionCode', 'dshVersion', 'mobileVersion']) {
+                    manifest.text = groovy.json.JsonOutput.toJson(packaged + [(field): field == 'versionCode' ? 3 : 'old-version'])
+                    reject("Runtime release mismatch: ${field}")
+                }
+                manifest.text = groovy.json.JsonOutput.toJson(packaged + [sha256: 'invalid'])
+                reject('no valid SHA-256')
+                manifest.text = groovy.json.JsonOutput.toJson(packaged)
+                archive.append('changed after manifest generation', 'UTF-8')
+                reject('archive checksum mismatch')
+                assert app.tasks.named('preBuild').get().taskDependencies.getDependencies(app.tasks.named('preBuild').get())
+                    .contains(app.tasks.named('verifyRuntimeRelease').get())
+                logger.lifecycle('PASS: bound release, stale Droy/DSH/adapter versions, malformed checksum, changed archive, and preBuild dependency')
+            } finally {
+                directory.deleteDir()
+            }
+        }
+    }
+}

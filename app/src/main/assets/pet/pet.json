@@ -1,0 +1,1435 @@
+{
+  "formatVersion": 2,
+  "id": "droy-black-cat-v3-personality",
+  "name": "Droy",
+  "description": "机智、机灵、不啰嗦的 Droy 伙伴，采用黑色黄眼睛猫咪形象，支持多种入退场、互动与左右朝向",
+  "atlases": {
+    "actions": {
+      "file": "cat-actions.png",
+      "width": 1024,
+      "height": 1536,
+      "frames": [
+        {
+          "sourceRect": [
+            43,
+            39,
+            178,
+            184
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            298,
+            39,
+            179,
+            184
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            553,
+            39,
+            179,
+            184
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            810,
+            39,
+            179,
+            184
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            43,
+            294,
+            177,
+            185
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            299,
+            296,
+            178,
+            183
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            555,
+            295,
+            177,
+            184
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            811,
+            290,
+            178,
+            189
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            43,
+            551,
+            179,
+            184
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            306,
+            545,
+            176,
+            190
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            556,
+            547,
+            176,
+            188
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            810,
+            549,
+            178,
+            186
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            45,
+            801,
+            181,
+            190
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            298,
+            809,
+            178,
+            182
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            567,
+            800,
+            166,
+            191
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            810,
+            806,
+            179,
+            185
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            43,
+            1062,
+            178,
+            185
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            299,
+            1067,
+            181,
+            180
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            555,
+            1042,
+            178,
+            205
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            810,
+            1062,
+            179,
+            185
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            43,
+            1318,
+            179,
+            185
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            302,
+            1308,
+            178,
+            195
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            557,
+            1303,
+            178,
+            200
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            810,
+            1318,
+            179,
+            185
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        }
+      ]
+    },
+    "peek": {
+      "file": "cat-peek.png",
+      "width": 1254,
+      "height": 1254,
+      "frames": [
+        {
+          "sourceRect": [
+            104,
+            114,
+            422,
+            434
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            730,
+            114,
+            424,
+            434
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            101,
+            715,
+            423,
+            428
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            728,
+            714,
+            424,
+            429
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        }
+      ]
+    },
+    "locomotion": {
+      "file": "cat-locomotion.png",
+      "width": 1024,
+      "height": 1536,
+      "frames": [
+        {
+          "sourceRect": [
+            15,
+            17,
+            235,
+            217
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            271,
+            17,
+            235,
+            217
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            527,
+            17,
+            235,
+            217
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            783,
+            17,
+            235,
+            217
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            13,
+            256,
+            233,
+            236
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            269,
+            256,
+            233,
+            236
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            525,
+            256,
+            233,
+            236
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            781,
+            256,
+            233,
+            236
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            12,
+            517,
+            237,
+            223
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            268,
+            517,
+            237,
+            223
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            524,
+            517,
+            237,
+            223
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            780,
+            517,
+            237,
+            223
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            13,
+            780,
+            232,
+            220
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            269,
+            780,
+            232,
+            220
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            525,
+            780,
+            232,
+            220
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            781,
+            780,
+            232,
+            220
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            10,
+            1035,
+            239,
+            210
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            266,
+            1035,
+            239,
+            210
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            522,
+            1035,
+            239,
+            210
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            778,
+            1035,
+            239,
+            210
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            15,
+            1281,
+            230,
+            218
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            271,
+            1281,
+            230,
+            218
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            527,
+            1281,
+            230,
+            218
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            783,
+            1281,
+            230,
+            218
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        }
+      ]
+    },
+    "interactions": {
+      "file": "cat-interactions.png",
+      "width": 1024,
+      "height": 1536,
+      "frames": [
+        {
+          "sourceRect": [
+            19,
+            19,
+            230,
+            228
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            275,
+            19,
+            230,
+            228
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            531,
+            19,
+            230,
+            228
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            787,
+            19,
+            230,
+            228
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            20,
+            268,
+            228,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            276,
+            268,
+            228,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            532,
+            268,
+            228,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            788,
+            268,
+            228,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            5,
+            520,
+            248,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            261,
+            520,
+            248,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            517,
+            520,
+            248,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            773,
+            520,
+            248,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            15,
+            777,
+            236,
+            230
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            271,
+            777,
+            236,
+            230
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            527,
+            777,
+            236,
+            230
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            783,
+            777,
+            236,
+            230
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            29,
+            1033,
+            226,
+            229
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            285,
+            1033,
+            226,
+            229
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            541,
+            1033,
+            226,
+            229
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            797,
+            1033,
+            226,
+            229
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            4,
+            1282,
+            252,
+            233
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            260,
+            1282,
+            252,
+            233
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            516,
+            1282,
+            252,
+            233
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        },
+        {
+          "sourceRect": [
+            772,
+            1282,
+            252,
+            233
+          ],
+          "anchor": [
+            0.5,
+            1.0
+          ]
+        }
+      ]
+    }
+  },
+  "states": {
+    "idle": {
+      "label": "待机眨眼",
+      "atlas": "actions",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        900,
+        90,
+        110,
+        900
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "working": {
+      "label": "工作观察",
+      "atlas": "actions",
+      "frames": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "durationsMs": [
+        320,
+        320,
+        320,
+        450
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "speaking": {
+      "label": "进度提示",
+      "atlas": "actions",
+      "frames": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "durationsMs": [
+        180,
+        150,
+        160,
+        350
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "waiting": {
+      "label": "等待回应",
+      "atlas": "actions",
+      "frames": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "durationsMs": [
+        400,
+        120,
+        400,
+        500
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "tap": {
+      "label": "点击回应",
+      "atlas": "actions",
+      "frames": [
+        16,
+        17,
+        18,
+        19
+      ],
+      "durationsMs": [
+        60,
+        90,
+        110,
+        180
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "success": {
+      "label": "完成反馈",
+      "atlas": "actions",
+      "frames": [
+        20,
+        21,
+        22,
+        23
+      ],
+      "durationsMs": [
+        180,
+        220,
+        220,
+        380
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "peekLeft": {
+      "label": "左侧探头",
+      "atlas": "peek",
+      "frames": [
+        0,
+        1,
+        0
+      ],
+      "durationsMs": [
+        1200,
+        120,
+        1200
+      ],
+      "displayHeightDp": 36,
+      "playback": "once_then_hold",
+      "facing": "none",
+      "mirrorSafe": false
+    },
+    "peekRight": {
+      "label": "右侧探头",
+      "atlas": "peek",
+      "frames": [
+        2,
+        3,
+        2
+      ],
+      "durationsMs": [
+        1200,
+        120,
+        1200
+      ],
+      "displayHeightDp": 36,
+      "playback": "once_then_hold",
+      "facing": "none",
+      "mirrorSafe": false
+    },
+    "enterWalk": {
+      "atlas": "locomotion",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        140,
+        140,
+        140,
+        180
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "enterJump": {
+      "atlas": "locomotion",
+      "frames": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "durationsMs": [
+        150,
+        130,
+        180,
+        220
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "enterPeek": {
+      "atlas": "locomotion",
+      "frames": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "durationsMs": [
+        180,
+        180,
+        220,
+        240
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "exitWalk": {
+      "atlas": "locomotion",
+      "frames": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "durationsMs": [
+        140,
+        140,
+        140,
+        180
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "exitHide": {
+      "atlas": "locomotion",
+      "frames": [
+        16,
+        17,
+        18,
+        19
+      ],
+      "durationsMs": [
+        180,
+        180,
+        220,
+        240
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "blocked": {
+      "atlas": "locomotion",
+      "frames": [
+        20,
+        21,
+        22,
+        23
+      ],
+      "durationsMs": [
+        180,
+        180,
+        220,
+        240
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "tapTilt": {
+      "atlas": "interactions",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        180,
+        180,
+        220,
+        240
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "tapWave": {
+      "atlas": "interactions",
+      "frames": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "durationsMs": [
+        180,
+        180,
+        220,
+        240
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "pet": {
+      "atlas": "interactions",
+      "frames": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "durationsMs": [
+        180,
+        180,
+        220,
+        240
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "petShy": {
+      "atlas": "interactions",
+      "frames": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "durationsMs": [
+        180,
+        180,
+        220,
+        240
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "idleTail": {
+      "atlas": "interactions",
+      "frames": [
+        16,
+        17,
+        18,
+        19
+      ],
+      "durationsMs": [
+        700,
+        250,
+        300,
+        450
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "idleStretch": {
+      "atlas": "interactions",
+      "frames": [
+        20,
+        21,
+        22,
+        23
+      ],
+      "durationsMs": [
+        700,
+        250,
+        300,
+        450
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "completed": {
+      "label": "待机眨眼",
+      "atlas": "actions",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        900,
+        90,
+        110,
+        900
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "stopped": {
+      "label": "待机眨眼",
+      "atlas": "actions",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        900,
+        90,
+        110,
+        900
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    }
+  },
+  "rendering": {
+    "bodyDisplayHeightDp": 56,
+    "peekDisplayHeightDp": 36,
+    "minimumTouchTargetDp": 48,
+    "anchor": "bottom_center",
+    "note": "sourceRect 带透明余量；按动作组统一缩放并保持脚底锚点。浮层移动与点击缩放由播放器执行。"
+  },
+  "transitions": {
+    "tapMs": 220,
+    "emergeMs": 240,
+    "dockMs": 320
+  },
+  "reference": "reference.png",
+  "persona": {
+    "temperament": "curious",
+    "description": "机智、机灵、不啰嗦，亲近自然，工作时专注；幽默适量，不夸大进度。",
+    "traits": { "terse": true, "tsundere": false, "gentle": false },
+    "voice": {
+      "working": [
+        "{name}正在处理。",
+        "{name}还在忙。",
+        "{name}正专心处理。",
+        "{name}正在推进这件事。",
+        "{name}还在处理这件事。",
+        "{name}正忙，稍等。"
+      ],
+      "idle": [
+        "{name}在，有事叫我。",
+        "{name}耳朵竖好了。",
+        "{name}在，随时开工。",
+        "{name}等你安排。",
+        "{name}在，今天忙点什么？",
+        "{name}待命，尾巴也就位。"
+      ]
+    }
+  },
+  "variants": {
+    "enter": [
+      "enterPeek",
+      "enterWalk",
+      "enterJump"
+    ],
+    "exit": [
+      "exitWalk",
+      "exitHide"
+    ],
+    "tap": [
+      "tap",
+      "tapTilt",
+      "tapWave"
+    ],
+    "pet": [
+      "pet",
+      "petShy"
+    ],
+    "idle": [
+      "idle",
+      "idleTail",
+      "idleStretch"
+    ]
+  }
+}

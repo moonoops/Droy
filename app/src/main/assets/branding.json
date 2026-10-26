@@ -1,0 +1,7 @@
+{
+  "name": "Droy",
+  "sidebarLabel": "Droy",
+  "heroBadge": "",
+  "welcomeTemplate": "与{name}开始对话",
+  "composerTemplate": "请描述你想让{name}执行的任务，或者你的对话"
+}

@@ -1,0 +1,13 @@
+{
+  "license": "AGPL-3.0-only",
+  "name": "@droyagent/privacy",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dsh-plugin.mjs",
+    "./dsh-plugin": "./dsh-plugin.mjs",
+    "./store": "./store.mjs",
+    "./policy": "./policy.mjs",
+    "./package.json": "./package.json"
+  }
+}

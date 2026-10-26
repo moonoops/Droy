@@ -1,0 +1,5 @@
+<network-security-config>
+    <!-- The dedicated browser supports public HTTP through its mandatory vetted proxy.
+         Chat navigation/subresources remain restricted to the authenticated loopback origin. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

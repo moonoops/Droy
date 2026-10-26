@@ -1,0 +1,74 @@
+// Opt-in debug mechanism probe. Does not alter the normal runtime archive.
+gradle.beforeProject { project ->
+    def output = project.findProperty('memoryProbeBuildRoot')
+    if (output == null) throw new GradleException('Set -PmemoryProbeBuildRoot to an isolated artifact directory')
+    project.layout.buildDirectory.set(new File(output.toString(), project.name))
+    if (project.path != ':app') return
+    def app = project
+    def root = project.rootProject
+    def ndk = project.findProperty('memoryProbeNdk')
+    if (ndk == null) throw new GradleException('Set -PmemoryProbeNdk to the Android NDK directory')
+    def prebuilt = new File(ndk.toString(), 'toolchains/llvm/prebuilt').listFiles()
+    def candidates = prebuilt.collect { new File(it, 'bin/aarch64-linux-android30-clang') }.findAll { it.isFile() }
+    if (candidates.size() != 1) throw new GradleException('Expected one ARM64 Android compiler')
+    def source = root.file('tools/fixtures/personal-memory/seccomp-broker-probe.c')
+    def primitiveSource = root.file('tools/fixtures/personal-memory/seccomp-service-primitives-probe.c')
+    def fixedRootSource = root.file('tools/fixtures/personal-memory/fixed-root-openat-probe.c')
+    def serviceSource = root.file('tools/fixtures/personal-memory/service')
+    def jniRoot = new File(output.toString(), 'probe-jni')
+    def binary = new File(jniRoot, 'arm64-v8a/libdroy_memory_broker_probe.so')
+    def primitiveBinary = new File(jniRoot, 'arm64-v8a/libdroy_memory_primitives_probe.so')
+    def fixedRootBinary = new File(jniRoot, 'arm64-v8a/libdroy_memory_fixed_root_probe.so')
+    def signalSource = new File(output.toString(), 'probe-sigsys.c')
+    def diagnostic = '''#define _GNU_SOURCE
+#include <signal.h>
+#include <unistd.h>
+static void report_sigsys(int signal, siginfo_t *info, void *context) {
+    (void)signal; (void)context;
+    char output[96] = "{\\"probe\\":\\"sigsys\\",\\"syscall\\":";
+    unsigned count = sizeof("{\\"probe\\":\\"sigsys\\",\\"syscall\\":") - 1;
+    unsigned value = (unsigned)info->si_syscall;
+    char digits[16]; unsigned n = 0;
+    do { digits[n++] = (char)('0' + value % 10); value /= 10; } while (value);
+    while (n) output[count++] = digits[--n];
+    output[count++] = '}'; output[count++] = '\\n';
+    (void)write(STDOUT_FILENO, output, count);
+    _exit(159);
+}
+__attribute__((constructor)) static void install_reporter(void) {
+    struct sigaction action = {0}; action.sa_sigaction = report_sigsys;
+    action.sa_flags = SA_SIGINFO; sigemptyset(&action.sa_mask);
+    (void)sigaction(SIGSYS, &action, 0);
+}
+'''
+    def compile = app.tasks.register('compileMemoryServiceProbe', Exec) {
+        inputs.file(source)
+        inputs.property('sigsysDiagnostic', diagnostic)
+        outputs.file(binary)
+        doFirst { binary.parentFile.mkdirs(); signalSource.text = diagnostic }
+        commandLine candidates[0].absolutePath, '-Wall', '-Wextra', '-Werror', '-O2', '-static', source.absolutePath, signalSource.absolutePath, '-o', binary.absolutePath
+    }
+    def compilePrimitives = app.tasks.register('compileMemoryServicePrimitiveProbe', Exec) {
+        dependsOn compile
+        inputs.file(primitiveSource)
+        inputs.property('sigsysDiagnostic', diagnostic)
+        outputs.file(primitiveBinary)
+        doFirst { primitiveBinary.parentFile.mkdirs(); signalSource.text = diagnostic }
+        commandLine candidates[0].absolutePath, '-Wall', '-Wextra', '-Werror', '-O2', '-static', primitiveSource.absolutePath, signalSource.absolutePath, '-o', primitiveBinary.absolutePath
+    }
+    def compileFixedRoot = app.tasks.register('compileMemoryServiceFixedRootProbe', Exec) {
+        dependsOn compilePrimitives
+        inputs.file(fixedRootSource)
+        inputs.property('sigsysDiagnostic', diagnostic)
+        outputs.file(fixedRootBinary)
+        doFirst { fixedRootBinary.parentFile.mkdirs(); signalSource.text = diagnostic }
+        commandLine candidates[0].absolutePath, '-Wall', '-Wextra', '-Werror', '-O2', '-static', fixedRootSource.absolutePath, signalSource.absolutePath, '-o', fixedRootBinary.absolutePath
+    }
+    app.pluginManager.withPlugin('com.android.application') {
+        app.android.sourceSets.debug.jniLibs.srcDir(jniRoot)
+        app.android.sourceSets.debug.java.srcDir(new File(serviceSource, 'java'))
+        app.android.sourceSets.debug.manifest.srcFile(new File(serviceSource, 'AndroidManifest.xml'))
+        app.android.sourceSets.androidTest.java.srcDir(new File(serviceSource, 'androidTest'))
+        app.tasks.matching { it.name == 'mergeDebugJniLibFolders' }.configureEach { dependsOn compile, compilePrimitives, compileFixedRoot }
+    }
+}

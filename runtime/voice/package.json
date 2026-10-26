@@ -1,0 +1,15 @@
+{
+  "license": "AGPL-3.0-only",
+  "name": "@droyagent/voice",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./plugin.mjs", "./client": "./client.js", "./package.json": "./package.json" },
+  "dsh": {
+    "client": {
+      "inject": ["@deepseek-ai/dsh-experimental-client-ui-voice-input", "@droyagent/mobile", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-commands", "@deepseek-ai/dsh-client-ui-workspace", "@deepseek-ai/dsh-client-ui-settings-general"],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": { "@droyagent/mobile": "0.3.0" },
+  "dependencies": { "ws": "8.22.0", "@deepseek-ai/dsh-tools": "0.2.1-rc.2" }
+}

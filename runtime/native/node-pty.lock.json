@@ -1,0 +1,9 @@
+{
+  "package": "node-pty",
+  "version": "1.2.0-beta.15",
+  "source": "src/unix/pty.cc",
+  "sha256": "5809f87b15122f335017b0b3020071df4c6205c7827186a2c5a9e0edc9ef59b2",
+  "nodeAddonApiVersion": "7.1.1",
+  "license": "MIT",
+  "repository": "https://github.com/microsoft/node-pty"
+}

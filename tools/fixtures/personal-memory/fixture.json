@@ -1,0 +1,66 @@
+{
+  "fixtureVersion": 1,
+  "synthetic": true,
+  "description": "Fictional test inputs; not an importable production memory export or a final record schema.",
+  "scope": {
+    "spaceId": "10000000-0000-4000-8000-000000000001",
+    "companionId": "20000000-0000-4000-8000-000000000001",
+    "nodeId": "30000000-0000-4000-8000-000000000001"
+  },
+  "records": [
+    {
+      "recordId": "40000000-0000-4000-8000-000000000001",
+      "kind": "preference",
+      "state": "active",
+      "payload": { "text": "虚构用户偏好：答复先给结论。" },
+      "assertion": "user_statement",
+      "sourceRefs": [{ "nodeId": "30000000-0000-4000-8000-000000000001", "sourceType": "session", "sourceId": "fixture-preference-session" }]
+    },
+    {
+      "recordId": "40000000-0000-4000-8000-000000000002",
+      "kind": "task_summary",
+      "state": "active",
+      "payload": { "text": "虚构任务已生成本地报告，尚未投递。", "outcome": "partial", "delivery": "not_requested" },
+      "assertion": "execution_receipt",
+      "sourceRefs": [{ "nodeId": "30000000-0000-4000-8000-000000000001", "sourceType": "session", "sourceId": "fixture-task-session" }]
+    },
+    {
+      "recordId": "40000000-0000-4000-8000-000000000003",
+      "kind": "event",
+      "state": "active",
+      "occurredAt": "2026-01-02T08:00:00+08:00",
+      "payload": { "eventType": "app_activity", "packageName": "example.fixture.reader", "coverage": "observed_window_event", "actor": "unknown", "durationMs": null },
+      "assertion": "tool_observation",
+      "sourceRefs": [{ "nodeId": "30000000-0000-4000-8000-000000000001", "sourceType": "native_event", "sourceId": "fixture-activity-event" }]
+    },
+    {
+      "recordId": "40000000-0000-4000-8000-000000000004",
+      "kind": "event",
+      "state": "active",
+      "occurredAt": "2026-01-02T08:05:00+08:00",
+      "payload": { "eventType": "location", "latitude": 0, "longitude": 0, "accuracyMeters": 800, "source": "synthetic", "city": null, "visitConfirmed": false },
+      "assertion": "tool_observation",
+      "sourceRefs": [{ "nodeId": "30000000-0000-4000-8000-000000000001", "sourceType": "native_event", "sourceId": "fixture-location-event" }]
+    },
+    {
+      "recordId": "40000000-0000-4000-8000-000000000005",
+      "kind": "fact",
+      "state": "deleted",
+      "payload": null,
+      "assertion": "user_statement",
+      "sourceRefs": [{ "nodeId": "30000000-0000-4000-8000-000000000001", "sourceType": "session", "sourceId": "fixture-forgotten-session" }]
+    }
+  ],
+  "operations": [
+    { "operationId": "fixture-operation-repeat", "action": "record", "recordId": "40000000-0000-4000-8000-000000000003", "sourceId": "fixture-activity-event" },
+    { "operationId": "fixture-operation-repeat", "action": "record", "recordId": "40000000-0000-4000-8000-000000000003", "sourceId": "fixture-activity-event" },
+    { "operationId": "fixture-operation-forget", "action": "forget", "recordId": "40000000-0000-4000-8000-000000000005", "sourceId": "fixture-forgotten-session" }
+  ],
+  "expected": {
+    "duplicateOperationId": "fixture-operation-repeat",
+    "duplicateCreatesNewRecord": false,
+    "deletedRecordRecallable": false,
+    "unresolvedLocationIsKnownCity": false,
+    "partialTaskIsSuccessfulDelivery": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "runtime": {
+    "repository": "Danmoreng/qwen3-tts.cpp",
+    "revision": "16bb5afcd06311031c72a8488f8d59660dc2fb46",
+    "bytes": 2425451,
+    "sha256": "91eee15d8eb4749221b44ce961506344e59278c98c37e43edf1b49a0439f6687"
+  },
+  "ggml": {
+    "repository": "ggml-org/ggml",
+    "revision": "af97976c7810cdabb1863172f31c432dab767de7",
+    "bytes": 3517707,
+    "sha256": "06e84ccb46a4e18ea9bd921548d8faa04d09651e4eb091c0446abfccd6134672"
+  },
+  "ndk": "28.2.13676358",
+  "androidApi": 30
+}

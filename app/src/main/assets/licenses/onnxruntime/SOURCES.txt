@@ -1,0 +1,9 @@
+ONNX Runtime 1.28.2
+
+Source: https://github.com/microsoft/onnxruntime/tree/v1.28.2
+Binary distribution: https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.28.2/onnxruntime-android-1.28.2.zip
+Archive SHA-256: 01518867f78241138b6aa25925802e843a4fa9085af8d303d49e35bbb52aff4d
+Included through sherpa-onnx 1.13.8 Android AAR.
+
+onnxruntime/LICENSE.txt SHA-256: 2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c
+onnxruntime/ThirdPartyNotices.txt SHA-256: 0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2

@@ -1,0 +1,580 @@
+/* DSH 0.2.1-rc.2 settings classes, verified in the Android WebView.
+   Keep this adapter scoped to the packaged app and recheck it on DSH upgrades. */
+html[data-droy-mobile] {
+  --droy-mobile-layout-ready: 1;
+  --droy-content-bottom: max(var(--droy-safe-bottom, 0px), var(--droy-ime-bottom, 0px));
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The three data attributes are introduced by the version-checked layout patch.
+   Drawer geometry therefore does not depend on DSH's generated CSS names. */
+[data-droy-frame] [data-shell-leading] {
+  top: calc(var(--droy-safe-top, 0px) + 6px);
+  left: calc(var(--droy-safe-left, 0px) + 8px);
+}
+[data-droy-frame] [data-droy-center] { grid-column: 2; grid-row: 1; }
+[data-droy-frame] [data-rightbar-col] { grid-column: 3; grid-row: 1; }
+/* Only the content is inset. The frame, drawer and settings surfaces continue
+   behind Android's transparent system bars, including when their colors differ. */
+html[data-droy-mobile] [data-droy-center] {
+  box-sizing: border-box;
+  padding: var(--droy-safe-top, 0px) var(--droy-safe-right, 0px)
+    var(--droy-content-bottom) var(--droy-safe-left, 0px);
+}
+/* Android already subtracts the IME once through the center's bottom inset.
+   The empty conversation keeps its centered layout until the keyboard opens. */
+html[data-droy-mobile][data-droy-ime-visible="true"] [data-conversation-content][data-content-phase="hero"] > [data-conversation-scroll] {
+  justify-content: flex-start;
+}
+html[data-droy-mobile][data-droy-ime-visible="true"] [data-conversation-content][data-content-phase="hero"] > [data-conversation-scroll] > [data-composer-seat] {
+  margin-top: auto;
+}
+html[data-droy-mobile][data-droy-ime-visible="true"] [data-droy-composer-hero] {
+  padding-bottom: 8px;
+}
+/* The right track does not contain its absolute occupant. Insets belong on the
+   real resource panel so its dock tabs and controls are below the system bars. */
+html[data-droy-mobile] [data-droy-mobile-panel] {
+  box-sizing: border-box;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  z-index: 30;
+  padding: var(--droy-safe-top, 0px) var(--droy-safe-right, 0px)
+    var(--droy-content-bottom) var(--droy-safe-left, 0px);
+  border: 0;
+  border-radius: 0;
+}
+html[data-droy-mobile] [data-droy-mobile-panel][data-sidebar-right-open] {
+  background: var(--dsw-alias-bg-base);
+}
+html[data-droy-mobile] [data-droy-mobile-panel-body] {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+html[data-droy-mobile] [data-droy-panel-chrome] button {
+  box-sizing: border-box;
+  min-width: var(--droy-touch-target, 48px);
+  min-height: var(--droy-touch-target, 48px);
+}
+html[data-droy-mobile] [data-droy-mobile-panel] [data-dockkit-strip] {
+  box-sizing: border-box;
+  height: auto;
+  min-height: calc(var(--droy-touch-target, 48px) + 8px);
+  padding: 4px 6px 4px 10px;
+}
+html[data-droy-mobile] [data-droy-mobile-panel] [data-dockkit-tab] {
+  box-sizing: border-box;
+  min-height: var(--droy-touch-target, 48px);
+}
+html[data-droy-mobile] [data-droy-attachment-lightbox] { inset: 0; }
+html[data-droy-mobile] [data-droy-attachment-stage] {
+  box-sizing: border-box;
+  inset: 0;
+  padding: calc(var(--droy-safe-top, 0px) + var(--droy-touch-target, 48px) + 16px)
+    calc(var(--droy-safe-right, 0px) + 16px)
+    calc(var(--droy-content-bottom) + 16px)
+    calc(var(--droy-safe-left, 0px) + 16px);
+}
+html[data-droy-mobile] [data-droy-attachment-close] {
+  box-sizing: border-box;
+  top: calc(var(--droy-safe-top, 0px) + 8px);
+  right: calc(var(--droy-safe-right, 0px) + 8px);
+  width: var(--droy-touch-target, 48px);
+  height: var(--droy-touch-target, 48px);
+}
+/* The drawer overlays a fixed conversation track; desktop grid interpolation
+   would force a layout on every animation frame without moving that track. */
+html[data-droy-mobile] [data-droy-frame] { transition: none; }
+[data-droy-frame] [data-droy-sidebar] {
+  touch-action: pan-y;
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--droy-drawer-width);
+  z-index: 40;
+  visibility: hidden;
+  transform: translateX(-100%);
+  transition: transform 180ms ease, visibility 0s linear 180ms;
+  will-change: transform;
+  box-shadow: 6px 0 24px #0002;
+}
+html[data-droy-mobile] [data-droy-sidebar] .hHd-Xa_root {
+  padding-top: calc(var(--droy-safe-top, 0px) + 6px);
+  padding-bottom: calc(var(--droy-content-bottom) + 6px);
+  padding-left: calc(var(--droy-safe-left, 0px) + 12px);
+}
+[data-droy-frame][data-droy-drawer-open] [data-droy-sidebar] {
+  visibility: visible;
+  transform: translateX(0);
+  transition-delay: 0s;
+}
+.droy-menu-button {
+  width: var(--droy-touch-target, 48px);
+  height: var(--droy-touch-target, 48px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+.droy-menu-button:active { background: var(--dsw-alias-interactive-bg-hover); }
+.droy-menu-button:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); }
+.droy-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  padding: 0;
+  border: 0;
+  background: #0005;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
+  cursor: pointer;
+}
+[data-droy-frame][data-droy-drawer-open] .droy-drawer-backdrop {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+[data-droy-frame] .hHd-Xa_toggle { min-width: var(--droy-touch-target, 48px); min-height: var(--droy-touch-target, 48px); }
+[data-droy-frame] .hHd-Xa_newSession { min-height: var(--droy-touch-target, 48px); }
+[data-droy-frame] .VOzbGW_trigger { min-height: var(--droy-touch-target, 48px); }
+
+html[data-droy-mobile] [data-droy-settings-launcher] {
+  min-height: var(--droy-touch-target, 48px);
+}
+html[data-droy-mobile] [data-droy-settings-launcher]:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
+/* Stable markers are the only contract the reusable gesture layer needs. */
+html[data-droy-mobile] [data-droy-session-row],
+html[data-droy-mobile] [data-droy-drawer-header] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+html[data-droy-mobile] [data-droy-session-row] :is(input, textarea, [contenteditable]:not([contenteditable="false"])),
+html[data-droy-mobile] [data-droy-drawer-header] :is(input, textarea, [contenteditable]:not([contenteditable="false"])) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+html[data-droy-mobile] [data-droy-session-row] {
+  --droy-row-fill: var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base));
+  background: transparent;
+  position: relative;
+  min-height: var(--droy-touch-target, 48px);
+  height: auto;
+  overflow: clip;
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+}
+html[data-droy-mobile] [data-droy-session-surface] {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  width: 100%;
+  min-height: var(--droy-touch-target, 48px);
+  transform: translateX(var(--droy-row-offset, 0px));
+  transition: transform 160ms ease;
+  position: relative;
+  z-index: 1;
+  background: var(--droy-row-fill);
+}
+html[data-droy-mobile] [data-droy-session-row][aria-selected="true"] {
+  --droy-row-fill: color-mix(in srgb, var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base)) 92%, var(--dsw-alias-label-primary) 8%);
+}
+html[data-droy-mobile] [data-droy-session-row][data-droy-session-menu-open="true"] {
+  --droy-row-fill: color-mix(in srgb, var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base)) 86%, var(--dsw-alias-label-primary) 14%);
+}
+/* Touch hover is sticky in Android WebView. The surface owns one resolved fill;
+   selected, pressed and menu-active states never stack translucent layers. */
+html[data-droy-mobile][data-droy-input="touch"] [data-droy-session-row]:hover {
+  background: transparent;
+}
+html[data-droy-mobile][data-droy-input="touch"] [data-droy-session-row]:active:not([data-droy-session-menu-open]) {
+  --droy-row-fill: color-mix(in srgb, var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base)) 90%, var(--dsw-alias-label-primary) 10%);
+}
+html[data-droy-mobile][data-droy-input="touch"] [data-droy-session-row] .YDXeBa_time { display: inline; }
+html[data-droy-mobile][data-droy-input="touch"] [data-droy-session-row] .YDXeBa_pinIndicator { display: inline-flex; }
+html[data-droy-mobile][data-droy-input="touch"] :is(.hHd-Xa_iconButton, .YDXeBa_iconButton, [data-droy-composer-add], [data-droy-workspace-trigger]):hover:not(:active) {
+  background: transparent;
+}
+html[data-droy-mobile][data-droy-input="touch"] .hHd-Xa_panelRow:hover:not(.hHd-Xa_panelActive):not(:active) {
+  background: transparent;
+}
+html[data-droy-mobile] [data-droy-row-dragging] [data-droy-session-surface] { transition: none; }
+html[data-droy-mobile] [data-droy-swipe-action] {
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: calc(var(--droy-touch-target, 48px) * 1.5);
+  display: flex;
+  justify-content: stretch;
+  align-items: stretch;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+  visibility: hidden;
+}
+html[data-droy-mobile] [data-droy-row-expanded] [data-droy-swipe-action],
+html[data-droy-mobile] [data-droy-row-dragging] [data-droy-swipe-action] { visibility: visible; }
+html[data-droy-mobile] [data-droy-swipe-action] button {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  min-height: var(--droy-touch-target, 48px);
+  padding: 2px 4px;
+  color: inherit;
+  background: transparent;
+}
+html[data-droy-mobile] [data-droy-swipe-action] button::after {
+  content: attr(aria-label);
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+html[data-droy-mobile] [data-droy-action-pending] [data-droy-swipe-action] { pointer-events: none; opacity: .55; }
+html[data-droy-mobile] [data-droy-row-actions] { display: inline-flex; gap: 0; }
+html[data-droy-mobile] [data-droy-search-actions] { display: inline-flex; }
+/* Slot wrappers use inline display:contents, so hide the original controls
+   themselves. The archive button in the swipe layer and restore stay usable. */
+html[data-droy-mobile] [data-droy-row-actions] [data-droy-session-archive][data-droy-session-action="archive"],
+html[data-droy-mobile] [data-droy-row-actions] [data-droy-session-pin] { display: none; }
+html[data-droy-mobile] [data-droy-session-menu],
+html[data-droy-mobile] [data-droy-session-restore],
+html[data-droy-mobile] [data-droy-session-action="unarchive"],
+html[data-droy-mobile] [data-droy-drawer-close],
+html[data-droy-mobile] [data-droy-composer-add] {
+  box-sizing: border-box;
+  min-width: var(--droy-touch-target, 48px);
+  min-height: var(--droy-touch-target, 48px);
+}
+html[data-droy-mobile] [role="menu"] [role="menuitem"] { min-height: var(--droy-touch-target, 48px); }
+html[data-droy-mobile] [data-droy-drawer-header],
+html[data-droy-mobile] [data-droy-backdrop] { touch-action: pan-y; }
+html[data-droy-mobile] [data-droy-dragging="drawer"] [data-droy-sidebar],
+html[data-droy-mobile] [data-droy-dragging="drawer"] [data-droy-backdrop] { transition: none; }
+.droy-touch-feedback {
+  position: fixed;
+  z-index: 200;
+  box-sizing: border-box;
+  left: calc(var(--droy-safe-left, 0px) + 16px);
+  right: calc(var(--droy-safe-right, 0px) + 16px);
+  bottom: calc(var(--droy-content-bottom, 0px) + 16px);
+  padding: 12px 16px;
+  border-radius: var(--dsw-radius-lg, 12px);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  font-size: 14px;
+}
+.droy-touch-feedback[hidden] { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-droy-frame] [data-droy-sidebar], .droy-drawer-backdrop { transition: none; }
+  html[data-droy-mobile] [data-droy-session-surface] { transition: none; }
+}
+
+/* The Android marker also covers landscape and resized app windows. */
+/* Desktop's 680px minimum also positions invisible width handles offscreen.
+   Their overflow lets WebView focus scrolling shift the entire conversation. */
+html[data-droy-mobile] .wSkVaW_body {
+  --dsh-chat-content-width: min(calc(100% - 32px), 920px);
+  --dsh-composer-card-max-width: min(calc(100% - 16px), 952px);
+  min-width: 0;
+}
+html[data-droy-mobile] .wSkVaW_widthHandle { display: none; }
+html[data-droy-mobile] .wSkVaW_scrollBody { min-width: 0; }
+html[data-droy-mobile] .wSkVaW_composerSeat {
+  --dsh-composer-text-max-height: clamp(36px, 20dvh, 120px);
+}
+/* The command menu belongs above the floating conversation controls, while
+   the drawer and full-screen resource panel retain their higher layers. */
+html[data-droy-mobile] .wSkVaW_composerSeat:has([data-trigger-menu]),
+html[data-droy-mobile] .wSkVaW_composerStack:has([data-trigger-menu]) { z-index: 20; }
+html[data-droy-mobile] [data-trigger-menu] ._3e4SsG_item {
+  flex: none;
+  flex-wrap: wrap;
+  row-gap: 2px;
+  min-height: var(--droy-touch-target, 48px);
+}
+html[data-droy-mobile] [data-trigger-menu] :is(._3e4SsG_itemName, ._3e4SsG_itemAlias) {
+  max-width: calc(100% - 20px);
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+html[data-droy-mobile] [data-trigger-menu] ._3e4SsG_itemDescription {
+  flex-basis: 100%;
+  margin-left: 20px;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  text-align: left;
+}
+
+html[data-droy-mobile] [data-droy-settings] {
+  inset: 0;
+  align-items: stretch;
+  justify-content: stretch;
+  background: var(--dsw-alias-bg-layer-2);
+}
+html[data-droy-mobile] [data-droy-settings-mask] { display: none; }
+html[data-droy-mobile] [data-droy-settings-panel] {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: var(--droy-safe-top, 0px) var(--droy-safe-right, 0px)
+    var(--droy-content-bottom) var(--droy-safe-left, 0px);
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+html[data-droy-mobile] [data-droy-settings-panel]:focus { outline: none; }
+html[data-droy-mobile] [data-droy-settings-nav] {
+  width: auto;
+  min-width: 0;
+  gap: 0;
+  padding: 0 12px 8px;
+}
+html[data-droy-mobile] [data-droy-settings-header] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 0;
+}
+html[data-droy-mobile] [data-droy-settings-back] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  cursor: pointer;
+}
+html[data-droy-mobile] [data-droy-settings-back]:active { background: var(--dsw-alias-interactive-bg-hover); }
+html[data-droy-mobile] [data-droy-settings-back]:focus-visible {
+  outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+}
+/* Contributions grow with DSH plugins; labels keep their width instead of
+   sharing a fixed number of slots. Only this strip scrolls horizontally. */
+html[data-droy-mobile] [data-droy-settings-tabs] {
+  flex-direction: row;
+  flex: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: 4px;
+  scrollbar-width: thin;
+}
+html[data-droy-mobile] .VOzbGW_navCell {
+  flex: none;
+  min-width: max-content;
+  min-height: 48px;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+html[data-droy-mobile] .VOzbGW_navLabel {
+  flex: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* These global pages use the same floating menu as chat. Their desktop
+   headings and breadcrumbs otherwise begin underneath its touch target. */
+html[data-droy-mobile] [data-plugin-panel] :is(.X_2TxG_pageHead, .X_2TxG_detailTop, .X_2TxG_moreHead),
+html[data-droy-mobile] [data-testid="task-manager-page"] .t-XoWW_pageHeading {
+  padding-top: calc(var(--droy-touch-target, 48px) + 16px);
+}
+html[data-droy-mobile] [data-testid="task-manager-page"] .t-XoWW_detailTabsBar {
+  box-sizing: border-box;
+  height: auto;
+  min-height: calc(var(--droy-touch-target, 48px) + 16px + 44px);
+  padding-top: calc(var(--droy-touch-target, 48px) + 16px);
+}
+
+html[data-droy-mobile] [data-droy-settings-content] { min-height: 0; }
+html[data-droy-mobile] [data-droy-settings-actions] { padding: 4px 12px; }
+/* The full-window settings page already has its accessible Back control. */
+html[data-droy-mobile] [data-droy-settings-close] { display: none; }
+html[data-droy-mobile] [data-droy-settings-options] {
+  padding: 4px 12px 16px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+/* In a short keyboard viewport, fixed settings chrome can consume all editing
+   space. Let it scroll with the focused settings field instead. */
+@media (orientation: landscape) and (max-height: 480px) {
+  html[data-droy-ime-visible="true"] [data-droy-settings-panel]:has([data-droy-general="proactiveNotifications"] input:focus, [data-droy-voice-settings] input:focus, [data-droy-memory] :is(input,textarea):focus) {
+    display: block;
+    height: calc(100dvh - var(--droy-ime-bottom, 0px));
+    max-height: calc(100dvh - var(--droy-ime-bottom, 0px));
+    padding-bottom: 0;
+    overflow: auto;
+    scroll-padding-block: 8px;
+  }
+  html[data-droy-ime-visible="true"] [data-droy-settings-panel]:has([data-droy-general="proactiveNotifications"] input:focus, [data-droy-voice-settings] input:focus, [data-droy-memory] :is(input,textarea):focus) [data-droy-settings-content],
+  html[data-droy-ime-visible="true"] [data-droy-settings-panel]:has([data-droy-general="proactiveNotifications"] input:focus, [data-droy-voice-settings] input:focus, [data-droy-memory] :is(input,textarea):focus) [data-droy-settings-options] {
+    display: block;
+    flex: none;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+  /* Keep focused forms below the status bar in the short editing viewport. */
+  html[data-droy-ime-visible="true"] [data-droy-settings-panel]:has([data-droy-voice-settings] input:focus, [data-droy-memory] :is(input,textarea):focus) {
+    margin-top: var(--droy-safe-top, 0px);
+    padding-top: 0;
+    height: calc(100dvh - var(--droy-ime-bottom, 0px) - var(--droy-safe-top, 0px));
+    max-height: calc(100dvh - var(--droy-ime-bottom, 0px) - var(--droy-safe-top, 0px));
+  }
+}
+
+/* Desktop font fields reserve 240px plus a 48px text gutter. Use the whole
+   phone row for explanations and editing instead of squeezing its text column. */
+html[data-droy-mobile] [data-droy-font-row] {
+  min-width: 0;
+  gap: 12px;
+}
+html[data-droy-mobile] [data-droy-font-copy] {
+  min-width: 0;
+  padding-right: 0;
+  overflow-wrap: anywhere;
+}
+/* DSH Input puts className on its wrapper and data attributes on the input. */
+html[data-droy-mobile] [data-droy-font-row="family"] > :has([data-droy-font-field]) {
+  box-sizing: border-box;
+  flex: 0 1 45%;
+  min-width: 0;
+  min-height: 48px;
+}
+html[data-droy-mobile] [data-droy-font-field] {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  font-size: 16px;
+}
+html[data-droy-mobile] [data-droy-font-control] {
+  flex: none;
+  min-width: 0;
+  gap: 8px;
+}
+html[data-droy-mobile] [data-droy-font-stepper] {
+  display: grid;
+  grid-template-columns: 48px minmax(40px, auto) 48px;
+  align-items: center;
+  min-width: 0;
+  height: 48px;
+}
+html[data-droy-mobile] [data-droy-font-value] { grid-column: 2; grid-row: 1; }
+html[data-droy-mobile] [data-droy-font-arrows] {
+  display: contents;
+  position: static;
+  opacity: 1;
+}
+html[data-droy-mobile] [data-droy-font-step] {
+  grid-row: 1;
+  width: 48px;
+  height: 48px;
+  background: transparent;
+  border-radius: var(--dsw-radius-md);
+}
+html[data-droy-mobile] [data-droy-font-step="decrease"] { grid-column: 1; }
+html[data-droy-mobile] [data-droy-font-step="increase"] { grid-column: 3; }
+html[data-droy-mobile] [data-droy-font-step] svg { width: 18px; height: 18px; }
+html[data-droy-mobile] [data-droy-font-expander] { width: 48px; height: 48px; }
+html[data-droy-mobile] [data-droy-font-expander] svg { width: 18px; height: 18px; }
+html[data-droy-mobile][data-droy-input="touch"] :is([data-droy-font-step], [data-droy-font-expander]):hover:not(:active) {
+  background: transparent;
+}
+html[data-droy-mobile] :is([data-droy-font-step], [data-droy-font-expander]):active:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+html[data-droy-mobile] [data-droy-theme-choices] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+html[data-droy-mobile] [data-droy-theme-choice] {
+  min-width: 0;
+  min-height: 84px;
+  padding: 12px 4px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  html[data-droy-mobile] [data-droy-font-row] {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  html[data-droy-mobile] [data-droy-font-copy] { flex: none; width: 100%; }
+  html[data-droy-mobile] [data-droy-font-row="family"] > :has([data-droy-font-field]) { flex: none; width: 100%; }
+  html[data-droy-mobile] [data-droy-font-control] { width: 100%; }
+  html[data-droy-mobile] [data-droy-font-expander] { margin-left: auto; }
+}
+
+html[data-droy-mobile] .zGbnIq_rowCard { padding: 12px; }
+html[data-droy-mobile] .zGbnIq_editor { padding: 12px; }
+html[data-droy-mobile] .zGbnIq_editorHeader { flex-wrap: wrap; }
+html[data-droy-mobile] .zGbnIq_editorRoute,
+html[data-droy-mobile] .zGbnIq_savedNotice,
+html[data-droy-mobile] .zGbnIq_advancedHint { overflow-wrap: anywhere; }
+html[data-droy-mobile] .zGbnIq_input { min-width: 0; min-height: 40px; font-size: 16px; }
+
+html[data-droy-mobile] .zGbnIq_modelRow {
+  grid-template-columns: minmax(0, 1fr) 40px 40px;
+}
+html[data-droy-mobile] .zGbnIq_modelRow > input:first-of-type { grid-column: 1 / -1; }
+html[data-droy-mobile] .zGbnIq_modelRow > input:nth-of-type(2) { grid-column: 1; }
+html[data-droy-mobile] .zGbnIq_iconButton { width: 40px; height: 40px; }
+html[data-droy-mobile] .zGbnIq_modelAdvanced { grid-template-columns: minmax(0, 1fr); }
+html[data-droy-mobile] .zGbnIq_editorActions { flex-wrap: wrap; }
+html[data-droy-mobile] .zGbnIq_editorActions > button { min-width: 88px; min-height: 44px; }
+html[data-droy-mobile] .zGbnIq_addButton { min-width: 0; }
+
+/* Preset names identify the mode being selected, so keep long built-in and
+   user names readable on narrow screens instead of ellipsizing the choice. */
+html[data-droy-mobile] .rtSEdW_cards {
+  grid-template-columns: repeat(auto-fill, minmax(min(268px, 100%), 1fr));
+}
+html[data-droy-mobile] .rtSEdW_cardName {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}

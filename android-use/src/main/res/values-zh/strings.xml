@@ -1,0 +1,4 @@
+<resources>
+    <string name="droy_accessibility_description">在你授权并启动手机操作任务后，DroyAgent 可读取当前页面、截图、点击、滑动和输入文字。任务中的页面内容可能发送给你配置的模型服务。可随时在应用或通知中停止任务，或在系统设置中关闭此服务。</string>
+    <string name="droy_accessibility_service">Droy 手机操作</string>
+</resources>

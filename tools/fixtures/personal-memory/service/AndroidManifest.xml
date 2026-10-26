@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service android:name=".MemoryIsolationProbeService"
+            android:exported="false" android:process=":memory_isolation_probe" />
+    </application>
+</manifest>

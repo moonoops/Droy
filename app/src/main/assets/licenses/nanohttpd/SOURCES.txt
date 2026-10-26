@@ -1,0 +1,5 @@
+NanoHTTPD 2.3.1
+License: BSD-3-Clause
+Source: https://github.com/NanoHttpd/nanohttpd/tree/nanohttpd-project-2.3.1
+License source: https://raw.githubusercontent.com/NanoHttpd/nanohttpd/nanohttpd-project-2.3.1/LICENSE.md
+SHA-256: a0ada3797d7ff576a77f892c7cd5e7910e0fffb56efa9cf2a295cbf596706185

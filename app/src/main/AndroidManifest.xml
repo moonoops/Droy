@@ -1,0 +1,92 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- User grants usage access through Settings/AppOps; this is not a runtime permission. -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.DUMP" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="https" /></intent>
+        <intent><action android:name="android.provider.action.PICK_IMAGES" /><data android:mimeType="image/*" /></intent>
+        <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
+        <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+    </queries>
+    <application android:name=".DroyApplication" android:label="@string/droy_app_name" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:icon="${droyLauncherIcon}"
+        android:allowBackup="false" android:extractNativeLibs="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:networkSecurityConfig="@xml/network_security_config">
+        <activity android:name=".MainActivity" android:theme="@style/DroyChatTheme" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden" android:enableOnBackInvokedCallback="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".TestPageActivity" android:exported="false" />
+        <activity android:name=".AudioPermissionActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".MemoryPermissionActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".media.ShareReceiveActivity" android:exported="true" android:theme="@style/DroyChatTheme"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.media-input-files"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/media_file_paths" />
+        </provider>
+        <provider android:name=".BrowserUiProtection" android:authorities="${applicationId}.browser-ui" android:exported="false" />
+        <provider android:name=".SetupFileProvider" android:authorities="${applicationId}.setup-files"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/setup_file_paths" />
+        </provider>
+        <provider android:name=".PermissionSetupProvider" android:authorities="${applicationId}.permissions"
+            android:exported="true" android:permission="android.permission.DUMP" />
+        <service android:name=".BrowserService" android:exported="false" android:process=":browser" />
+        <service android:name=".AudioCaptureService" android:exported="false" android:stopWithTask="false"
+            android:foregroundServiceType="microphone|mediaProjection|camera" />
+        <service android:name=".history.HistoryLocationService" android:exported="false" android:stopWithTask="false"
+            android:foregroundServiceType="location" />
+        <service android:name=".ComputeService" android:exported="false" android:isolatedProcess="true" />
+        <service android:name=".DroyNotificationService" android:exported="true"
+            android:label="@string/droy_notification_service"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
+        </service>
+        <service android:name=".RuntimeService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started on-device AI conversation and Android automation with visible stop control" />
+        </service>
+    </application>
+</manifest>
+

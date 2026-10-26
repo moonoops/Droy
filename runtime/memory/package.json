@@ -1,0 +1,22 @@
+{
+  "license": "AGPL-3.0-only",
+  "name": "@droyagent/memory",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./plugin.mjs",
+    "./adapter": "./adapter.mjs",
+    "./store": "./store.mjs",
+    "./schema": "./schema.mjs",
+    "./maintenance": "./maintenance.mjs",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": ["@deepseek-ai/dsh-client-ui-settings-general"],
+      "platform": "web"
+    }
+  },
+  "dependencies": { "@deepseek-ai/dsh-tools": "0.2.1-rc.2", "@deepseek-ai/dsh-token-meter": "0.2.1-rc.2" }
+}

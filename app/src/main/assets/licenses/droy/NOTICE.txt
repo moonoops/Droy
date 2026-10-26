@@ -1,0 +1,8 @@
+Droy
+Copyright (c) 2026 moonoops
+
+Project-authored source code is licensed under GNU AGPL version 3 only
+(SPDX-License-Identifier: AGPL-3.0-only). See LICENSE.
+
+Third-party components retain their respective licenses and copyright notices.
+See THIRD_PARTY_NOTICES.md.

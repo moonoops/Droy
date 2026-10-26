@@ -1,0 +1,47 @@
+{
+  "license": "AGPL-3.0-only",
+  "name": "@droyagent/mobile",
+  "version": "0.3.0",
+  "type": "module",
+  "exports": {
+    ".": "./plugin.mjs",
+    "./auth": "./auth.mjs",
+    "./bridge": "./bridge.mjs",
+    "./publish": "./publish.mjs",
+    "./plugin-policy": "./plugin-policy.mjs",
+    "./required-plugins": "./required-plugins.mjs",
+    "./memory-host": "./memory-host.mjs",
+    "./attachments": "./attachments.mjs",
+    "./initialize": "./initialize.mjs",
+    "./lifecycle": "./lifecycle.mjs",
+    "./notifications": "./notifications.mjs",
+    "./diagnostics": "./diagnostics.mjs",
+    "./package-manager": "./package-manager.mjs",
+    "./prompt": "./prompt.mjs",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings-general",
+        "@deepseek-ai/dsh-client-ui-theme",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-attachment-local": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-scope": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  }
+}

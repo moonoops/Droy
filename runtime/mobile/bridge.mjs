@@ -1,0 +1,125 @@
+import { renderPhoneResult } from './tool-result.mjs';
+import { translateBackendText } from './backend-i18n.mjs';
+
+export class BridgeError extends Error {
+  constructor(code, message, details = {}) {
+    const rendered = renderPhoneResult(details);
+    super(`${code}: ${message}${Object.keys(rendered).length ? `\n${JSON.stringify(rendered)}` : ''}`);
+    this.code = code;
+    this.details = details;
+  }
+}
+
+function actionBudget(action, args) {
+  const requested = Number.isFinite(args.timeoutMs) && args.timeoutMs >= 0 ? Math.min(args.timeoutMs, 60000) : undefined;
+  if (action.startsWith('browser_')) return Math.max(15000, (requested ?? 15000) + 10000);
+  if (action === 'sequence') return requested ?? 30000;
+  if (action === 'wait_for') return Math.max(1000, (requested ?? 10000) + 1500);
+  if (action === 'compute_run') return Math.max(15000, (requested ?? 5000) + 10000);
+  if (args.afterCondition !== undefined) {
+    const wait = Number.isFinite(args.afterTimeoutMs) && args.afterTimeoutMs >= 0 ? Math.min(args.afterTimeoutMs, 60000) : 2000;
+    return Math.max(15000, wait + 5000);
+  }
+  return 15000;
+}
+
+export function createBridge({ port = process.env.DROY_BRIDGE_PORT, token = process.env.DROY_BRIDGE_TOKEN, fetchImpl = fetch, getLocale = () => process.env.DROY_LOCALE } = {}) {
+  const ownMessage = text => translateBackendText(text, getLocale());
+  if (!/^\d+$/.test(String(port)) || Number(port) < 1 || Number(port) > 65535 || !token || token.length < 32) {
+    throw new Error(ownMessage('DroyAgent 原生桥配置无效'));
+  }
+  const post = async (path, body, signal) => {
+    const response = await fetchImpl(`http://127.0.0.1:${port}${path}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(body), signal: signal ?? AbortSignal.timeout(5000), redirect: 'error',
+    });
+    const envelope = await response.json();
+    if (!response.ok || envelope.ok !== true) {
+      const { code = 'BRIDGE_ERROR', message = ownMessage('原生桥请求失败'), ...details } = envelope.error ?? {};
+      throw new BridgeError(code, message, details);
+    }
+    return envelope.result;
+  };
+  const audioBytes = async (path, payload, signal) => {
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(new BridgeError('AUDIO_TRANSFER_TIMEOUT', ownMessage('音频接口未及时响应'))), 15000);
+    timer.unref?.();
+    let response;
+    try {
+      response = await fetchImpl(`http://127.0.0.1:${port}${path}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(payload), signal: signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal,
+        redirect: 'error',
+      });
+    } finally { clearTimeout(timer); }
+    if (!response.ok || response.headers.get('content-type')?.includes('application/json')) {
+      const envelope = await response.json();
+      const { code = 'AUDIO_TRANSFER_FAILED', message = ownMessage('音频读取失败'), ...details } = envelope.error ?? {};
+      throw new BridgeError(code, message, details);
+    }
+    return response;
+  };
+  return {
+    async call(action, args, exec) {
+      if (!exec.agent?.id || !exec.callId) throw new BridgeError('IDENTITY_REQUIRED', ownMessage('工具调用缺少引擎身份'));
+      const identity = { taskId: String(exec.agent.id), callId: String(exec.callId) };
+      const budgetMs = actionBudget(action, args);
+      const deadline = new AbortController();
+      // Native code owns the action budget; allow its final receipt to reach us.
+      const timer = setTimeout(() => deadline.abort(new BridgeError('action_timeout',
+        ownMessage('手机工具未在预算内返回；先核实当前状态，不重放动作'), { outcomeUnknown: true })), budgetMs + 1000);
+      timer.unref?.();
+      const signal = AbortSignal.any([exec.signal, deadline.signal]);
+      let cancellation;
+      const cancel = () => { cancellation ??= post('/cancel', identity); cancellation.catch(() => {}); };
+      signal.addEventListener('abort', cancel, { once: true });
+      try {
+        if (signal.aborted) cancel();
+        signal.throwIfAborted();
+        return await post('/tool', { action, args, budgetMs, ...identity }, signal);
+      } finally {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', cancel);
+        // Do not silently lose cancellation: native acknowledgement precedes quiescence.
+        if (cancellation) {
+          try { await cancellation; }
+          catch {
+            throw new BridgeError('cancellation_unconfirmed', ownMessage('手机尚未确认停止；恢复连接后先核实状态，不重放动作'),
+              { outcomeUnknown: true });
+          }
+        }
+      }
+    },
+    progress(payload) { return post('/progress', payload); },
+    setup(payload, signal) { return post('/setup', payload, signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000)); },
+    companion(signal) { return post('/companion', {}, signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : undefined); },
+    notifications(payload, signal) { return post('/notifications', payload, signal); },
+    memory(payload, signal) { return post('/memory', payload, signal ?? AbortSignal.timeout(45000)); },
+    history(payload, signal) { return post('/history', payload, signal ?? AbortSignal.timeout(15000)); },
+    voice(payload, signal) { return post('/voice', payload, signal ?? AbortSignal.timeout(15000)); },
+    notify(payload, signal) { return post('/notify', payload, signal); },
+    async audio(payload, caller) {
+      const signal = caller ? AbortSignal.any([caller, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000);
+      if (payload.operation !== 'transcribe') return post('/audio', payload, signal);
+      if (!payload.taskId || !payload.callId) throw new BridgeError('IDENTITY_REQUIRED', ownMessage('转写启动缺少可信调用身份'));
+      const identity = { taskId: String(payload.taskId), callId: String(payload.callId) };
+      let cancellation;
+      const cancel = () => { cancellation ??= post('/cancel', identity); cancellation.catch(() => {}); };
+      signal.addEventListener('abort', cancel, { once: true });
+      try {
+        if (signal.aborted) cancel();
+        signal.throwIfAborted();
+        return await post('/audio', payload, signal);
+      } finally {
+        signal.removeEventListener('abort', cancel);
+        if (cancellation) {
+          try { await cancellation; }
+          catch { throw new BridgeError('cancellation_unconfirmed', ownMessage('手机尚未确认停止音频转写；先核实当前作业'), { outcomeUnknown: true }); }
+        }
+      }
+    },
+    audioFile(payload, signal) { return audioBytes('/audio/file', payload, signal); },
+    audioFrames(payload, signal) { return audioBytes('/audio/frames', payload, signal); },
+    end(taskId) { return post('/task/end', { taskId: String(taskId) }); },
+  };
+}

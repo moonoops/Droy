@@ -1,0 +1,14 @@
+{
+  "license": "AGPL-3.0-only",
+  "name": "@droyagent/media-input",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./plugin.mjs", "./client": "./client.js", "./package.json": "./package.json" },
+  "dsh": {
+    "client": {
+      "inject": ["@droyagent/mobile", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-commands", "@deepseek-ai/dsh-client-ui-workspace"],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": { "@droyagent/mobile": "0.3.0" }
+}

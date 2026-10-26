@@ -1,0 +1,17 @@
+{
+  "license": "AGPL-3.0-only",
+  "name": "@droyagent/execution",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./dsh-plugin.mjs",
+    "./launcher": "./launcher.mjs",
+    "./fs-rpc": "./fs-rpc.mjs",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-subprocess-local": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-fs-sandbox": "0.2.1-rc.2"
+  }
+}

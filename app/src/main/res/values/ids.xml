@@ -1,0 +1,6 @@
+<resources>
+    <item name="test_input" type="id" />
+    <item name="test_confirm" type="id" />
+    <item name="test_result" type="id" />
+</resources>
+
