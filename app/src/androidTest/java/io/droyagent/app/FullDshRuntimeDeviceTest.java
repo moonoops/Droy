@@ -1,17 +1,23 @@
 package io.droyagent.app;
 
 import android.content.Context;
+import android.content.ContextWrapper;
+import android.content.SharedPreferences;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import io.droyagent.androiduse.ProcessMemoryTools;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
@@ -25,16 +31,22 @@ import static org.junit.Assert.*;
 /** Bundled tools and real DSH providers under the app UID, with a disposable home and no model calls. */
 @RunWith(AndroidJUnit4.class)
 public class FullDshRuntimeDeviceTest {
+    private static final String BRIDGE_TOKEN = "fictional-full-dsh-device-bridge-token";
     private Context context;
     private File runtime;
     private Path fixture;
     private Path temporary;
     private Process child;
+    private ProductBridge bridge;
+    private Field memorySingleton;
+    private Object previousMemoryTools;
+    private final Set<String> preferenceNames = ConcurrentHashMap.newKeySet();
 
     @Before public void setUp() throws Exception {
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         assertTrue("Stop the engine before installing or testing its runtime", RuntimeService.canManageHistory());
         assertFalse("The engine must be stopped", RuntimeService.ready);
+        assertFalse("Wait for active phone tasks to finish before testing the bridge", ToolProgress.current(context).getBoolean("active"));
         runtime = RuntimeInstaller.install(context);
         fixture = Files.createTempDirectory(context.getFilesDir().toPath(), "full-dsh-device-");
         temporary = Files.createTempDirectory(context.getCacheDir().toPath(), "full-dsh-device-");
@@ -45,13 +57,48 @@ public class FullDshRuntimeDeviceTest {
             assertTrue("Missing packaged executable: " + executable, Files.isRegularFile(target));
             Files.createSymbolicLink(fixture.resolve("bin").resolve(executable), target);
         }
+        File bridgeFiles = Files.createDirectory(fixture.resolve("bridge-files")).toFile();
+        File bridgeCache = Files.createDirectory(temporary.resolve("bridge-cache")).toFile();
+        String preferencePrefix = fixture.getFileName() + "-";
+        Context isolated = new ContextWrapper(context) {
+            @Override public Context getApplicationContext() { return this; }
+            @Override public File getFilesDir() { return bridgeFiles; }
+            @Override public File getCacheDir() { return bridgeCache; }
+            @Override public SharedPreferences getSharedPreferences(String name, int mode) {
+                String isolatedName = preferencePrefix + name;
+                preferenceNames.add(isolatedName);
+                return super.getSharedPreferences(isolatedName, mode);
+            }
+        };
+        assertTrue(ProductPermissions.preferences(isolated).edit()
+            .putString("petId", "default").putString("petName", "Full DSH fixture")
+            .putString("assistantName", "Full DSH fixture")
+            .putBoolean(ProductPermissions.DEFAULT_DENY, true)
+            .putBoolean(ProductPermissions.STOPPED, true).commit());
+        // The bridge creates a process-memory singleton even though this test only
+        // requests companion identity. Do not leave its disposable context installed.
+        memorySingleton = ProcessMemoryTools.class.getDeclaredField("instance");
+        memorySingleton.setAccessible(true);
+        previousMemoryTools = memorySingleton.get(null);
+        bridge = new ProductBridge(isolated, BRIDGE_TOKEN);
+        bridge.start(5000, false);
+        assertTrue("The companion bridge did not start", bridge.getListeningPort() > 0);
     }
 
     @After public void tearDown() throws Exception {
         try {
             stopChild();
         } finally {
-            try { deleteFixture(fixture); } finally { deleteFixture(temporary); }
+            try {
+                if (bridge != null) { bridge.policy.stop(); bridge.stop(); }
+            } finally {
+                try {
+                    if (memorySingleton != null) memorySingleton.set(null, previousMemoryTools);
+                    for (String name : preferenceNames) context.deleteSharedPreferences(name);
+                } finally {
+                    try { deleteFixture(fixture); } finally { deleteFixture(temporary); }
+                }
+            }
         }
     }
 
@@ -200,8 +247,8 @@ public class FullDshRuntimeDeviceTest {
         environment.put("DROY_BASH_PATH", fixture.resolve("bin/bash").toString());
         environment.put("DROY_RG_PATH", fixture.resolve("bin/rg").toString());
         environment.put("DROY_WEB_TOKEN", "fictional-device-web-token-1234567890");
-        environment.put("DROY_BRIDGE_TOKEN", "fictional-device-bridge-token-1234567890");
-        environment.put("DROY_BRIDGE_PORT", "1");
+        environment.put("DROY_BRIDGE_TOKEN", BRIDGE_TOKEN);
+        environment.put("DROY_BRIDGE_PORT", Integer.toString(bridge.getListeningPort()));
         environment.put("DSH_TELEMETRY_DISABLED", "1");
         environment.put("NO_COLOR", "1");
         environment.put("TERM", "dumb");
