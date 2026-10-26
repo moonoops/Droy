@@ -20,6 +20,14 @@ DSH plans tasks and calls models. Droy manages permissions, task state and data 
 
 ![Droy architecture](assets/droy-architecture.en.png)
 
+### Interface preview
+
+Captured on a Redmi K90 Ultra.
+
+| Start a conversation | Capabilities and permissions | Local speech |
+| :---: | :---: | :---: |
+| <img src="assets/screenshots/chat.en.png" width="260" alt="Droy English conversation home" /> | <img src="assets/screenshots/permissions.en.png" width="260" alt="Droy phone capability permissions" /> | <img src="assets/screenshots/voice.en.png" width="260" alt="Droy local speech and readout settings" /> |
+
 ## Capabilities
 
 | Capability | Description |
@@ -43,7 +51,6 @@ DSH plans tasks and calls models. Droy manages permissions, task state and data 
 - Your own compatible model configuration. Screenshot understanding requires image input.
 - Root is optional for conversations and basic phone interaction. Personal memory requires Root and execution-isolation qualification.
 
-
 For compatibility problems, an agent can help investigate, modify the source and verify a fix. Share reproduction steps in an [issue](https://github.com/moonoops/Droy/issues) or submit a [pull request](https://github.com/moonoops/Droy/pulls).
 
 ### Recommended: USB ADB installation with an agent
@@ -63,6 +70,11 @@ Prompt me for phone-side confirmations. I will enter my model API key on the pho
 4. Complete model setup and permission prompts on the phone, then check the results. You can disconnect USB after setup.
 
 The installer supports macOS, Linux and Windows with Python 3.8+ and ADB. See [installation details](INSTALLATION.md). You can also install the official APK directly and follow the phone setup guide.
+
+After setup, try:
+
+- "Open Calculator and calculate 128 × 24."
+- "Summarize the current page in three key points."
 
 ## Permissions and data
 
@@ -89,6 +101,7 @@ Third-party components retain their respective licenses. See [THIRD_PARTY_NOTICE
 
 ## 🤝 Community & Acknowledgements
 
+- **[DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness):** Droy is built on its agent engine. Thanks to the DeepSeek team and contributors for their open-source work.
 - **LINUX DO Community:** [linux.do](https://linux.do)
 
 ## Star history

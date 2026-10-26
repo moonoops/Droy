@@ -1,0 +1,230 @@
+{
+  "sherpa_version": "1.13.8",
+  "upstream_build": "https://github.com/k2-fsa/sherpa-onnx/tree/v1.13.8",
+  "build_recipe": "https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.8/build-android-arm64-v8a.sh",
+  "components": [
+    {
+      "name": "kaldi-native-fbank",
+      "version_or_revision": "1.22.3",
+      "license": "Apache-2.0",
+      "source_url": "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.22.3.tar.gz",
+      "source_archive_sha256": "9176cc66fc7ce1edf85cf355b06e320c57db6297df74277f575183468893cf61",
+      "role": "Linked into sherpa-onnx-core."
+    },
+    {
+      "name": "kaldi-decoder",
+      "version_or_revision": "0.3.0",
+      "license": "Apache-2.0",
+      "source_url": "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.3.0.tar.gz",
+      "source_archive_sha256": "b9f34cfb4fd3b1344100eead79ef4d37aa15962274b9e3056de345021f76a1b0",
+      "role": "Linked into sherpa-onnx-core."
+    },
+    {
+      "name": "simple-sentencepiece",
+      "version_or_revision": "0.7",
+      "license": "Apache-2.0; Darts-clone BSD-2-Clause",
+      "source_url": "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz",
+      "source_archive_sha256": "1748a822060a35baa9f6609f84efc8eb54dc0e74b9ece3d82367b7119fdc75af",
+      "role": "Linked into sherpa core; Android patches are in the fixed sherpa CMake recipe."
+    },
+    {
+      "name": "json",
+      "version_or_revision": "3.12.0",
+      "license": "MIT",
+      "source_url": "https://github.com/nlohmann/json/archive/refs/tags/v3.12.0.tar.gz",
+      "source_archive_sha256": "4b92eb0c06d10683f7447ce9406cb97cd4b453be18d7279320f7b2f025c10187",
+      "role": "nlohmann/json headers used by the sherpa core."
+    },
+    {
+      "name": "hclust-cpp",
+      "version_or_revision": "2026-02-25",
+      "license": "BSD-2-Clause",
+      "source_url": "https://github.com/csukuangfj/hclust-cpp/archive/refs/tags/2026-02-25.tar.gz",
+      "source_archive_sha256": "8f14e024c709d73afb40ae69cb22de4b73dba67cbce40f2e518813da8139ab56",
+      "role": "Header used by the speaker-diarization clustering code."
+    },
+    {
+      "name": "espeak-ng-for-piper",
+      "version_or_revision": "ed530aa113046142eb5115cf2fc9157854d0ffe1",
+      "license": "GPL-3.0-or-later; bundled Unicode and supplemental notices",
+      "source_url": "https://github.com/csukuangfj/espeak-ng/archive/ed530aa113046142eb5115cf2fc9157854d0ffe1.zip",
+      "source_archive_sha256": "e4e262cbe34f7fe21f91f1ba3397f2728e1f30eafbae7853f2b753a9ed13f0dd",
+      "role": "Statically linked through piper-phonemize; includes ucd-tools."
+    },
+    {
+      "name": "piper-phonemize",
+      "version_or_revision": "f3ff95afc03640bc1399e113e83361192a2fafb4",
+      "license": "MIT; uni-algo MIT/public-domain option",
+      "source_url": "https://github.com/csukuangfj/piper-phonemize/archive/f3ff95afc03640bc1399e113e83361192a2fafb4.zip",
+      "source_archive_sha256": "d9cca4e2bdc7d6dd8dffb96a4668283dbd3f77a9c194a3e530c1e8eba9406a5d",
+      "role": "Statically linked by the TTS-enabled sherpa core."
+    },
+    {
+      "name": "kissfft",
+      "version_or_revision": "febd4caeed32e33ad8b2e0bb5ea77542c40f18ec",
+      "license": "BSD-3-Clause",
+      "source_url": "https://github.com/mborgerding/kissfft/archive/febd4caeed32e33ad8b2e0bb5ea77542c40f18ec.zip",
+      "source_archive_sha256": "497103e664168ebe39580b757adbe616f6cf85a16572af581ca7bc42d0ab13fd",
+      "role": "Dependency of kaldi-native-fbank."
+    },
+    {
+      "name": "eigen",
+      "version_or_revision": "3.4.0",
+      "license": "MPL-2.0; supplemental BSD notice",
+      "source_url": "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz",
+      "source_archive_sha256": "8586084f71f9bde545ee7fa6d00288b264a2b7ac3607b974e54d13e7162c1c72",
+      "role": "Dense matrix headers used by kaldi-decoder and sherpa clustering."
+    },
+    {
+      "name": "kaldifst",
+      "version_or_revision": "1.8.0",
+      "license": "Apache-2.0",
+      "source_url": "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.8.0.tar.gz",
+      "source_archive_sha256": "3f247b7e5a2409071202f5e2bc6200060f66728c0a3443c03923ad2723e040b3",
+      "role": "Dependency of kaldi-decoder."
+    },
+    {
+      "name": "openfst",
+      "version_or_revision": "1.8.5-2026-04-10",
+      "license": "Apache-2.0",
+      "source_url": "https://github.com/csukuangfj/openfst/archive/refs/tags/v1.8.5-2026-04-10.tar.gz",
+      "source_archive_sha256": "c3549940384cbe4fa9f18c2bcfb1bfbd0a80492fd1b0bfa27433cee395a6a199",
+      "role": "fst and fstfar targets linked into sherpa-onnx-core."
+    }
+  ],
+  "legal_files": [
+    {
+      "component": "espeak-ng-for-piper",
+      "upstream_path": "COPYING",
+      "file": "espeak-ng-COPYING.txt",
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "component": "espeak-ng-for-piper",
+      "upstream_path": "COPYING.BSD2",
+      "file": "espeak-ng-COPYING.BSD2.txt",
+      "sha256": "a8b0c1c7d7af6c0415c068be8cf373799d1a42b0707b79dc4ccfcaf593cd902d"
+    },
+    {
+      "component": "espeak-ng-for-piper",
+      "upstream_path": "COPYING.UCD",
+      "file": "espeak-ng-COPYING.UCD.txt",
+      "sha256": "be029c50df83105a810e391778b6edcb522d6cb4b4e142332aca54437a499bf7"
+    },
+    {
+      "component": "espeak-ng-for-piper",
+      "upstream_path": "COPYING.APACHE",
+      "file": "espeak-ng-COPYING.APACHE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "component": "piper-phonemize",
+      "upstream_path": "LICENSE.md",
+      "file": "piper-phonemize-LICENSE.txt",
+      "sha256": "13746d509d74e55ea2265fbef204bb7cdbf84a8315b0207e988326cb54387028"
+    },
+    {
+      "component": "piper-phonemize",
+      "upstream_path": "licenses/uni-algo/LICENSE.md",
+      "file": "uni-algo-LICENSE.txt",
+      "sha256": "c55648b02873556d6ab2de14938998101fda3a0f293337542af9196435def318"
+    },
+    {
+      "component": "kaldi-native-fbank",
+      "upstream_path": "LICENSE",
+      "file": "kaldi-native-fbank-LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "component": "kaldi-decoder",
+      "upstream_path": "LICENSE",
+      "file": "kaldi-decoder-LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "component": "kaldifst",
+      "upstream_path": "LICENSE",
+      "file": "kaldifst-LICENSE.txt",
+      "sha256": "a682d6efd1ee5dee08a8e405c233c2c198ea70ae0718129daa83ab58cfe31c5d"
+    },
+    {
+      "component": "openfst",
+      "upstream_path": "COPYING",
+      "file": "openfst-COPYING.txt",
+      "sha256": "4300529197035fd3452350718a0b8cee984e9412c9932d7f35fcde849fc97a4b"
+    },
+    {
+      "component": "openfst",
+      "upstream_path": "AUTHORS",
+      "file": "openfst-AUTHORS.txt",
+      "sha256": "43f2391d54a1b711ead93f27e1cbca4d38bf66de9aff05b4e00d957e3acac09a"
+    },
+    {
+      "component": "simple-sentencepiece",
+      "upstream_path": "LICENSE",
+      "file": "simple-sentencepiece-LICENSE.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "component": "json",
+      "upstream_path": "LICENSE.MIT",
+      "file": "nlohmann-json-LICENSE.txt",
+      "sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603"
+    },
+    {
+      "component": "hclust-cpp",
+      "upstream_path": "LICENSE",
+      "file": "hclust-cpp-LICENSE.txt",
+      "sha256": "e361d842da1d290351860ad6dcce2673a1e42e4f873a3ae1ff4eb92c6adaa882"
+    },
+    {
+      "component": "eigen",
+      "upstream_path": "COPYING.MPL2",
+      "file": "eigen-COPYING.MPL2.txt",
+      "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"
+    },
+    {
+      "component": "eigen",
+      "upstream_path": "COPYING.BSD",
+      "file": "eigen-COPYING.BSD.txt",
+      "sha256": "51928dce36213c5333ba3172e847d735d4c6e9b7ff2722a326c49067155b82eb"
+    },
+    {
+      "component": "kissfft",
+      "upstream_path": "COPYING",
+      "file": "kissfft-COPYING.txt",
+      "sha256": "a2840585f8411be8e6826a31ef15ae65c950bd74a2437a73b013398a934ad0c6"
+    },
+    {
+      "component": "kissfft",
+      "upstream_path": "LICENSES/BSD-3-Clause",
+      "file": "kissfft-BSD-3-Clause.txt",
+      "sha256": "4d6bcab46f27d6d0c878e8305d4bdcfe040d52bf6656b9771f04c9fb9902c0ed"
+    },
+    {
+      "component": "espeak-ng-for-piper",
+      "upstream_path": "src/libespeak-ng/synthdata.c",
+      "extraction": "complete first legal comment block",
+      "file": "espeak-ng-NOTICE.txt",
+      "sha256": "e77cc799b02ddf9b3b6f034446a5b70b2974184e2e8ecdb045b46d54c0865838"
+    },
+    {
+      "component": "espeak-ng-for-piper",
+      "upstream_path": "src/ucd-tools/src/include/ucd/ucd.h",
+      "extraction": "complete first legal comment block",
+      "file": "ucd-tools-NOTICE.txt",
+      "sha256": "b986c3415aaa210ebe4c84476a817261514a7569486b8134afeaa1de67bb3a14"
+    },
+    {
+      "component": "simple-sentencepiece",
+      "upstream_path": "ssentencepiece/csrc/darts.h",
+      "extraction": "complete first legal comment block",
+      "file": "darts-clone-LICENSE.txt",
+      "sha256": "4e1570eca8424c9b6f5020a42688749de8b4b29b7109edf4e2490428ea8d0c7b"
+    }
+  ],
+  "apache_2_0_full_text": "../speech/sherpa-onnx-LICENSE.txt",
+  "corresponding_source": "https://github.com/moonoops/Droy/releases/tag/v0.0.1",
+  "source_attachment": "sherpa-source-materials-v0.0.1.tar.gz",
+  "license_boundary": "The sherpa source license is Apache-2.0. Its TTS-enabled Android native build also incorporates GPL-3.0-or-later eSpeak NG/ucd-tools. Those notices and corresponding-source obligations remain applicable; Droy code is separately AGPL-3.0-only."
+}

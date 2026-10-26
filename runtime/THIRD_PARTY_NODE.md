@@ -37,6 +37,9 @@ Binary distributors must also provide the matching source and build materials
 required by the applicable GPL, LGPL and MPL licenses; license texts alone do
 not replace those obligations.
 
+Matching source archives, patches and build recipes for this release accompany
+the APK in the [Termux source attachment](https://github.com/moonoops/Droy/releases/download/v0.0.1/termux-source-materials-v0.0.1.tar.gz).
+
 To prepare the locked payload from the repository root:
 
 ```sh

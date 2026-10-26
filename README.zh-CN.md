@@ -20,6 +20,14 @@ DSH 负责规划任务与调用模型；Droy 管理权限、任务状态和数�
 
 ![Droy 架构](assets/droy-architecture.zh-CN.png)
 
+### 界面预览
+
+Redmi K90 Ultra 上的真实界面。
+
+| 开始对话 | 能力与授权 | 本地语音 |
+| :---: | :---: | :---: |
+| <img src="assets/screenshots/chat.zh-CN.png" width="260" alt="Droy 中文对话首页" /> | <img src="assets/screenshots/permissions.zh-CN.png" width="260" alt="Droy 手机能力授权设置" /> | <img src="assets/screenshots/voice.zh-CN.png" width="260" alt="Droy 本地语音与朗读设置" /> |
+
 ## 主要能力
 
 | 能力 | 说明 |
@@ -43,7 +51,6 @@ DSH 负责规划任务与调用模型；Droy 管理权限、任务状态和数�
 - 自己的兼容模型配置；理解截图需要模型支持图像输入。
 - 普通对话和基础手机操作不强制要求 Root；个人记忆需要 Root 与执行隔离资格。
 
-
 遇到兼容性问题，可以让 Agent 协助定位、修改源码并验证，通过 [Issue](https://github.com/moonoops/Droy/issues) 提供复现信息，或提交 [Pull Request](https://github.com/moonoops/Droy/pulls) 分享修复。
 
 ### 推荐：通过 USB ADB 配合 Agent 安装
@@ -63,6 +70,11 @@ DSH 负责规划任务与调用模型；Droy 管理权限、任务状态和数�
 4. 在手机完成模型配置和权限确认，核对自检结果。配置完成后可断开 USB 使用。
 
 安装端支持 macOS、Linux 和 Windows，需要 Python 3.8+ 与 ADB。详细流程见[安装指南](INSTALLATION.md)。也可以直接安装官方 APK，并按手机引导配置。
+
+配置完成后，可以试试：
+
+- “打开计算器，计算 128 × 24。”
+- “总结当前页面，列出三个要点。”
 
 ## 权限与数据
 
@@ -89,6 +101,7 @@ Droy 自有代码采用 **GNU AGPL v3.0 only**（[LICENSE](LICENSE)）。可以�
 
 ## 🤝 社区与致谢
 
+- **[DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness)：** Droy 基于其 Agent 引擎构建，感谢 DeepSeek 团队与贡献者的开源工作。
 - **LINUX DO 社区：** [linux.do](https://linux.do)
 
 ## Star 趋势
