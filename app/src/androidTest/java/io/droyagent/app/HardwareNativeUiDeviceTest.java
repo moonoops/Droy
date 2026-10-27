@@ -54,6 +54,8 @@ public class HardwareNativeUiDeviceTest {
     private SharedPreferences preferences;
     private Activity activity;
     private DeviceUi touch;
+    private boolean rotationOwned;
+    private Boolean landscape;
 
     @Before public void setUp() {
         instrumentation = InstrumentationRegistry.getInstrumentation(); context = instrumentation.getTargetContext();
@@ -72,6 +74,13 @@ public class HardwareNativeUiDeviceTest {
             .putBoolean("allowDeviceDataRead", true).putBoolean("allowDeviceDataWrite", true)
             .putString("themeColorScheme", colorScheme).commit());
         touch = new DeviceUi(instrumentation, null);
+        String orientation = InstrumentationRegistry.getArguments().getString("hardwareUiLandscape");
+        if (orientation != null) {
+            assertTrue("Unsupported native hardware orientation", orientation.equals("true") || orientation.equals("false"));
+            landscape = Boolean.valueOf(orientation);
+            assertTrue(touch.automation().setRotation(landscape ? UiAutomation.ROTATION_FREEZE_90 : UiAutomation.ROTATION_FREEZE_0));
+            rotationOwned = true;
+        }
     }
 
     @After public void tearDown() throws Exception {
@@ -93,6 +102,7 @@ public class HardwareNativeUiDeviceTest {
             else restore.putString(key, (String) value);
         }
         assertTrue(restore.commit());
+        if (rotationOwned) assertTrue(touch.automation().setRotation(UiAutomation.ROTATION_UNFREEZE));
     }
 
     @Test public void nfcCredentialInputSaveAndBackWorkInBothLanguagesWithSecureWindow() throws Exception {
@@ -187,6 +197,11 @@ public class HardwareNativeUiDeviceTest {
         DeviceUi.await("The native page did not receive layout and window focus", 5000, () -> {
             AtomicReference<Boolean> ready = new AtomicReference<>(false);
             onMain(() -> ready.set(activity.hasWindowFocus() && activity.getWindow().getDecorView().getWidth() > 0)); return ready.get();
+        });
+        if (android.os.Build.VERSION.SDK_INT == 30 && NfcUi.dark(activity)) onMain(() -> {
+            int lightFlags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            assertEquals("API 30 dark pages must clear legacy light-system-bar flags", 0,
+                activity.getWindow().getDecorView().getSystemUiVisibility() & lightFlags);
         });
     }
     private void finish() {
@@ -305,6 +320,8 @@ public class HardwareNativeUiDeviceTest {
         assertTrue("The native evidence frame did not commit", committed.await(5, TimeUnit.SECONDS));
         Bitmap screenshot = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES).takeScreenshot();
         assertNotNull("Android did not provide a public native-page screenshot", screenshot);
+        if (landscape != null) assertEquals("Native evidence orientation differs from the requested fixture", landscape,
+            Boolean.valueOf(screenshot.getWidth() > screenshot.getHeight()));
         File directory = new File(context.getExternalFilesDir(null), "hardware-native-ui-evidence");
         assertTrue(directory.isDirectory() || directory.mkdirs());
         try (FileOutputStream output = new FileOutputStream(new File(directory, name))) { assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, output)); }

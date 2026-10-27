@@ -32,10 +32,11 @@ final class NfcUi {
         scroll.setOnApplyWindowInsetsListener((v, insets) -> {
             android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
             scroll.setPadding(bars.left,bars.top,bars.right,bars.bottom);
-            int lightBars = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
-            android.view.WindowInsetsController controls = v.getWindowInsetsController();
-            if (controls != null) controls.setSystemBarsAppearance(dark(activity) ? 0 : lightBars, lightBars);
+            // API 30 also retains legacy light-bar flags from the window theme.
+            androidx.core.view.WindowInsetsControllerCompat controls = androidx.core.view.WindowCompat
+                .getInsetsController(activity.getWindow(), v);
+            controls.setAppearanceLightStatusBars(!dark(activity));
+            controls.setAppearanceLightNavigationBars(!dark(activity));
             return insets;
         });
         activity.setContentView(scroll);

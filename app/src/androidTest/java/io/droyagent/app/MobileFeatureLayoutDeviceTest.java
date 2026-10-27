@@ -171,6 +171,8 @@ public final class MobileFeatureLayoutDeviceTest {
             () -> ui.truth("!![...document.querySelectorAll('[role=dialog]')].find(e=>e.querySelector('input[aria-label=\"包名或地址\"],input[aria-label=\"Package name or address\"]'))"));
         ui.evaluate("(()=>{const e=[...document.querySelectorAll('[role=dialog]')].find(e=>e.querySelector('input[aria-label=\"包名或地址\"],input[aria-label=\"Package name or address\"]'));e.setAttribute('data-layout-modal','')})()");
         ui.hideKeyboard();
+        ui.evaluate("document.querySelectorAll('[data-layout-last]').forEach(e=>e.removeAttribute('data-layout-last'));document.querySelector('[data-layout-modal] h2').setAttribute('data-layout-last','')");
+        reachLastControlByTouch();
         capture("plugin-install");
         assertReadable("[data-layout-modal] h2", false);
         assertNoHorizontalOverflow("[data-layout-modal]", "plugin install dialog");
@@ -922,9 +924,14 @@ public final class MobileFeatureLayoutDeviceTest {
         assertTrue("The WebView did not publish its current visual state", painted.await(5, TimeUnit.SECONDS));
         instrumentation.waitForIdleSync();
         SystemClock.sleep(100);
-        Bitmap bitmap = instrumentation.getUiAutomation().takeScreenshot();
+        String landscape = InstrumentationRegistry.getArguments().getString("layoutLandscape");
+        if (landscape != null) assertTrue("The screenshot viewport left the requested orientation: " + stage,
+            ui.truth(landscape.equals("true") ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+        Bitmap bitmap = ui.automation().takeScreenshot();
         assertNotNull("Android did not capture the synthetic fixture screen", bitmap);
         try (FileOutputStream output = new FileOutputStream(new File(directory, stage + ".png"))) {
+            if (landscape != null) assertTrue("The screenshot bitmap left the requested orientation: " + stage,
+                landscape.equals("true") ? bitmap.getWidth() > bitmap.getHeight() : bitmap.getHeight() > bitmap.getWidth());
             assertTrue("Could not encode the synthetic fixture screenshot", bitmap.compress(Bitmap.CompressFormat.PNG, 100, output));
         } finally { bitmap.recycle(); }
     }
