@@ -107,6 +107,27 @@ html[data-droy-mobile] [data-droy-sidebar] .hHd-Xa_root {
   padding-bottom: calc(var(--droy-content-bottom) + 6px);
   padding-left: calc(var(--droy-safe-left, 0px) + 12px);
 }
+/* Fixed drawer sections can consume the entire short viewport. Keep sessions
+   and the footer reachable through one scroller when that happens. */
+@media (max-height: 480px) {
+  html[data-droy-mobile] [data-droy-sidebar] .hHd-Xa_root {
+    margin-top: var(--droy-safe-top, 0px);
+    height: calc(100% - var(--droy-safe-top, 0px) - var(--droy-content-bottom));
+    padding-top: 6px;
+    padding-bottom: 6px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  html[data-droy-mobile] [data-droy-sidebar] .hHd-Xa_regionArea,
+  html[data-droy-mobile] [data-droy-sidebar] .bhn1Oq_root,
+  html[data-droy-mobile] [data-droy-sidebar] .bhn1Oq_listArea,
+  html[data-droy-mobile] [data-droy-sidebar] .bhn1Oq_treeBody,
+  html[data-droy-mobile] [data-droy-sidebar] .bhn1Oq_list {
+    flex: none;
+    height: auto;
+    overflow: visible;
+  }
+}
 [data-droy-frame][data-droy-drawer-open] [data-droy-sidebar] {
   visibility: visible;
   transform: translateX(0);
@@ -597,6 +618,11 @@ html[data-droy-mobile] .qSYn7G_switcherLabel {
   overflow-wrap: anywhere;
   text-overflow: clip;
 }
+html[data-droy-mobile] .droy-button:is([data-droy-permission="file"], [data-droy-permission="directory"]) {
+  min-height: 48px;
+  height: auto;
+  white-space: normal;
+}
 
 /* Preset names identify the mode being selected, so keep long built-in and
    user names readable on narrow screens instead of ellipsizing the choice. */
@@ -607,9 +633,51 @@ html[data-droy-mobile] .rtSEdW_cardName {
   white-space: normal;
   overflow: visible;
   overflow-wrap: anywhere;
+  flex: 1 0 100%;
 }
+html[data-droy-mobile] .rtSEdW_cardHead { flex-wrap: wrap; gap: 8px; }
+html[data-droy-mobile] .rtSEdW_cardIdentity { flex: 1 1 160px; flex-wrap: wrap; }
 html[data-droy-mobile] .rtSEdW_iconButton::after {
   left: auto;
   right: 0;
   transform: none;
+}
+html[data-droy-mobile] .rtSEdW_creatorButton {
+  min-width: 0;
+  min-height: 48px;
+  height: auto;
+  padding: 8px 12px;
+  white-space: normal;
+}
+html[data-droy-mobile] .LSQftG_guideTabs > [role="tab"] {
+  min-width: 0;
+  min-height: 48px;
+  height: auto;
+  padding: 6px 8px;
+  white-space: normal;
+}
+@media (max-height: 480px) {
+  html[data-droy-mobile] .LSQftG_guideDialog { overflow-y: auto; overscroll-behavior: contain; }
+  html[data-droy-mobile] .LSQftG_guideLayout { height: auto; min-height: 100%; }
+  html[data-droy-mobile] .LSQftG_guidePanel { flex: none; overflow-y: visible; }
+}
+html[data-droy-mobile] .rtSEdW_dialog {
+  max-height: calc(100dvh - var(--droy-safe-top, 0px) - var(--droy-safe-bottom, 0px) - 16px);
+  min-height: 0;
+}
+html[data-droy-mobile] .rtSEdW_dialog > ._content_o6lrb_63 {
+  flex: 1;
+  min-height: 0;
+}
+html[data-droy-mobile] .rtSEdW_dialog ._header_o6lrb_71,
+html[data-droy-mobile] .rtSEdW_dialog > ._footer_o6lrb_123 { flex: none; }
+html[data-droy-mobile] .rtSEdW_dialog ._body_o6lrb_115 {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+html[data-droy-mobile] .rtSEdW_dialog .rtSEdW_viewerCode {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
 }

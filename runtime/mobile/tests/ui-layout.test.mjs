@@ -767,7 +767,8 @@ test('scrolling composer command menu uses the actual available chat viewport', 
   assert.ok(shifted.top >= 90 && shifted.top + shifted.maxHeight <= 290);
 });
 
-function triggerMenuFixture(source, { mobile = true, usage = true, overflowing = true } = {}) {
+function triggerMenuFixture(source, { mobile = true, usage = true, overflowing = true,
+  viewportHeight = 686, cardTop = 128.75, scrollTop = 120.75, scrollBottom = 403.05 } = {}) {
   const patched = patchInputTrigger(source);
   const code = patched.slice(patched.indexOf('function MenuView('), patched.indexOf('\n\t\t//#endregion', patched.indexOf('function MenuView(')));
   const jsx = (type, props) => ({ type, props });
@@ -776,23 +777,23 @@ function triggerMenuFixture(source, { mobile = true, usage = true, overflowing =
   const composerButton = new Node(), menuItem = new Node(), outside = new Node();
   card.contains = target => target === composerButton;
   card.closest = selector => selector === '[data-composer-seat]' ? seat : null;
-  card.getBoundingClientRect = () => ({ left: 24, top: 128.75, width: 265.05 });
+  card.getBoundingClientRect = () => ({ left: 24, top: cardTop, width: 265.05 });
   anchor.closest = selector => selector === '[data-composer-card]' ? card : null;
   seat.querySelector = () => usage ? {} : null;
   seat.scrollHeight = overflowing ? 374 : 282; seat.clientHeight = 282;
   seat.closest = () => scroll;
-  let bottom = 403.05;
-  scroll.getBoundingClientRect = () => ({ left: 0, top: 120.75, right: 318, bottom, width: 318, height: bottom - 120.75 });
+  let bottom = scrollBottom;
+  scroll.getBoundingClientRect = () => ({ left: 0, top: scrollTop, right: 318, bottom, width: 318, height: bottom - scrollTop });
   menuNode.contains = target => target === menuItem;
   const view = { scrollTop: 0, clientHeight: 200, scrollHeight: 700 };
   const listeners = new Map(), windowListeners = new Map(), observers = [];
   const document = { body: {}, documentElement: { hasAttribute: () => mobile }, getElementById: () => null,
     addEventListener: (name, listener) => listeners.set(name, listener),
     removeEventListener: (name, listener) => { if (listeners.get(name) === listener) listeners.delete(name); } };
-  const window = { innerWidth: 320, innerHeight: 686,
+  const window = { innerWidth: 320, innerHeight: viewportHeight,
     addEventListener: (name, listener) => windowListeners.set(name, listener),
     removeEventListener: (name, listener) => { if (windowListeners.get(name) === listener) windowListeners.delete(name); },
-    visualViewport: { offsetLeft: 0, offsetTop: 0, width: 320, height: 686,
+    visualViewport: { offsetLeft: 0, offsetTop: 0, width: 320, height: viewportHeight,
       addEventListener() {}, removeEventListener() {} } };
   class ResizeObserver {
     constructor(callback) { this.callback = callback; observers.push(this); }
@@ -821,7 +822,7 @@ function triggerMenuFixture(source, { mobile = true, usage = true, overflowing =
     close() { for (const dispose of disposers) dispose?.(); }, get dismissals() { return dismissals; } };
 }
 
-test('only an overflowing mobile composer with totals portals the existing menu and preserves inside/outside picks', async () => {
+test('normal-height mobile menu portals only overflowing composers with totals and preserves inside/outside picks', async () => {
   const source = await readFile(new URL('dsh-client-ui-input-trigger/lib/client.js', packageRoot), 'utf8');
   for (const options of [{ mobile: false }, { usage: false }, { overflowing: false }, {}]) {
     const f = triggerMenuFixture(source, options);
@@ -849,6 +850,32 @@ test('only an overflowing mobile composer with totals portals the existing menu 
     assert.ok(f.observers.every(observer => observer.disconnected));
   }
   assert.throws(() => patchInputTrigger(patchInputTrigger(source)), /already adapted/);
+});
+
+
+test('short mobile hero uses the chat viewport for its complete command menu without totals', async () => {
+  const source = await readFile(new URL('dsh-client-ui-input-trigger/lib/client.js', packageRoot), 'utf8');
+  for (const mobile of [false, true]) {
+    const f = triggerMenuFixture(source, { mobile, usage: false, overflowing: false,
+      viewportHeight: 320, cardTop: 147, scrollTop: 64, scrollBottom: 296 });
+    f.render(); const tree = f.render();
+    const surface = nodes(tree).find(node => node.type === 'surface');
+    assert.equal(f.portalCalls.length > 0, mobile);
+    if (mobile) {
+      assert.equal(f.portalCalls.at(-1).host, f.document.body);
+      assert.equal(surface.props.style.top, 68);
+      assert.equal(surface.props.style.maxHeight, 224, 'the menu must use the 232px chat viewport instead of a 27px anchored list');
+      f.pointerDown(f.composerButton); f.pointerDown(f.menuItem);
+      assert.equal(f.dismissals, 0);
+      const item = nodes(surface).find(node => node.props?.role === 'option');
+      item.props.onMouseDown({ preventDefault() {} });
+      assert.deepEqual(f.picks, [['command', 0]]);
+      f.pointerDown(f.outside); assert.equal(f.dismissals, 1);
+      f.dismissMenu(); assert.equal(f.render(), null);
+    }
+    f.close(); assert.equal(f.windowListeners.size, 0);
+    assert.ok(f.observers.every(observer => observer.disconnected));
+  }
 });
 
 

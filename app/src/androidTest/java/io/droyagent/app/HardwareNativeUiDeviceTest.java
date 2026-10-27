@@ -57,7 +57,7 @@ public class HardwareNativeUiDeviceTest {
     private boolean rotationOwned;
     private Boolean landscape;
 
-    @Before public void setUp() {
+    @Before public void setUp() throws Exception {
         instrumentation = InstrumentationRegistry.getInstrumentation(); context = instrumentation.getTargetContext();
         instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
         assertFalse("Run this native UI batch after stopping the engine", RuntimeService.ready);
@@ -78,8 +78,6 @@ public class HardwareNativeUiDeviceTest {
         if (orientation != null) {
             assertTrue("Unsupported native hardware orientation", orientation.equals("true") || orientation.equals("false"));
             landscape = Boolean.valueOf(orientation);
-            assertTrue(touch.automation().setRotation(landscape ? UiAutomation.ROTATION_FREEZE_90 : UiAutomation.ROTATION_FREEZE_0));
-            rotationOwned = true;
         }
     }
 
@@ -194,9 +192,30 @@ public class HardwareNativeUiDeviceTest {
     private void launch(Class<? extends Activity> type, Intent intent) throws Exception {
         finish(); activity = instrumentation.startActivitySync(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         assertEquals(type, activity.getClass()); instrumentation.waitForIdleSync();
+        if (landscape != null) {
+            assertTrue(touch.automation().setRotation(landscape ? UiAutomation.ROTATION_FREEZE_90 : UiAutomation.ROTATION_FREEZE_0));
+            rotationOwned = true;
+        }
+        // Rotation recreates these native activities; follow the resumed instance.
+        Activity[] resumed = {null}; long[] resumedSince = {0};
         DeviceUi.await("The native page did not receive layout and window focus", 5000, () -> {
             AtomicReference<Boolean> ready = new AtomicReference<>(false);
-            onMain(() -> ready.set(activity.hasWindowFocus() && activity.getWindow().getDecorView().getWidth() > 0)); return ready.get();
+            onMain(() -> {
+                boolean found = false;
+                for (Activity candidate : androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                        .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED)) {
+                    if (candidate.getClass() != type || candidate.isDestroyed() || candidate.isFinishing()) continue;
+                    boolean oriented = landscape == null || candidate.getResources().getConfiguration().orientation == (landscape
+                        ? android.content.res.Configuration.ORIENTATION_LANDSCAPE : android.content.res.Configuration.ORIENTATION_PORTRAIT);
+                    if (oriented && candidate.hasWindowFocus() && candidate.getWindow().getDecorView().getWidth() > 0) {
+                        found = true;
+                        if (candidate != resumed[0]) { resumed[0] = candidate; resumedSince[0] = SystemClock.elapsedRealtime(); }
+                        if (SystemClock.elapsedRealtime() - resumedSince[0] >= 200) { activity = candidate; ready.set(true); }
+                        break;
+                    }
+                }
+                if (!found) resumed[0] = null;
+            }); return ready.get();
         });
         if (android.os.Build.VERSION.SDK_INT == 30 && NfcUi.dark(activity)) onMain(() -> {
             int lightFlags = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
@@ -224,6 +243,7 @@ public class HardwareNativeUiDeviceTest {
     private List<View> views() { List<View> result = new ArrayList<>(); collect(activity.getWindow().getDecorView(), result); return result; }
     private void collect(View view, List<View> output) { output.add(view); if (view instanceof ViewGroup) for (int i = 0; i < ((ViewGroup) view).getChildCount(); i++) collect(((ViewGroup) view).getChildAt(i), output); }
     private void input(EditText field, String value) throws Exception {
+        hideKeyboard();
         tap(field);
         DeviceUi.await("Touch did not focus the native input", 5000, () -> {
             AtomicReference<Boolean> focused = new AtomicReference<>(false); onMain(() -> focused.set(field.hasFocus())); return focused.get();
@@ -248,13 +268,69 @@ public class HardwareNativeUiDeviceTest {
             + ", actual length=" + field.length() + ", inputType=" + field.getInputType(), value.contentEquals(field.getText())));
     }
     private void reveal(View view) throws Exception {
-        onMain(() -> view.requestRectangleOnScreen(new Rect(0, 0, view.getWidth(), view.getHeight()), true));
-        instrumentation.waitForIdleSync();
-        DeviceUi.await("Native target is clipped or outside the visible viewport", 5000, () -> {
-            AtomicReference<Boolean> visible = new AtomicReference<>(false); onMain(() -> {
-                Rect rect = new Rect(); visible.set(view.isShown() && view.getGlobalVisibleRect(rect) && rect.width() >= view.getWidth() - 1 && rect.height() >= view.getHeight() - 1);
-            }); return visible.get();
+        String[] previous = {null}; long[] unchangedSince = {0};
+        // Let IME-driven viewport reflow finish before scrolling by touch.
+        DeviceUi.await("Native layout did not settle before scrolling", 5000, () -> {
+            String current = nativeGeometry(view);
+            if (!current.equals(previous[0])) { previous[0] = current; unchangedSince[0] = SystemClock.elapsedRealtime(); }
+            return SystemClock.elapsedRealtime() - unchangedSince[0] >= 200;
         });
+        for (int step = 0; step < 8; step++) {
+            AtomicReference<Boolean> complete = new AtomicReference<>(false);
+            AtomicReference<float[]> gesture = new AtomicReference<>();
+            onMain(() -> {
+                Rect visible = new Rect();
+                if (view.isShown() && view.getGlobalVisibleRect(visible) && visible.width() >= view.getWidth() - 1
+                        && visible.height() >= view.getHeight() - 1) { complete.set(true); return; }
+                android.widget.ScrollView scroll = null;
+                for (android.view.ViewParent parent = view.getParent(); parent instanceof View; parent = parent.getParent())
+                    if (parent instanceof android.widget.ScrollView found) { scroll = found; break; }
+                if (scroll == null) return;
+                Rect viewport = new Rect(); if (!scroll.getGlobalVisibleRect(viewport)) return;
+                viewport.left += scroll.getPaddingLeft(); viewport.right -= scroll.getPaddingRight();
+                viewport.top += scroll.getPaddingTop(); viewport.bottom -= scroll.getPaddingBottom();
+                if (viewport.height() <= 0 || view.getHeight() > viewport.height() + 1) return;
+                int[] position = new int[2]; view.getLocationOnScreen(position);
+                int bottom = position[1] + view.getHeight();
+                int delta = position[1] < viewport.top ? position[1] - viewport.top : bottom > viewport.bottom ? bottom - viewport.bottom : 0;
+                if (delta == 0) return;
+                float available = viewport.height(), start = delta > 0 ? viewport.bottom - available * .2f : viewport.top + available * .2f;
+                float distance = Math.min(available * .6f, Math.abs(delta) + android.view.ViewConfiguration.get(context).getScaledTouchSlop() + 8);
+                float x = viewport.left + Math.min(12 * context.getResources().getDisplayMetrics().density, viewport.width() * .1f);
+                gesture.set(new float[]{x, start, x, start + (delta > 0 ? -distance : distance)});
+            });
+            if (complete.get() || gesture.get() == null) break;
+            float[] swipe = gesture.get(); touch.swipe(swipe[0], swipe[1], swipe[2], swipe[3], 300);
+            instrumentation.waitForIdleSync();
+        }
+        try {
+            DeviceUi.await("Native target is clipped or outside the visible viewport", 5000, () -> {
+                AtomicReference<Boolean> visible = new AtomicReference<>(false); onMain(() -> {
+                    Rect rect = new Rect(); visible.set(view.isShown() && view.getGlobalVisibleRect(rect) && rect.width() >= view.getWidth() - 1 && rect.height() >= view.getHeight() - 1);
+                }); return visible.get();
+            });
+        } catch (AssertionError failure) {
+            throw new AssertionError(failure.getMessage() + ": " + nativeGeometry(view), failure);
+        }
+    }
+    private String nativeGeometry(View view) {
+        AtomicReference<String> geometry = new AtomicReference<>();
+        onMain(() -> {
+            Rect rect = new Rect(); view.getGlobalVisibleRect(rect);
+            View root = activity.getWindow().getDecorView();
+            android.view.WindowInsets insets = root.getRootWindowInsets();
+            StringBuilder detail = new StringBuilder("target=").append(view.getWidth()).append('x').append(view.getHeight())
+                .append(" visible=").append(rect).append(" root=").append(root.getWidth()).append('x').append(root.getHeight())
+                .append(" destroyed=").append(activity.isDestroyed()).append(" ime=")
+                .append(insets == null ? "unknown" : insets.getInsets(android.view.WindowInsets.Type.ime()));
+            for (android.view.ViewParent parent = view.getParent(); parent instanceof View; parent = parent.getParent())
+                if (parent instanceof android.widget.ScrollView scroll) detail.append(" scrollHeight=").append(scroll.getHeight())
+                    .append(" paddingTop=").append(scroll.getPaddingTop()).append(" paddingBottom=").append(scroll.getPaddingBottom())
+                    .append(" scrollY=").append(scroll.getScrollY()).append(" childHeight=")
+                    .append(scroll.getChildCount() == 0 ? 0 : scroll.getChildAt(0).getHeight());
+            geometry.set(detail.toString());
+        });
+        return geometry.get();
     }
     private void tap(View view) throws Exception {
         reveal(view); Rect rect = new Rect(); long[] unchangedSince = {0};

@@ -998,9 +998,10 @@ public final class MainActivity extends Activity {
         // Theme is also applied before setContentView; create the DecorView
         // before asking for its controller on Android's first Activity launch.
         window.getDecorView().setBackgroundColor(background);
-        WindowInsetsController controller = window.getDecorView().getWindowInsetsController();
-        if (controller != null) controller.setSystemBarsAppearance(dark ? 0 : WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+        androidx.core.view.WindowInsetsControllerCompat controller = androidx.core.view.WindowCompat
+            .getInsetsController(window, window.getDecorView());
+        controller.setAppearanceLightStatusBars(!dark);
+        controller.setAppearanceLightNavigationBars(!dark);
     }
 
     private void applyNativeForeground(View view) {

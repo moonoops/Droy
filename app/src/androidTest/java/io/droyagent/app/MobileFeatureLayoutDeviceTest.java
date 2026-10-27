@@ -63,6 +63,11 @@ public final class MobileFeatureLayoutDeviceTest {
     private boolean rotationOwned;
     private static final String OPTIONS = "[data-droy-settings-options]";
     private static final String TABS = "[data-droy-settings-tabs]";
+    // Paragraph line leading may sit outside a scrollport while every glyph fits.
+    // Interactive controls still require their complete target boxes.
+    private static final String LAST_CONTROL_RECT = "(()=>{const e=document.querySelector('[data-layout-last]');"
+        + "if(e.hasAttribute('data-layout-last-text')){const range=document.createRange();range.selectNodeContents(e);const rect=range.getBoundingClientRect();if(rect.width>0&&rect.height>0)return rect;}"
+        + "return e.getBoundingClientRect()})()";
 
     @Before public void setUp() throws Exception {
         instrumentation = InstrumentationRegistry.getInstrumentation();
@@ -88,16 +93,16 @@ public final class MobileFeatureLayoutDeviceTest {
         if (hadOriginalHome) assertTrue("Could not preserve the original DSH home", isolatedHome.renameTo(preservedHome));
         homeOwned = true;
         assertTrue("Could not create the isolated layout home", isolatedHome.mkdirs());
-        seedFutureAutomation();
-        SharedPreferences installation = context.getSharedPreferences("installation", Context.MODE_PRIVATE);
-        originalSetupCompleted = installation.contains("completed") ? installation.getBoolean("completed", false) : null;
-        assertTrue(installation.edit().putBoolean("completed", true).commit());
-        setupCompletionOwned = true;
         String locale = InstrumentationRegistry.getArguments().getString("layoutLocale");
         if (locale != null) {
             assertTrue("Unsupported layout locale", locale.equals("zh") || locale.equals("en"));
             assertTrue(preferences.edit().putString("languagePreference", locale).commit());
         }
+        seedFutureAutomation();
+        SharedPreferences installation = context.getSharedPreferences("installation", Context.MODE_PRIVATE);
+        originalSetupCompleted = installation.contains("completed") ? installation.getBoolean("completed", false) : null;
+        assertTrue(installation.edit().putBoolean("completed", true).commit());
+        setupCompletionOwned = true;
         activity = (MainActivity) instrumentation.startActivitySync(new Intent(context, MainActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         ui = new DeviceUi(instrumentation, activity);
@@ -171,8 +176,7 @@ public final class MobileFeatureLayoutDeviceTest {
             () -> ui.truth("!![...document.querySelectorAll('[role=dialog]')].find(e=>e.querySelector('input[aria-label=\"包名或地址\"],input[aria-label=\"Package name or address\"]'))"));
         ui.evaluate("(()=>{const e=[...document.querySelectorAll('[role=dialog]')].find(e=>e.querySelector('input[aria-label=\"包名或地址\"],input[aria-label=\"Package name or address\"]'));e.setAttribute('data-layout-modal','')})()");
         ui.hideKeyboard();
-        ui.evaluate("document.querySelectorAll('[data-layout-last]').forEach(e=>e.removeAttribute('data-layout-last'));document.querySelector('[data-layout-modal] h2').setAttribute('data-layout-last','')");
-        reachLastControlByTouch();
+        reachElementByTouch("[data-layout-modal] h2");
         capture("plugin-install");
         assertReadable("[data-layout-modal] h2", false);
         assertNoHorizontalOverflow("[data-layout-modal]", "plugin install dialog");
@@ -192,6 +196,7 @@ public final class MobileFeatureLayoutDeviceTest {
         returnFromPanel("[data-testid=task-manager-page]");
 
         openDrawer();
+        reachElementByTouch("[data-droy-sidebar] [data-droy-settings-launcher]");
         SettingsEntryDeviceUi.openFromDrawer(ui);
         DeviceUi.await("The settings page did not open", 5000,
             () -> ui.truth("!!document.querySelector('[data-droy-settings-panel]')"));
@@ -223,6 +228,12 @@ public final class MobileFeatureLayoutDeviceTest {
             assertNestedTabs(section);
             assertLastControlReachable(OPTIONS, "settings/" + section);
             if (section.equals("plugins")) assertPluginPresetSwitcher();
+            if (section.equals("droy-permissions")) for (String permission : new String[]{"file", "directory"}) {
+                String choice = ".droy-button[data-droy-permission=" + permission + "]";
+                ui.visibleWebBounds(choice);
+                assertReadable(choice, false);
+                capture("permissions-" + permission + "-choice");
+            }
             if (section.equals("models")) assertModelAddForm();
             if (section.equals("agent-presets")) assertPresetNamesAndGuide();
         }
@@ -237,6 +248,7 @@ public final class MobileFeatureLayoutDeviceTest {
 
     @Test public void builtInPluginDetailsExpandAndRemainReadable() throws Exception {
         openDrawer();
+        reachElementByTouch("[data-droy-sidebar] [data-droy-settings-launcher]");
         SettingsEntryDeviceUi.openFromDrawer(ui);
         DeviceUi.await("The settings page did not open", 5000,
             () -> ui.truth("!!document.querySelector('[data-droy-settings-panel]')"));
@@ -282,14 +294,15 @@ public final class MobileFeatureLayoutDeviceTest {
     @Test public void defaultSpaceAndTwoBuiltInModesRemainUsableAfterRenameAndRestart() throws Exception {
         openDrawer();
         String workspace = "[data-droy-sidebar] [data-row-key^='workspace:']";
+        String defaultSpace = ui.truth("document.documentElement.lang.startsWith('zh')") ? "默认空间" : "Default space";
         assertTrue("A new profile must display the default space name",
-            ui.truth("document.querySelector(" + JSONObject.quote(workspace) + ")?.textContent.includes('默认空间')"));
+            ui.truth("document.querySelector(" + JSONObject.quote(workspace) + ")?.textContent.includes(" + JSONObject.quote(defaultSpace) + ")"));
         capture("default-space-sidebar");
         markButton("[data-droy-sidebar]", "新会话", "New Session");
         ui.tap("[data-layout-action]");
         ui.awaitPage();
         DeviceUi.await("The new conversation must show the default space", 10000,
-            () -> ui.truth("document.querySelector('[data-content-phase=hero] [data-droy-workspace-chip]')?.textContent.trim()==='默认空间'"));
+            () -> ui.truth("document.querySelector('[data-content-phase=hero] [data-droy-workspace-chip]')?.textContent.trim()===" + JSONObject.quote(defaultSpace)));
         assertReadable("[data-content-phase=hero] [data-droy-workspace-chip]", false);
         markPresetChip();
         assertTrue("New conversations must start with Standard mode", ui.truth(
@@ -315,6 +328,7 @@ public final class MobileFeatureLayoutDeviceTest {
         assertReadable("[data-layout-preset-chip]", false);
 
         openDrawer();
+        reachElementByTouch("[data-droy-sidebar] [data-droy-settings-launcher]");
         SettingsEntryDeviceUi.openFromDrawer(ui);
         reachTabByTouch("[data-droy-settings-section=agent-presets]", TABS);
         ui.tap("[data-droy-settings-section=agent-presets]");
@@ -365,7 +379,7 @@ public final class MobileFeatureLayoutDeviceTest {
         assertTrue("Restart must preserve the user's space name", ui.truth(
             "document.querySelector(" + JSONObject.quote(workspace) + ")?.textContent.includes('Daily space')"));
         assertFalse("Restart must not add another default space", ui.truth(
-            "[...document.querySelectorAll(" + JSONObject.quote(workspace) + ")].some(e=>e.textContent.includes('默认空间'))"));
+            "[...document.querySelectorAll(" + JSONObject.quote(workspace) + ")].some(e=>e.textContent.includes(" + JSONObject.quote(defaultSpace) + "))"));
         capture("renamed-space-after-restart");
     }
 
@@ -379,9 +393,40 @@ public final class MobileFeatureLayoutDeviceTest {
         String row = "[data-droy-session-row='droy-layout-fixture']";
         if (!ui.truth("!!document.querySelector(" + JSONObject.quote(row) + ")"))
             ui.tap("[data-droy-sidebar] [role=treeitem][aria-expanded=false]");
-        ui.tap(row + " [data-droy-session-surface]");
-        DeviceUi.await("The fictional standard session did not open", 10000,
-            () -> ui.truth("!!document.querySelector('[data-conversation-session=\"droy-layout-fixture\"][data-content-phase=active] [data-composer-input][contenteditable=true]')&&!document.querySelector('[data-droy-drawer-open=true]')"));
+        String surface = row + " [data-droy-session-surface]";
+        reachElementByTouch(surface);
+        String[] previous = {null}; long[] unchangedSince = {0};
+        try {
+            DeviceUi.await("The actual session row did not settle into a touchable position", 5000, () -> {
+                JSONObject current = (JSONObject) ui.evaluate("(()=>{const e=document.querySelector(" + JSONObject.quote(surface) + "),r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2),root=getComputedStyle(document.documentElement),px=n=>parseFloat(root.getPropertyValue(n))||0;"
+                    + "let fullyVisible=r.top>=px('--droy-safe-top')-1&&r.bottom<=innerHeight-Math.max(px('--droy-safe-bottom'),px('--droy-ime-bottom'))+1;"
+                    + "for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();if(/hidden|clip|auto|scroll/.test(s.overflowY)&&(r.top<b.top-1||r.bottom>b.bottom+1))fullyVisible=false;}"
+                    + "return {left:r.left,top:r.top,width:r.width,height:r.height,fullyVisible,hit:!!hit&&(e===hit||e.contains(hit))}})()");
+                String value = current.toString();
+                if (!value.equals(previous[0])) { previous[0] = value; unchangedSince[0] = SystemClock.elapsedRealtime(); }
+                return current.getBoolean("fullyVisible") && current.getBoolean("hit")
+                    && SystemClock.elapsedRealtime() - unchangedSince[0] >= 200;
+            });
+        } catch (AssertionError failure) {
+            capture("session-touch-position-failure");
+            Object state = ui.evaluate("(()=>{const e=document.querySelector(" + JSONObject.quote(surface) + "),r=e.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2),ancestors=[];"
+                + "for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a);ancestors.push({tag:a.tagName,className:a.className,overflowY:s.overflowY,scrollTop:a.scrollTop,scrollHeight:a.scrollHeight,clientHeight:a.clientHeight,rect:a.getBoundingClientRect().toJSON()});}"
+                + "return {target:r.toJSON(),hit:hit?{tag:hit.tagName,className:hit.className,role:hit.getAttribute('role')}:null,selection:String(getSelection()),ancestors}})()");
+            throw new AssertionError(failure.getMessage() + "; actual touch geometry=" + state, failure);
+        }
+        capture("session-drawer-reached");
+        // The row is already reached and fully checked. Generic tap() invokes
+        // scrollIntoView again, which can move this short drawer under a system bar.
+        Rect sessionBounds = ui.webBounds(surface);
+        ui.tapAt(sessionBounds.centerX(), sessionBounds.centerY());
+        try {
+            DeviceUi.await("The fictional standard session did not open", 10000,
+                () -> ui.truth("!!document.querySelector('[data-conversation-session=\"droy-layout-fixture\"][data-content-phase=active] [data-composer-input][contenteditable=true]')&&!document.querySelector('[data-droy-drawer-open=true]')"));
+        } catch (AssertionError failure) {
+            capture("session-selection-failure");
+            Object state = ui.evaluate("({drawer:!!document.querySelector('[data-droy-drawer-open=true]'),rows:[...document.querySelectorAll('[data-droy-session-row]')].map(e=>({id:e.getAttribute('data-droy-session-row'),selected:e.getAttribute('aria-selected')})),contents:[...document.querySelectorAll('[data-conversation-session]')].map(e=>({session:e.getAttribute('data-conversation-session'),phase:e.getAttribute('data-content-phase')})),dialogs:[...document.querySelectorAll('[role=dialog] h2')].map(e=>e.textContent.trim())})");
+            throw new AssertionError(failure.getMessage() + "; actual session state=" + state, failure);
+        }
         assertCommandMenu("active");
         openDrawer();
         markButton("[data-droy-sidebar]", "新会话", "New Session");
@@ -564,6 +609,7 @@ public final class MobileFeatureLayoutDeviceTest {
         env.put("TMPDIR", context.getCacheDir().getAbsolutePath());env.put("DSH_TELEMETRY_DISABLED", "1");
         env.put("DROY_WEB_TOKEN", "fictional-layout-fixture-token-123456789");env.put("DROY_BRIDGE_TOKEN", "fictional-layout-fixture-token-123456789");
         env.put("DROY_WEB_PORT", Integer.toString(port));env.put("DROY_BRIDGE_PORT", "9");
+        env.put("DROY_LOCALE", NativeLocale.active());
         Process process = builder.start();
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         Thread reader = new Thread(() -> {
@@ -605,6 +651,9 @@ public final class MobileFeatureLayoutDeviceTest {
     }
 
     private void assertPresetNamesAndGuide() throws Exception {
+        ui.visibleWebBounds(".rtSEdW_creatorButton");
+        assertReadable(".rtSEdW_creatorButton", false);
+        capture("preset-create-entry");
         JSONArray names = (JSONArray) ui.evaluate("[...document.querySelectorAll('[data-agent-preset-id]')].map(e=>({id:e.getAttribute('data-agent-preset-id'),name:e.querySelector('button[aria-pressed] span[title]').textContent.trim()}))");
         assertEquals("A fresh Droy profile must expose exactly two built-in modes", 2, names.length());
         List<String> ids = new ArrayList<>();
@@ -615,6 +664,9 @@ public final class MobileFeatureLayoutDeviceTest {
             String selector = "[data-agent-preset-id=" + JSONObject.quote(names.getJSONObject(i).getString("id")) + "] button[aria-pressed] span[title]";
             ui.evaluate("document.querySelector(" + JSONObject.quote(selector) + ").scrollIntoView({block:'center',behavior:'instant'})");
             assertReadable(selector, false);
+            assertTrue("The built-in mode name is squeezed into word fragments", ui.truth("(()=>{const e=document.querySelector(" + JSONObject.quote(selector)
+                + "),c=document.createElement('canvas').getContext('2d');c.font=getComputedStyle(e).font;const needed=Math.max(...e.textContent.trim().split(/\\s+/).map(word=>c.measureText(word).width));"
+                + "return e.getBoundingClientRect().width>=Math.min(needed,e.closest('[data-agent-preset-id]').clientWidth-32)-1})()"));
         }
         markButton(OPTIONS, "模式说明", "Mode details");
         ui.tap("[data-layout-action]");
@@ -627,6 +679,7 @@ public final class MobileFeatureLayoutDeviceTest {
         JSONArray tabs = (JSONArray) ui.evaluate("[...document.querySelectorAll('[data-layout-modal] [role=tab]')].map(e=>e.id)");
         for (int i = 0; i < tabs.length(); i++) {
             String selector = "[id=" + JSONObject.quote(tabs.getString(i)) + "]";
+            reachElementByTouch(selector);
             assertReadable(selector, false);
             ui.tap(selector);
             DeviceUi.await("The mode explanation tab did not switch", 5000,
@@ -634,9 +687,17 @@ public final class MobileFeatureLayoutDeviceTest {
             assertLastControlReachable("[data-layout-modal] [data-guide-page]:not([hidden])", "mode explanation content");
         }
         markButton("[data-layout-modal]", "关闭", "Close");
+        reachElementByTouch("[data-layout-action]");
         ui.tap("[data-layout-action]");
         DeviceUi.await("The mode explanation dialog did not close", 5000,
             () -> !ui.truth("!!document.querySelector('[data-layout-modal]')"));
+        markButton(OPTIONS, "模式说明", "Mode details");
+        ui.tap("[data-layout-action]");
+        DeviceUi.await("The mode guide did not reopen after Close", 5000,
+            () -> ui.truth("!!document.querySelector('[role=dialog] [data-guide-page]')"));
+        ui.pressBack();
+        DeviceUi.await("System Back did not close the mode guide", 5000,
+            () -> !ui.truth("!!document.querySelector('[role=dialog] [data-guide-page]')"));
         String configuration = "[data-agent-preset-id=standard] button[data-tip]";
         ui.tap(configuration);
         DeviceUi.await("The actual preset configuration did not open", 5000,
@@ -645,6 +706,10 @@ public final class MobileFeatureLayoutDeviceTest {
         capture("preset-configuration");
         assertReadable("[data-layout-preset-viewer] h2", false);
         assertNoHorizontalOverflow("[data-layout-preset-viewer]", "preset configuration");
+        ui.evaluate("(()=>{const e=document.querySelector('[data-layout-preset-viewer] pre');e.scrollTop=e.scrollHeight})()");
+        DeviceUi.await("The preset configuration's final line cannot be reached", 5000,
+            () -> ui.truth("(()=>{const e=document.querySelector('[data-layout-preset-viewer] pre');return e.clientHeight>0&&e.scrollTop+e.clientHeight>=e.scrollHeight-1})()"));
+        capture("preset-configuration-code-end");
         markButton("[data-layout-preset-viewer]", "关闭", "Close");
         ui.tap("[data-layout-action]");
         DeviceUi.await("The preset configuration did not close", 5000,
@@ -746,7 +811,7 @@ public final class MobileFeatureLayoutDeviceTest {
             float distance = Math.min(strip.width() * 0.6f,
                 (float) target.getDouble("delta") * scale + ViewConfiguration.get(context).getScaledTouchSlop() + 8);
             float start = left ? strip.left + inset : strip.right - inset;
-            ui.swipe(start, strip.centerY(), start + (left ? distance : -distance), strip.centerY(), 450);
+            ui.swipe(start, strip.centerY(), start + (left ? distance : -distance), strip.centerY(), 300);
             Bundle status = new Bundle(); status.putString("stream", "\nDROY_SETTINGS_TAB_TOUCH_SCROLL " + selector + " " + target + "\n");
             instrumentation.sendStatus(2, status);
         }
@@ -785,40 +850,46 @@ public final class MobileFeatureLayoutDeviceTest {
     }
 
     private void assertLastControlReachable(String selector, String location) throws Exception {
-        boolean found = ui.truth("(()=>{document.querySelectorAll('[data-layout-last]').forEach(e=>e.removeAttribute('data-layout-last'));const p=document.querySelector(" + JSONObject.quote(selector) + ");"
+        boolean found = ui.truth("(()=>{document.querySelectorAll('[data-layout-last]').forEach(e=>{e.removeAttribute('data-layout-last');e.removeAttribute('data-layout-last-text')});const p=document.querySelector(" + JSONObject.quote(selector) + ");"
             + "const elements=[...p.querySelectorAll('button,input:not([type=hidden]),textarea,select,summary,a[href]')].filter(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);"
             + "return r.width>1&&r.height>1&&s.visibility!=='hidden'&&!e.closest('[hidden]')&&!(e.closest('details:not([open])')&&!e.matches('summary'))&&s.clip==='auto'&&s.clipPath==='none'});"
-            + "const e=elements.at(-1)||[...p.querySelectorAll('p,li,h2,h3')].filter(e=>e.getClientRects().length).at(-1);if(!e)return false;e.setAttribute('data-layout-last','');e.scrollIntoView({block:'end',inline:'nearest',behavior:'instant'});return true})()");
+            + "const e=elements.at(-1)||[...p.querySelectorAll('p,li,h2,h3')].filter(e=>e.getClientRects().length).at(-1);if(!e)return false;e.setAttribute('data-layout-last','');if(!elements.length)e.setAttribute('data-layout-last-text','');e.scrollIntoView({block:'end',inline:'nearest',behavior:'instant'});return true})()");
         if (!found) return; // Read-only/empty sections can legitimately have no controls.
         reachLastControlByTouch();
         ui.awaitPaint();
         capture("last-control-" + location.replaceAll("[^a-zA-Z0-9-]", "-"));
-        JSONObject result = (JSONObject) ui.evaluate("(()=>{const e=document.querySelector('[data-layout-last]'),r=e.getBoundingClientRect(),root=getComputedStyle(document.documentElement),px=n=>parseFloat(root.getPropertyValue(n))||0,errors=[];"
+        JSONObject result = (JSONObject) ui.evaluate("(()=>{const e=document.querySelector('[data-layout-last]'),r=" + LAST_CONTROL_RECT + ",root=getComputedStyle(document.documentElement),px=n=>parseFloat(root.getPropertyValue(n))||0,errors=[];"
             + "if(r.top<px('--droy-safe-top')-1||r.bottom>innerHeight-Math.max(px('--droy-safe-bottom'),px('--droy-ime-bottom'))+1)errors.push('last-control-behind-system-bar');"
             + "for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();if(/hidden|clip|auto|scroll/.test(s.overflowY)&&(r.top<b.top-1||r.bottom>b.bottom+1))errors.push('last-control-clipped');}"
             + "const hit=document.elementFromPoint((r.left+r.right)/2,(r.top+r.bottom)/2);if(!e.disabled&&(!hit||!(e===hit||e.contains(hit))))errors.push('last-control-obscured');"
             + "const ancestors=[];for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();ancestors.push({tag:a.tagName,className:a.className,overflowY:s.overflowY,scrollTop:a.scrollTop,scrollHeight:a.scrollHeight,clientHeight:a.clientHeight,rect:b.toJSON()});}"
-            + "return {errors:[...new Set(errors)],tag:e.tagName,label:e.textContent.trim(),rect:{top:r.top,bottom:r.bottom,left:r.left,right:r.right},ancestors}})()");
+            + "return {errors:[...new Set(errors)],tag:e.tagName,textBounds:e.hasAttribute('data-layout-last-text'),label:e.textContent.trim(),rect:{top:r.top,bottom:r.bottom,left:r.left,right:r.right},ancestors}})()");
         if (result.getJSONArray("errors").length() != 0) capture("last-control-failure-" + location.replaceAll("[^a-zA-Z0-9-]", "-"));
         assertEquals("The last control cannot be scrolled into view in " + location + "; " + result, 0, result.getJSONArray("errors").length());
+    }
+
+    private void reachElementByTouch(String selector) throws Exception {
+        assertTrue("The actual scroll target is missing: " + selector, ui.truth("(()=>{document.querySelectorAll('[data-layout-last]').forEach(e=>{e.removeAttribute('data-layout-last');e.removeAttribute('data-layout-last-text')});"
+            + "const e=document.querySelector(" + JSONObject.quote(selector) + ");if(!e)return false;e.setAttribute('data-layout-last','');return true})()"));
+        reachLastControlByTouch();
     }
 
     private void reachLastControlByTouch() throws Exception {
         for (int attempt = 0; attempt < 8; attempt++) {
             String[] previous = {null}; long[] unchangedSince = {0};
             DeviceUi.await("The last control layout did not settle", 5000, () -> {
-                String current = String.valueOf(ui.evaluate("(()=>{const e=document.querySelector('[data-layout-last]'),r=e.getBoundingClientRect(),ancestors=[];"
+                String current = String.valueOf(ui.evaluate("(()=>{const e=document.querySelector('[data-layout-last]'),r=" + LAST_CONTROL_RECT + ",ancestors=[];"
                     + "for(let a=e.parentElement;a;a=a.parentElement)ancestors.push([a.clientHeight,a.scrollHeight,a.scrollTop]);"
                     + "return JSON.stringify([r.top,r.bottom,r.left,r.right,ancestors])})()"));
                 if (!current.equals(previous[0])) { previous[0] = current; unchangedSince[0] = SystemClock.elapsedRealtime(); }
                 return SystemClock.elapsedRealtime() - unchangedSince[0] >= 200;
             });
             JSONObject position = (JSONObject) ui.evaluate("(()=>{document.querySelectorAll('[data-layout-last-viewport]').forEach(e=>e.removeAttribute('data-layout-last-viewport'));"
-                + "const e=document.querySelector('[data-layout-last]'),r=e.getBoundingClientRect(),root=getComputedStyle(document.documentElement),px=n=>parseFloat(root.getPropertyValue(n))||0;"
+                + "const e=document.querySelector('[data-layout-last]'),r=" + LAST_CONTROL_RECT + ",root=getComputedStyle(document.documentElement),px=n=>parseFloat(root.getPropertyValue(n))||0;"
                 + "let top=px('--droy-safe-top'),bottom=innerHeight-Math.max(px('--droy-safe-bottom'),px('--droy-ime-bottom')),viewport=null;"
-                + "for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();"
-                + "if(/hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom);}"
-                + "if(!viewport&&/auto|scroll/.test(s.overflowY)&&a.scrollHeight>a.clientHeight+1)viewport=a;}"
+                + "for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a);if(/auto|scroll/.test(s.overflowY)&&a.scrollHeight>a.clientHeight+1){viewport=a;break;}}"
+                + "for(let a=viewport||e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();"
+                + "if(/hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom);}}"
                 + "if(viewport)viewport.setAttribute('data-layout-last-viewport','');"
                 + "return {fits:r.top>=top-1&&r.bottom<=bottom+1,canScroll:!!viewport,top,bottom,height:r.height,"
                 + "viewportTop:viewport?.getBoundingClientRect().top||0,viewportHeight:viewport?.getBoundingClientRect().height||0,"
@@ -871,7 +942,12 @@ public final class MobileFeatureLayoutDeviceTest {
         }
         DeviceUi.await("The sidebar did not open", 5000,
             () -> ui.truth("!!document.querySelector('[data-droy-drawer-open=true]')"));
-        SystemClock.sleep(200);
+        ui.awaitPaint();
+        JSONObject drawer = (JSONObject) ui.evaluate("(()=>{if(innerHeight>480)return {errors:[]};const e=document.querySelector('[data-droy-sidebar] .hHd-Xa_root'),r=e.getBoundingClientRect(),s=getComputedStyle(document.documentElement),px=n=>parseFloat(s.getPropertyValue(n))||0,errors=[];"
+            + "if(r.height<=0||r.top<px('--droy-safe-top')-1||r.bottom>innerHeight-Math.max(px('--droy-safe-bottom'),px('--droy-ime-bottom'))+1)errors.push('drawer-scrollport-outside-safe-area');"
+            + "return {errors,rect:r.toJSON(),scrollHeight:e.scrollHeight,clientHeight:e.clientHeight,safeTop:px('--droy-safe-top'),safeBottom:Math.max(px('--droy-safe-bottom'),px('--droy-ime-bottom'))}})()");
+        assertEquals("The short drawer scroller must remain inside the system safe area: " + drawer,
+            0, drawer.getJSONArray("errors").length());
     }
 
     private void awaitMainMenu() throws Exception {
@@ -927,6 +1003,10 @@ public final class MobileFeatureLayoutDeviceTest {
         String landscape = InstrumentationRegistry.getArguments().getString("layoutLandscape");
         if (landscape != null) assertTrue("The screenshot viewport left the requested orientation: " + stage,
             ui.truth(landscape.equals("true") ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+        if (Build.VERSION.SDK_INT == 30 && preferences.getString("themeColorScheme", "light").equals("dark"))
+            instrumentation.runOnMainSync(() -> assertEquals("Dark web pages must clear API 30 legacy light-system-bar flags", 0,
+                activity.getWindow().getDecorView().getSystemUiVisibility()
+                    & (View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR)));
         Bitmap bitmap = ui.automation().takeScreenshot();
         assertNotNull("Android did not capture the synthetic fixture screen", bitmap);
         try (FileOutputStream output = new FileOutputStream(new File(directory, stage + ".png"))) {

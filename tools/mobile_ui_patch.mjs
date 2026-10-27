@@ -601,7 +601,7 @@ export function patchInputTrigger(source) {
 \t\t\t\t\tconst seat = card?.closest("[data-composer-seat]");
 \t\t\t\t\tconst mobile = document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined";
 \t\t\t\t\tlet position = null;
-\t\t\t\t\tif (mobile && seat?.querySelector("[data-droy-token-usage]") && seat.scrollHeight > seat.clientHeight + 1) {
+\t\t\t\t\tif (mobile && seat && ((window.visualViewport?.height ?? window.innerHeight) <= 480 || (seat.querySelector("[data-droy-token-usage]") && seat.scrollHeight > seat.clientHeight + 1))) {
 \t\t\t\t\t\tconst scroll = seat.closest("[data-conversation-scroll]");
 \t\t\t\t\t\tif (scroll) {
 \t\t\t\t\t\t\tconst bounds = scroll.getBoundingClientRect(), visual = window.visualViewport;
