@@ -83,6 +83,19 @@ final class DeviceUi {
 
     boolean truth(String expression) throws Exception { return Boolean.TRUE.equals(evaluate(expression)); }
 
+    void replaceFocusedText(String value, int existingLength) {
+        WebView view = web();
+        instrumentation.runOnMainSync(() -> {
+            assertTrue("The WebView must receive actual touch focus before text input", view.hasFocus());
+            android.view.inputmethod.InputConnection connection = view.onCreateInputConnection(new android.view.inputmethod.EditorInfo());
+            assertNotNull("The focused WebView has no editor connection", connection);
+            assertTrue("The WebView rejected the input selection", connection.setSelection(0, existingLength));
+            assertTrue("The WebView rejected the synthetic IME commit", connection.commitText(value, 1));
+            connection.finishComposingText();
+        });
+        instrumentation.waitForIdleSync();
+    }
+
     void click(String selector) throws Exception {
         long deadline = SystemClock.elapsedRealtime() + 5000;
         do {
@@ -103,9 +116,9 @@ final class DeviceUi {
 
     void awaitPage() throws Exception {
         await("Real DSH conversation did not become ready: " + RuntimeService.status, 90000,
-                () -> RuntimeService.ready && web() != null
+                () -> RuntimeService.ready && web() != null && nativeUiReady()
                         && truth("typeof window.DroyMobile?.handleBack === 'function' && document.documentElement.dataset.droyUiReady === 'true'")
-                        && nativeUiReady() && !loadingOverlayShown());
+                        && !loadingOverlayShown());
         dismissInitialOnboarding();
     }
 

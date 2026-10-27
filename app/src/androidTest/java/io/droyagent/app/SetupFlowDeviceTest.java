@@ -345,12 +345,8 @@ public final class SetupFlowDeviceTest {
         DeviceUi.await("The installation field did not receive touch focus", 5000,
             () -> ui.truth("document.activeElement===document.querySelector(" + JSONObject.quote(selector) + ")"));
         int existing = ((String) ui.evaluate("document.querySelector(" + JSONObject.quote(selector) + ").value")).length();
-        if (existing > 0) {
-            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_MOVE_END);
-            for (int index = 0; index < existing; index++) instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL);
-        }
-        instrumentation.sendStringSync(value);
-        DeviceUi.await("Installation input did not accept actual keyboard events", 5000,
+        ui.replaceFocusedText(value, existing);
+        DeviceUi.await("Installation input did not accept the Android editor commit", 5000,
             () -> value.equals(ui.evaluate("document.querySelector(" + JSONObject.quote(selector) + ").value")));
     }
 

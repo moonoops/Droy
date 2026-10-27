@@ -26,6 +26,10 @@ public final class NfcCredentialActivity extends Activity {
         key.setFilters(new InputFilter[]{new InputFilter.LengthFilter(12)}); key.setSaveEnabled(false);
         key.setImportantForAutofill(android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
         key.setHint(HardwareSupport.text(this, io.droyagent.androiduse.R.string.nfc_credential_key)); body.addView(key);
+        for (EditText field : new EditText[]{name, key}) {
+            field.setTextColor(NfcUi.dark(this) ? android.graphics.Color.WHITE : android.graphics.Color.rgb(25,31,39));
+            field.setHintTextColor(NfcUi.dark(this) ? android.graphics.Color.rgb(185,190,198) : android.graphics.Color.rgb(91,99,112));
+        }
         TextView status = NfcUi.text(this, io.droyagent.androiduse.R.string.nfc_credential_help, 16);
         Button save = new Button(this); save.setText(HardwareSupport.text(this, io.droyagent.androiduse.R.string.nfc_credential_save));
         save.setOnClickListener(v -> {

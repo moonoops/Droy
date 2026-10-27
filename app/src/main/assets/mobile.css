@@ -567,6 +567,36 @@ html[data-droy-mobile] .zGbnIq_modelAdvanced { grid-template-columns: minmax(0, 
 html[data-droy-mobile] .zGbnIq_editorActions { flex-wrap: wrap; }
 html[data-droy-mobile] .zGbnIq_editorActions > button { min-width: 88px; min-height: 44px; }
 html[data-droy-mobile] .zGbnIq_addButton { min-width: 0; }
+html[data-droy-mobile] .zGbnIq_addModes > [role="tablist"] {
+  box-sizing: border-box;
+  align-self: stretch;
+  width: 100%;
+  min-width: 0;
+  grid-auto-columns: minmax(0, 1fr);
+}
+html[data-droy-mobile] .zGbnIq_addModes > [role="tablist"] > [role="tab"] {
+  min-width: 0;
+  min-height: 48px;
+  height: auto;
+  padding: 6px 8px;
+  white-space: normal;
+}
+html[data-droy-mobile] .qSYn7G_groupTitleRow { flex-wrap: wrap; }
+html[data-droy-mobile] .qSYn7G_headerEnd { min-width: 0; max-width: 100%; }
+html[data-droy-mobile] .qSYn7G_switcher {
+  max-width: 100%;
+  min-height: 48px;
+  height: auto;
+  padding: 8px 14px;
+  white-space: normal;
+}
+html[data-droy-mobile] .qSYn7G_switcherLabel {
+  min-width: 0;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
 
 /* Preset names identify the mode being selected, so keep long built-in and
    user names readable on narrow screens instead of ellipsizing the choice. */
@@ -577,4 +607,9 @@ html[data-droy-mobile] .rtSEdW_cardName {
   white-space: normal;
   overflow: visible;
   overflow-wrap: anywhere;
+}
+html[data-droy-mobile] .rtSEdW_iconButton::after {
+  left: auto;
+  right: 0;
+  transform: none;
 }

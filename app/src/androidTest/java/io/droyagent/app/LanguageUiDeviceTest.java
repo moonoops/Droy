@@ -117,14 +117,16 @@ public final class LanguageUiDeviceTest {
     private static void openGeneral(DeviceUi ui) throws Exception {
         ui.evaluate("window.dispatchEvent(new CustomEvent('droy-mobile-open-settings',{detail:{section:'general'}}))");
         DeviceUi.await("General settings did not open", 10000,
-            () -> ui.truth("!!document.querySelector('[data-droy-settings-panel]')"));
+            () -> ui.truth("document.querySelector('[data-droy-settings-section=general]')?.getAttribute('aria-current')==='true'"
+                + "&&[...document.querySelectorAll('[data-droy-settings-panel] button[aria-haspopup=menu]')].some(e=>['中文','English'].includes(e.textContent.trim()))"));
     }
 
     private static void select(DeviceUi ui, String label) throws Exception {
         assertTrue(ui.truth("(()=>{const e=[...document.querySelectorAll('[data-droy-settings-panel] button[aria-haspopup=menu]')].find(e=>['中文','English'].includes(e.textContent.trim()));if(!e)return false;e.setAttribute('data-test-language-selector','');return true})()"));
         ui.tap("[data-test-language-selector]");
-        assertTrue(ui.truth("(()=>{const e=[...document.querySelectorAll('[role=menuitem],[role=menuitemradio]')].find(e=>e.getClientRects().length&&e.textContent.trim()==="
-            + JSONObject.quote(label) + ");if(!e)return false;e.setAttribute('data-test-language-option','');return true})()"));
+        DeviceUi.await("The actual language menu option did not open: " + label, 5000,
+            () -> ui.truth("(()=>{const e=[...document.querySelectorAll('[role=menuitem],[role=menuitemradio]')].find(e=>e.getClientRects().length&&e.textContent.trim()==="
+                + JSONObject.quote(label) + ");if(!e)return false;e.setAttribute('data-test-language-option','');return true})()"));
         ui.tap("[data-test-language-option]");
     }
 

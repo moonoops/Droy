@@ -355,6 +355,22 @@ public class HardwareDeviceTest {
         assertFalse("A status query must not invent coordinates", status.has("location"));
     }
 
+    @Test public void realCurrentLocationFixIsFreshAndRemainsInTheCurrentTask() throws Exception {
+        assumeTrue("Explicit hardwareAcquireLocation=true is required for real-location acquisition",
+            "true".equals(InstrumentationRegistry.getArguments().getString("hardwareAcquireLocation")));
+        LocationManager manager = context.getSystemService(LocationManager.class);
+        assertTrue("Enable system location and grant precise location for this acquisition fixture",
+            manager != null && manager.isLocationEnabled() && granted(Manifest.permission.ACCESS_FINE_LOCATION));
+        change("allowLocationRead", true);
+        JSONObject result = call("location", args("current").put("durationMs", 10000).put("maxAgeMs", 0));
+        assertEquals("No fresh location fix was acquired before the deadline", "located", result.getString("status"));
+        assertEquals("current_task", result.getString("collectionScope"));
+        assertEquals("WGS84", result.getString("coordinateReference"));
+        JSONObject location = result.getJSONObject("location");
+        assertTrue(location.getDouble("accuracyMeters") >= 0);
+        assertTrue("A fresh observation must not become a saved data record", !result.has("dataRef"));
+    }
+
     private JSONObject call(String action, JSONObject args) throws Exception {
         return bridge.executeTool(action, args, owner, UUID.randomUUID().toString());
     }

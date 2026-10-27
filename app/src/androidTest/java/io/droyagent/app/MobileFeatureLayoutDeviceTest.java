@@ -60,6 +60,7 @@ public final class MobileFeatureLayoutDeviceTest {
     private boolean hadOriginalLanguage;
     private Boolean originalSetupCompleted;
     private boolean setupCompletionOwned;
+    private boolean rotationOwned;
     private static final String OPTIONS = "[data-droy-settings-options]";
     private static final String TABS = "[data-droy-settings-tabs]";
 
@@ -71,9 +72,12 @@ public final class MobileFeatureLayoutDeviceTest {
         originalTheme = preferences.getString("themePreference", "system");
         hadOriginalLanguage = preferences.contains("languagePreference");
         originalLanguage = preferences.getString("languagePreference", "system");
-        assertTrue("Layout fixtures require a dedicated emulator",
-            Build.FINGERPRINT.startsWith("generic") || Build.FINGERPRINT.contains("emulator")
-                || Build.MODEL.contains("sdk_gphone") || Build.PRODUCT.contains("sdk_gphone"));
+        boolean emulator = Build.FINGERPRINT.startsWith("generic") || Build.FINGERPRINT.contains("emulator")
+            || Build.MODEL.contains("sdk_gphone") || Build.PRODUCT.contains("sdk_gphone");
+        boolean developmentPhone = context.getPackageName().equals("io.droyagent.app.dev")
+            && (context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            && "true".equals(InstrumentationRegistry.getArguments().getString("layoutDevelopmentPhoneFixture"));
+        assertTrue("Layout fixtures require a dedicated emulator or an explicitly selected development app", emulator || developmentPhone);
         assertTrue("Stop the existing engine before layout tests", RuntimeService.canManageHistory());
         RuntimeInstaller.installCertificate(context);
         runtime = RuntimeInstaller.install(context);
@@ -98,6 +102,16 @@ public final class MobileFeatureLayoutDeviceTest {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         ui = new DeviceUi(instrumentation, activity);
         ui.awaitPage();
+        String landscape = InstrumentationRegistry.getArguments().getString("layoutLandscape");
+        if (landscape != null) {
+            assertTrue("Unsupported layout orientation", landscape.equals("true") || landscape.equals("false"));
+            boolean requestedLandscape = landscape.equals("true");
+            assertTrue(ui.automation().setRotation(requestedLandscape
+                ? android.app.UiAutomation.ROTATION_FREEZE_90 : android.app.UiAutomation.ROTATION_FREEZE_0));
+            rotationOwned = true;
+            DeviceUi.await("The layout did not reach the requested orientation", 5000,
+                () -> ui.truth(requestedLandscape ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+        }
         ui.hideKeyboard();
         awaitMainMenu();
         if ("true".equals(InstrumentationRegistry.getArguments().getString("layoutMaxTextFont"))) maximizeDshTextFont();
@@ -137,6 +151,10 @@ public final class MobileFeatureLayoutDeviceTest {
                 else installation.putBoolean("completed", originalSetupCompleted);
                 assertTrue("Could not restore installation completion", installation.commit());
                 setupCompletionOwned = false;
+            }
+            if (rotationOwned) {
+                assertTrue(ui.automation().setRotation(android.app.UiAutomation.ROTATION_UNFREEZE));
+                rotationOwned = false;
             }
             homeOwned = false;
         }
@@ -196,10 +214,13 @@ public final class MobileFeatureLayoutDeviceTest {
             DeviceUi.await("A touched settings tab did not switch: " + section, 5000,
                 () -> ui.truth("document.querySelector(" + JSONObject.quote(selector) + ")?.getAttribute('aria-current')==='true'"));
             awaitSettingsContent();
+            ui.evaluate("document.querySelector('[data-droy-settings-options]').scrollTop=0");
+            ui.awaitPaint();
             capture("settings-" + section);
             assertNoHorizontalOverflow(OPTIONS, "settings/" + section);
             assertNestedTabs(section);
             assertLastControlReachable(OPTIONS, "settings/" + section);
+            if (section.equals("plugins")) assertPluginPresetSwitcher();
             if (section.equals("models")) assertModelAddForm();
             if (section.equals("agent-presets")) assertPresetNamesAndGuide();
         }
@@ -394,8 +415,14 @@ public final class MobileFeatureLayoutDeviceTest {
         Object geometry = ui.evaluate("(()=>{const menu=document.querySelector('[data-trigger-menu]'),list=menu.querySelector('[role=listbox]'),ancestors=[];for(let e=menu;e;e=e.parentElement){const s=getComputedStyle(e);ancestors.push({tag:e.tagName,className:e.className,position:s.position,overflowX:s.overflowX,overflowY:s.overflowY,transform:s.transform,rect:e.getBoundingClientRect().toJSON()})}return {phase:document.querySelector('[data-conversation-content]')?.getAttribute('data-content-phase'),menu:menu.getBoundingClientRect().toJSON(),listbox:{rect:list.getBoundingClientRect().toJSON(),scrollTop:list.scrollTop,clientHeight:list.clientHeight,scrollHeight:list.scrollHeight},composer:document.querySelector('[data-composer-seat]')?.getBoundingClientRect().toJSON(),ancestors}})()");
         Bundle status = new Bundle();status.putString("stream", "\nDROY_COMPOSER_GEOMETRY " + geometry + "\n");instrumentation.sendStatus(2, status);
         JSONArray commands = (JSONArray) ui.evaluate("[...document.querySelectorAll('[data-trigger-menu] [role=option]')].map(e=>({id:e.id,names:[...e.querySelectorAll('span')].filter(s=>!s.closest('[aria-hidden=true]')).map(s=>s.textContent.trim())}))");
+        List<String> commandNames = new ArrayList<>();
+        for (int i = 0; i < commands.length(); i++) {
+            JSONArray names = commands.getJSONObject(i).getJSONArray("names");
+            for (int index = 0; index < names.length(); index++)
+                commandNames.add(names.getString(index).toLowerCase(java.util.Locale.ROOT));
+        }
         for (String name : new String[]{"file", "goal", "plan", "feedback", "compact", "permission", "model", "export"})
-            assertTrue("The full command menu omitted /" + name, commands.toString().contains(JSONObject.quote(name)));
+            assertTrue("The full command menu omitted /" + name + ": " + commandNames, commandNames.contains(name));
         JSONArray targets = (JSONArray) ui.evaluate("[...document.querySelectorAll('[data-trigger-menu] [role=presentation],[data-trigger-menu] [role=option]')].filter(e=>e.textContent.trim()).map((e,index)=>{e.setAttribute('data-layout-command',String(index));return String(index)})");
         for (int index = 0; index < targets.length(); index++) {
             String selector = "[data-layout-command=" + JSONObject.quote(targets.getString(index)) + "]";
@@ -608,19 +635,63 @@ public final class MobileFeatureLayoutDeviceTest {
         ui.tap("[data-layout-action]");
         DeviceUi.await("The mode explanation dialog did not close", 5000,
             () -> !ui.truth("!!document.querySelector('[data-layout-modal]')"));
+        String configuration = "[data-agent-preset-id=standard] button[data-tip]";
+        ui.tap(configuration);
+        DeviceUi.await("The actual preset configuration did not open", 5000,
+            () -> ui.truth("!!document.querySelector('[role=dialog] pre')?.textContent.trim()"));
+        ui.evaluate("document.querySelector('[role=dialog] pre').closest('[role=dialog]').setAttribute('data-layout-preset-viewer','')");
+        capture("preset-configuration");
+        assertReadable("[data-layout-preset-viewer] h2", false);
+        assertNoHorizontalOverflow("[data-layout-preset-viewer]", "preset configuration");
+        markButton("[data-layout-preset-viewer]", "关闭", "Close");
+        ui.tap("[data-layout-action]");
+        DeviceUi.await("The preset configuration did not close", 5000,
+            () -> !ui.truth("!!document.querySelector('[data-layout-preset-viewer]')"));
+        ui.visibleWebBounds(configuration);
+        assertNoHorizontalOverflow(OPTIONS, "preset configuration tooltip");
+        capture("preset-configuration-closed");
     }
 
     private void assertModelAddForm() throws Exception {
         markButton(OPTIONS, "添加模型提供商", "Add model provider");
         ui.tap("[data-layout-action]");
         DeviceUi.await("The model provider editor did not open", 5000,
-            () -> ui.truth("!!document.querySelector('[data-droy-settings-options] input[aria-label]')"));
-        capture("model-add");
-        assertNoHorizontalOverflow(OPTIONS, "add model provider form");
-        assertLastControlReachable(OPTIONS, "add model provider form");
-        markButton(OPTIONS, "取消", "Cancel");
+            () -> ui.truth("document.querySelectorAll('.zGbnIq_addModes [role=tab]').length===2"));
+        for (String mode : new String[]{"catalog", "custom"}) {
+            String selector = ".zGbnIq_addModes [role=tab][id$='-" + mode + "']";
+            ui.visibleWebBounds(selector);
+            assertReadable(selector, false);
+            ui.tap(selector);
+            DeviceUi.await("The model provider mode did not switch: " + mode, 5000,
+                () -> ui.truth("(()=>{const e=document.querySelector(" + JSONObject.quote(selector) + ");"
+                    + "const panel=document.getElementById(e.getAttribute('aria-controls'));return e.getAttribute('aria-selected')==='true'&&!!panel&&!panel.hidden})()"));
+            capture("model-add-" + mode);
+            assertNoHorizontalOverflow(OPTIONS, "add model provider/" + mode);
+            assertLastControlReachable(OPTIONS, "add model provider/" + mode);
+        }
+        markButton(".zGbnIq_addBlock", "取消", "Cancel");
         ui.tap("[data-layout-action]");
+        DeviceUi.await("Cancel did not close the model provider editor", 5000,
+            () -> !ui.truth("!!document.querySelector('.zGbnIq_addModes')"));
         ui.hideKeyboard();
+    }
+
+    private void assertPluginPresetSwitcher() throws Exception {
+        String selector = "[data-plugin-scope=preset] button[aria-haspopup=menu]";
+        ui.visibleWebBounds(selector);
+        assertReadable(selector, false);
+        String selectedLabel = String.valueOf(ui.evaluate("document.querySelector(" + JSONObject.quote(selector) + ").textContent.trim()"));
+        ui.tap(selector);
+        DeviceUi.await("The session plugin preset menu did not open", 5000,
+            () -> ui.truth("!!document.querySelector('[role=menu] [role=menuitemradio],[role=menu] [role=menuitem]')"));
+        ui.pressBack();
+        DeviceUi.await("Back did not close the session plugin preset menu", 5000,
+            () -> !ui.truth("!!document.querySelector('[role=menu]')"));
+        ui.visibleWebBounds(selector);
+        assertReadable(selector, false);
+        assertEquals("Dismissing the preset menu changed the selected preset label", selectedLabel,
+            String.valueOf(ui.evaluate("document.querySelector(" + JSONObject.quote(selector) + ").textContent.trim()")));
+        capture("plugins-preset-selector");
     }
 
     private void assertNestedTabs(String section) throws Exception {
@@ -650,9 +721,18 @@ public final class MobileFeatureLayoutDeviceTest {
 
     private void reachTabByTouch(String selector, String stripSelector) throws Exception {
         for (int attempt = 0; attempt < 14; attempt++) {
+            String[] previous = {null}; long[] unchangedSince = {0};
+            DeviceUi.await("The settings tab strip did not stop moving", 5000, () -> {
+                String current = String.valueOf(ui.evaluate("(()=>{const e=document.querySelector(" + JSONObject.quote(selector)
+                    + "),c=document.querySelector(" + JSONObject.quote(stripSelector) + "),r=e.getBoundingClientRect();return JSON.stringify([c.scrollLeft,c.scrollWidth,c.clientWidth,r.left,r.right])})()"));
+                if (!current.equals(previous[0])) { previous[0] = current; unchangedSince[0] = SystemClock.elapsedRealtime(); }
+                return SystemClock.elapsedRealtime() - unchangedSince[0] >= 200;
+            });
             JSONObject target = (JSONObject) ui.evaluate("(()=>{const e=document.querySelector(" + JSONObject.quote(selector)
                 + "),c=document.querySelector(" + JSONObject.quote(stripSelector) + ");if(!e||!c)return {};const r=e.getBoundingClientRect(),b=c.getBoundingClientRect();"
-                + "return {visible:r.left>=b.left-1&&r.right<=b.right+1,left:r.left<b.left,width:r.width,stripWidth:b.width}})()");
+                + "return {visible:r.left>=b.left-1&&r.right<=b.right+1,left:r.left<b.left,width:r.width,stripWidth:b.width,"
+                + "targetLeft:r.left,targetRight:r.right,stripLeft:b.left,stripRight:b.right,scrollLeft:c.scrollLeft,scrollWidth:c.scrollWidth,clientWidth:c.clientWidth,"
+                + "delta:r.left<b.left?b.left-r.left:r.right-b.right}})()");
             assertTrue("The real settings tab disappeared: " + selector, target.has("visible"));
             assertTrue("A settings label is wider than its usable strip: " + selector + "; " + target,
                 target.getDouble("width") <= target.getDouble("stripWidth") + 1);
@@ -660,9 +740,13 @@ public final class MobileFeatureLayoutDeviceTest {
             Rect strip = ui.webBounds(stripSelector);
             boolean left = target.getBoolean("left");
             float inset = Math.max(12, strip.width() * 0.16f);
-            ui.swipe(left ? strip.left + inset : strip.right - inset, strip.centerY(),
-                left ? strip.right - inset : strip.left + inset, strip.centerY(), 300);
-            SystemClock.sleep(180);
+            float scale = (float) (strip.width() / target.getDouble("stripWidth"));
+            float distance = Math.min(strip.width() * 0.6f,
+                (float) target.getDouble("delta") * scale + ViewConfiguration.get(context).getScaledTouchSlop() + 8);
+            float start = left ? strip.left + inset : strip.right - inset;
+            ui.swipe(start, strip.centerY(), start + (left ? distance : -distance), strip.centerY(), 450);
+            Bundle status = new Bundle(); status.putString("stream", "\nDROY_SETTINGS_TAB_TOUCH_SCROLL " + selector + " " + target + "\n");
+            instrumentation.sendStatus(2, status);
         }
         fail("A settings tab cannot be reached by horizontal touch scrolling: " + selector);
     }
@@ -693,7 +777,8 @@ public final class MobileFeatureLayoutDeviceTest {
             + "if(!r.width||!r.height||s.visibility==='hidden'||e.closest('[hidden],svg')||s.clip!=='auto'||s.clipPath!=='none')continue;"
             + "if(e.closest('[role=tablist]'))continue;"
             + "if(r.left<b.left-1||r.right>b.right+1)errors.push(e.tagName.toLowerCase()+':outside-content');}"
-            + "return {errors:[...new Set(errors)],width:b.width,scrollWidth:p.scrollWidth,clientWidth:p.clientWidth}})()");
+            + "const outliers=[...p.querySelectorAll('*')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&!e.closest('[hidden],svg')&&(r.left<b.left-1||r.right>b.right+1)}).slice(0,20).map(e=>({tag:e.tagName,className:e.className,label:e.textContent.trim().slice(0,160),rect:e.getBoundingClientRect().toJSON()}));"
+            + "return {errors:[...new Set(errors)],width:b.width,scrollWidth:p.scrollWidth,clientWidth:p.clientWidth,outliers}})()");
         assertEquals("Horizontal overflow in " + location + "; " + result, 0, result.getJSONArray("errors").length());
     }
 
@@ -703,12 +788,54 @@ public final class MobileFeatureLayoutDeviceTest {
             + "return r.width>1&&r.height>1&&s.visibility!=='hidden'&&!e.closest('[hidden]')&&!(e.closest('details:not([open])')&&!e.matches('summary'))&&s.clip==='auto'&&s.clipPath==='none'});"
             + "const e=elements.at(-1)||[...p.querySelectorAll('p,li,h2,h3')].filter(e=>e.getClientRects().length).at(-1);if(!e)return false;e.setAttribute('data-layout-last','');e.scrollIntoView({block:'end',inline:'nearest',behavior:'instant'});return true})()");
         if (!found) return; // Read-only/empty sections can legitimately have no controls.
+        reachLastControlByTouch();
+        ui.awaitPaint();
+        capture("last-control-" + location.replaceAll("[^a-zA-Z0-9-]", "-"));
         JSONObject result = (JSONObject) ui.evaluate("(()=>{const e=document.querySelector('[data-layout-last]'),r=e.getBoundingClientRect(),root=getComputedStyle(document.documentElement),px=n=>parseFloat(root.getPropertyValue(n))||0,errors=[];"
             + "if(r.top<px('--droy-safe-top')-1||r.bottom>innerHeight-Math.max(px('--droy-safe-bottom'),px('--droy-ime-bottom'))+1)errors.push('last-control-behind-system-bar');"
             + "for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();if(/hidden|clip|auto|scroll/.test(s.overflowY)&&(r.top<b.top-1||r.bottom>b.bottom+1))errors.push('last-control-clipped');}"
             + "const hit=document.elementFromPoint((r.left+r.right)/2,(r.top+r.bottom)/2);if(!e.disabled&&(!hit||!(e===hit||e.contains(hit))))errors.push('last-control-obscured');"
-            + "return {errors:[...new Set(errors)],tag:e.tagName,rect:{top:r.top,bottom:r.bottom,left:r.left,right:r.right}}})()");
+            + "const ancestors=[];for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();ancestors.push({tag:a.tagName,className:a.className,overflowY:s.overflowY,scrollTop:a.scrollTop,scrollHeight:a.scrollHeight,clientHeight:a.clientHeight,rect:b.toJSON()});}"
+            + "return {errors:[...new Set(errors)],tag:e.tagName,label:e.textContent.trim(),rect:{top:r.top,bottom:r.bottom,left:r.left,right:r.right},ancestors}})()");
+        if (result.getJSONArray("errors").length() != 0) capture("last-control-failure-" + location.replaceAll("[^a-zA-Z0-9-]", "-"));
         assertEquals("The last control cannot be scrolled into view in " + location + "; " + result, 0, result.getJSONArray("errors").length());
+    }
+
+    private void reachLastControlByTouch() throws Exception {
+        for (int attempt = 0; attempt < 8; attempt++) {
+            String[] previous = {null}; long[] unchangedSince = {0};
+            DeviceUi.await("The last control layout did not settle", 5000, () -> {
+                String current = String.valueOf(ui.evaluate("(()=>{const e=document.querySelector('[data-layout-last]'),r=e.getBoundingClientRect(),ancestors=[];"
+                    + "for(let a=e.parentElement;a;a=a.parentElement)ancestors.push([a.clientHeight,a.scrollHeight,a.scrollTop]);"
+                    + "return JSON.stringify([r.top,r.bottom,r.left,r.right,ancestors])})()"));
+                if (!current.equals(previous[0])) { previous[0] = current; unchangedSince[0] = SystemClock.elapsedRealtime(); }
+                return SystemClock.elapsedRealtime() - unchangedSince[0] >= 200;
+            });
+            JSONObject position = (JSONObject) ui.evaluate("(()=>{document.querySelectorAll('[data-layout-last-viewport]').forEach(e=>e.removeAttribute('data-layout-last-viewport'));"
+                + "const e=document.querySelector('[data-layout-last]'),r=e.getBoundingClientRect(),root=getComputedStyle(document.documentElement),px=n=>parseFloat(root.getPropertyValue(n))||0;"
+                + "let top=px('--droy-safe-top'),bottom=innerHeight-Math.max(px('--droy-safe-bottom'),px('--droy-ime-bottom')),viewport=null;"
+                + "for(let a=e.parentElement;a;a=a.parentElement){const s=getComputedStyle(a),b=a.getBoundingClientRect();"
+                + "if(/hidden|clip|auto|scroll/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom);}"
+                + "if(!viewport&&/auto|scroll/.test(s.overflowY)&&a.scrollHeight>a.clientHeight+1)viewport=a;}"
+                + "if(viewport)viewport.setAttribute('data-layout-last-viewport','');"
+                + "return {fits:r.top>=top-1&&r.bottom<=bottom+1,canScroll:!!viewport,top,bottom,height:r.height,"
+                + "viewportTop:viewport?.getBoundingClientRect().top||0,viewportHeight:viewport?.getBoundingClientRect().height||0,"
+                + "delta:r.top<top?r.top-top:r.bottom-bottom}})()");
+            if (position.getBoolean("fits") || !position.getBoolean("canScroll")
+                    || position.getDouble("height") > position.getDouble("bottom") - position.getDouble("top")) return;
+            Rect bounds = ui.webBounds("[data-layout-last-viewport]");
+            float scale = (float) (bounds.height() / position.getDouble("viewportHeight"));
+            float top = bounds.top + (float) (position.getDouble("top") - position.getDouble("viewportTop")) * scale;
+            float bottom = bounds.top + (float) (position.getDouble("bottom") - position.getDouble("viewportTop")) * scale;
+            float available = bottom - top;
+            if (available <= 0) return;
+            float delta = (float) position.getDouble("delta");
+            float distance = Math.min(available * 0.6f, Math.abs(delta) * scale + ViewConfiguration.get(context).getScaledTouchSlop() + 8);
+            float start = delta > 0 ? bottom - available * 0.2f : top + available * 0.2f;
+            ui.swipe(bounds.centerX(), start, bounds.centerX(), start + (delta > 0 ? -distance : distance), 350);
+            Bundle status = new Bundle(); status.putString("stream", "\nDROY_LAST_CONTROL_TOUCH_SCROLL " + position + "\n");
+            instrumentation.sendStatus(2, status);
+        }
     }
 
     private void markButton(String root, String chinese, String english) throws Exception {

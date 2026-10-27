@@ -109,9 +109,9 @@ public final class HardwareShortcutActivity extends Activity {
     }
     @Override public void onCreate(Bundle savedState) {
         super.onCreate(savedState);
-        TextView text = new TextView(this); text.setPadding(24, 24, 24, 24); text.setTextSize(16);
-        text.setText(NativeLocale.text("正在打开设备快捷方式…", "Opening device shortcut…"));
-        android.widget.ScrollView content = new android.widget.ScrollView(this); content.addView(text); setContentView(content);
+        android.widget.LinearLayout content = NfcUi.body(this);
+        TextView text = NfcUi.text(this, NativeLocale.text("正在打开设备快捷方式…", "Opening device shortcut…"), 16);
+        content.addView(text); NfcUi.show(this, content);
         String id = getIntent().getStringExtra("shortcutId");
         new Thread(() -> {
             try {

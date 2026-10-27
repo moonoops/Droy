@@ -40,12 +40,20 @@ public class RuntimeLifecycleDeviceTest {
     private Context context;
     private MainActivity activity;
     private boolean ownsRuntime;
+    private SharedPreferences fixturePreferences;
+    private String originalLanguage;
+    private Boolean originalBackgroundStop;
 
     @Before public void setUp() throws Exception {
         instrumentation = InstrumentationRegistry.getInstrumentation();
         context = instrumentation.getTargetContext();
         assertTrue("Stop the existing engine before running lifecycle tests", RuntimeService.canManageHistory());
         assertFalse("The engine should initially be stopped", RuntimeService.ready);
+        fixturePreferences = context.getSharedPreferences("product", Context.MODE_PRIVATE);
+        originalLanguage = fixturePreferences.getString("languagePreference", null);
+        originalBackgroundStop = fixturePreferences.contains(BackgroundRuntime.STOPPED)
+            ? fixturePreferences.getBoolean(BackgroundRuntime.STOPPED, false) : null;
+        assertTrue(fixturePreferences.edit().putString("languagePreference", "zh").commit());
         activity = (MainActivity) instrumentation.startActivitySync(
                 new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         instrumentation.waitForIdleSync();
@@ -71,20 +79,34 @@ public class RuntimeLifecycleDeviceTest {
                         RuntimeService::canManageHistory);
             }
         } finally {
-            if (activity != null) {
-                MainActivity closing = activity;
-                instrumentation.runOnMainSync(closing::finish);
-                await("Lifecycle fixture Activity was not destroyed after finish", 10000, () -> {
-                    boolean[] destroyed = new boolean[1];
-                    instrumentation.runOnMainSync(() -> destroyed[0] = closing.isDestroyed());
-                    return destroyed[0];
-                });
-                instrumentation.waitForIdleSync();
+            try {
+                if (activity != null) {
+                    MainActivity closing = activity;
+                    instrumentation.runOnMainSync(closing::finish);
+                    await("Lifecycle fixture Activity was not destroyed after finish", 10000, () -> {
+                        boolean[] destroyed = new boolean[1];
+                        instrumentation.runOnMainSync(() -> destroyed[0] = closing.isDestroyed());
+                        return destroyed[0];
+                    });
+                    instrumentation.waitForIdleSync();
+                }
+            } finally {
+                if (fixturePreferences != null) {
+                    SharedPreferences.Editor restore = fixturePreferences.edit();
+                    if (originalLanguage == null) restore.remove("languagePreference");
+                    else restore.putString("languagePreference", originalLanguage);
+                    if (originalBackgroundStop == null) restore.remove(BackgroundRuntime.STOPPED);
+                    else restore.putBoolean(BackgroundRuntime.STOPPED, originalBackgroundStop);
+                    assertTrue("Could not restore lifecycle fixture settings", restore.commit());
+                }
             }
         }
     }
 
     @Test public void notificationPausesToolsAndDiagnosticsStopsRealDsh() throws Exception {
+        assertTrue("Grant notification permission before running this notification fixture",
+            android.os.Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED);
         SharedPreferences settings = context.getSharedPreferences("product", Context.MODE_PRIVATE);
         boolean hadPause = settings.contains(ProductPermissions.STOPPED);
         boolean previousPause = settings.getBoolean(ProductPermissions.STOPPED, false);
@@ -101,12 +123,12 @@ public class RuntimeLifecycleDeviceTest {
 
             await("Ready engine did not show its standby state", 5000, () -> {
                 Notification posted = runtimeNotificationForTest();
-                return posted != null && "Droy · 待命".contentEquals(posted.extras.getCharSequence(Notification.EXTRA_TITLE));
+                return posted != null && isStandbyTitle(posted.extras.getCharSequence(Notification.EXTRA_TITLE));
             });
             Notification idle = runtimeNotificationForTest();
             assertNotNull("Ready engine did not publish its standby notification", idle);
             assertTrue("Standby notification should not have action buttons", idle.actions == null || idle.actions.length == 0);
-            assertEquals("Droy · 待命", idle.extras.getCharSequence(Notification.EXTRA_TITLE).toString());
+            assertTrue(isStandbyTitle(idle.extras.getCharSequence(Notification.EXTRA_TITLE)));
             assertNull("Standby notification should not carry an empty expanded layout", idle.extras.getString(Notification.EXTRA_TEMPLATE));
             assertNull("Standby notification should not carry an empty detail line", idle.extras.getCharSequence(Notification.EXTRA_TEXT));
             ToolProgress.update("notification-pause-fixture", "executing", true);
@@ -216,7 +238,7 @@ public class RuntimeLifecycleDeviceTest {
         SharedPreferences settings = context.getSharedPreferences("product", Context.MODE_PRIVATE);
         Map<String, Boolean> saved = savedPermissionChoices(settings);
         try {
-            assertTrue(settings.edit().remove(ProductPermissions.STOPPED).remove("allowDeviceInfo")
+            assertTrue(settings.edit().remove(ProductPermissions.STOPPED).putBoolean("allowDeviceInfo", true)
                     .putBoolean("allowApps", false).commit());
             RuntimeService first = startReady();
             assertOperationsAvailable(first);
@@ -247,7 +269,7 @@ public class RuntimeLifecycleDeviceTest {
         ExecutorService queued = Executors.newSingleThreadExecutor();
         CountDownLatch registered = new CountDownLatch(1), release = new CountDownLatch(1);
         try {
-            assertTrue(settings.edit().remove(ProductPermissions.STOPPED).remove("allowDeviceInfo")
+            assertTrue(settings.edit().remove(ProductPermissions.STOPPED).putBoolean("allowDeviceInfo", true)
                     .putBoolean("allowApps", false).commit());
             RuntimeService first = startReady();
             assertOperationsAvailable(first);
@@ -494,6 +516,11 @@ public class RuntimeLifecycleDeviceTest {
         for (StatusBarNotification posted : context.getSystemService(NotificationManager.class).getActiveNotifications())
             if (posted.getId() == 1 && context.getPackageName().equals(posted.getPackageName())) return posted.getNotification();
         return null;
+    }
+
+    private static boolean isStandbyTitle(CharSequence title) {
+        return title != null && java.util.Set.of("Droy · 待命", "Droy · 正在无所事事", "Droy · 随时听你安排")
+            .contains(title.toString());
     }
 
     private void assertNoRuntimeNotification() throws Exception {

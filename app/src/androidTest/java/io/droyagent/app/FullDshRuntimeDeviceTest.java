@@ -48,6 +48,11 @@ public class FullDshRuntimeDeviceTest {
         assertFalse("The engine must be stopped", RuntimeService.ready);
         assertFalse("Wait for active phone tasks to finish before testing the bridge", ToolProgress.current(context).getBoolean("active"));
         runtime = RuntimeInstaller.install(context);
+        // Capability queries create process singletons. ASR can still load its
+        // native model after a case ends, so none may retain the disposable home.
+        AudioCapture.get(context);
+        AudioTranscription.get(context);
+        HardwareRuntime.get(context);
         fixture = Files.createTempDirectory(context.getFilesDir().toPath(), "full-dsh-device-");
         temporary = Files.createTempDirectory(context.getCacheDir().toPath(), "full-dsh-device-");
         Files.createDirectories(fixture.resolve("home/workspace"));

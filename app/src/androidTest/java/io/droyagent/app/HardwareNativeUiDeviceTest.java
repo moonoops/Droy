@@ -61,10 +61,16 @@ public class HardwareNativeUiDeviceTest {
         assertFalse("Run this native UI batch after stopping the engine", RuntimeService.ready);
         preferences = ProductPermissions.preferences(context);
         for (String key : PREFERENCES) before.put(key, preferences.getAll().get(key));
+        String theme = InstrumentationRegistry.getArguments().getString("hardwareUiTheme", "light");
+        assertTrue("Unsupported native hardware theme", java.util.Set.of("light", "dark", "system").contains(theme));
+        String colorScheme = theme.equals("system")
+            ? ((context.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES ? "dark" : "light")
+            : theme;
         assertTrue(preferences.edit().putBoolean("toolsStopped", false).putBoolean("allowNfcRead", true)
             .putBoolean("allowNfcWrite", true).putBoolean("allowWifiRead", true).putBoolean("allowWifiControl", true)
             .putBoolean("allowDeviceDataRead", true).putBoolean("allowDeviceDataWrite", true)
-            .putString("themeColorScheme", "light").commit());
+            .putString("themeColorScheme", colorScheme).commit());
         touch = new DeviceUi(instrumentation, null);
     }
 
@@ -131,7 +137,16 @@ public class HardwareNativeUiDeviceTest {
         for (String language : new String[]{"zh", "en"}) {
             language(language); launch(HealthPermissionRationaleActivity.class);
             assertTextPresent(NativeLocale.text("身体传感器数据用途", "Body sensor data use"));
-            assertTextGeometry(); capture("health-" + language + "-top.png");
+            onMain(() -> {
+                int safeTop = activity.getWindow().getDecorView().getRootWindowInsets()
+                    .getInsets(android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout()).top;
+                for (View view : views()) if (view instanceof TextView text
+                        && text.getText().toString().equals(NativeLocale.text("身体传感器数据用途", "Body sensor data use"))) {
+                    int[] position = new int[2]; text.getLocationOnScreen(position);
+                    assertTrue("The health-purpose title overlaps the system status bar", position[1] >= safeTop);
+                }
+            });
+            capture("health-" + language + "-top.png"); assertTextGeometry();
             Button back = button(NativeLocale.text("返回", "Back")); reveal(back);
             assertTextGeometry(); capture("health-" + language + "-bottom.png"); tap(back); awaitFinished();
         }
@@ -150,7 +165,16 @@ public class HardwareNativeUiDeviceTest {
             assertTrue(context.getSharedPreferences("device-shortcuts", Context.MODE_PRIVATE).edit().putString(id, record.toString()).commit());
             launch(HardwareShortcutActivity.class, new Intent(context, HardwareShortcutActivity.class).putExtra("shortcutId", id));
             DeviceUi.await("The saved-data entry did not show its synthetic payload", 5000, () -> hasText("01020304"));
-            assertTextPresent(label); assertTextGeometry(); capture("data-shortcut-" + language + ".png");
+            assertTextPresent(label);
+            onMain(() -> {
+                int safeTop = activity.getWindow().getDecorView().getRootWindowInsets()
+                    .getInsets(android.view.WindowInsets.Type.systemBars() | android.view.WindowInsets.Type.displayCutout()).top;
+                for (View view : views()) if (view instanceof TextView text && text.getText().toString().startsWith(label)) {
+                    int[] position = new int[2]; text.getLocationOnScreen(position);
+                    assertTrue("The saved-data preview overlaps the system status bar", position[1] >= safeTop);
+                }
+            });
+            assertTextGeometry(); capture("data-shortcut-" + language + ".png");
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK); awaitFinished();
         }
     }
@@ -189,8 +213,24 @@ public class HardwareNativeUiDeviceTest {
         DeviceUi.await("Touch did not focus the native input", 5000, () -> {
             AtomicReference<Boolean> focused = new AtomicReference<>(false); onMain(() -> focused.set(field.hasFocus())); return focused.get();
         });
-        instrumentation.sendStringSync(value); instrumentation.waitForIdleSync();
-        onMain(() -> assertTrue("Synthetic input did not reach the focused field", value.contentEquals(field.getText())));
+        DeviceUi.await("The input method is not accepting text for the focused field", 5000, () -> {
+            AtomicReference<Boolean> active = new AtomicReference<>(false);
+            onMain(() -> {
+                InputMethodManager manager = context.getSystemService(InputMethodManager.class);
+                active.set(manager != null && manager.isActive(field) && manager.isAcceptingText());
+            });
+            return active.get();
+        });
+        // Commit through Android's editor connection after the real focus touch.
+        onMain(() -> {
+            android.view.inputmethod.InputConnection connection = field.onCreateInputConnection(new android.view.inputmethod.EditorInfo());
+            assertNotNull("The focused native editor has no input connection", connection);
+            assertTrue("The native editor rejected the synthetic IME commit", connection.commitText(value, 1));
+            connection.finishComposingText();
+        });
+        instrumentation.waitForIdleSync();
+        onMain(() -> assertTrue("Synthetic input did not reach the focused field: expected length=" + value.length()
+            + ", actual length=" + field.length() + ", inputType=" + field.getInputType(), value.contentEquals(field.getText())));
     }
     private void reveal(View view) throws Exception {
         onMain(() -> view.requestRectangleOnScreen(new Rect(0, 0, view.getWidth(), view.getHeight()), true));
@@ -202,7 +242,13 @@ public class HardwareNativeUiDeviceTest {
         });
     }
     private void tap(View view) throws Exception {
-        reveal(view); Rect rect = new Rect(); onMain(() -> assertTrue(view.getGlobalVisibleRect(rect)));
+        reveal(view); Rect rect = new Rect(); long[] unchangedSince = {0};
+        // IME insets can still move a visible button after the keyboard reports hidden.
+        DeviceUi.await("Native touch target did not settle after layout", 5000, () -> {
+            Rect current = new Rect(); onMain(() -> assertTrue(view.getGlobalVisibleRect(current)));
+            if (!current.equals(rect)) { rect.set(current); unchangedSince[0] = SystemClock.elapsedRealtime(); }
+            return SystemClock.elapsedRealtime() - unchangedSince[0] >= 200;
+        });
         touch.tapAt(rect.centerX(), rect.centerY()); instrumentation.waitForIdleSync();
     }
     private void hideKeyboard() throws Exception {
@@ -215,7 +261,16 @@ public class HardwareNativeUiDeviceTest {
             }); return hidden.get();
         });
     }
-    private void assertSecure() { onMain(() -> assertNotEquals("Credential page must retain FLAG_SECURE", 0, activity.getWindow().getAttributes().flags & WindowManager.LayoutParams.FLAG_SECURE)); }
+    private void assertSecure() { onMain(() -> {
+        assertNotEquals("Credential page must retain FLAG_SECURE", 0, activity.getWindow().getAttributes().flags & WindowManager.LayoutParams.FLAG_SECURE);
+        if (NfcUi.dark(activity)) for (View view : views()) if (view instanceof EditText field) {
+            double background = android.graphics.Color.luminance(android.graphics.Color.rgb(21,21,23));
+            assertTrue("Dark credential text lacks readable contrast",
+                (android.graphics.Color.luminance(field.getCurrentTextColor()) + .05) / (background + .05) >= 4.5);
+            assertTrue("Dark credential hints lack readable contrast",
+                (android.graphics.Color.luminance(field.getCurrentHintTextColor()) + .05) / (background + .05) >= 4.5);
+        }
+    }); }
     private void assertTextPresent(String expected) throws Exception { DeviceUi.await("Expected native text is missing", 5000, () -> hasText(expected)); }
     private boolean hasText(String expected) {
         AtomicReference<Boolean> found = new AtomicReference<>(false); onMain(() -> { for (View view : views()) if (view instanceof TextView && ((TextView) view).getText().toString().contains(expected)) found.set(true); }); return found.get();
@@ -230,7 +285,10 @@ public class HardwareNativeUiDeviceTest {
                 assertTrue("Native text is vertically clipped", layout.getHeight() <= text.getHeight() - text.getCompoundPaddingTop() - text.getCompoundPaddingBottom() + 1);
                 for (int line = 0; line < layout.getLineCount(); line++) {
                     assertEquals("Native text is ellipsized", 0, layout.getEllipsisCount(line));
-                    if (!(text instanceof EditText)) assertTrue("Native text exceeds its available width", layout.getLineWidth(line) <= layout.getWidth() + 2);
+                    // Wrapped trailing whitespace contributes to lineWidth but has no visible ink.
+                    if (!(text instanceof EditText)) assertTrue("Native text exceeds its available width: line=" + line
+                        + ", lineWidth=" + layout.getLineWidth(line) + ", lineMax=" + layout.getLineMax(line)
+                        + ", available=" + layout.getWidth(), layout.getLineMax(line) <= layout.getWidth() + 2);
                 }
                 if (!(text instanceof EditText)) assertEquals("Native text is cut off before its end", text.length(), layout.getLineEnd(layout.getLineCount() - 1));
             }

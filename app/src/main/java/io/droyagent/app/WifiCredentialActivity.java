@@ -7,12 +7,10 @@ import android.os.Bundle;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.view.View;
-import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import io.droyagent.androiduse.HardwareSupport;
 import io.droyagent.androiduse.WifiCredentialStore;
@@ -56,14 +54,7 @@ public final class WifiCredentialActivity extends Activity {
         body.addView(save); body.addView(status);
         Button back = button(io.droyagent.androiduse.R.string.wifi_credential_back);
         back.setOnClickListener(view -> { password.setText(""); finish(); }); body.addView(back);
-        getWindow().setDecorFitsSystemWindows(false);
-        ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.addView(body);
-        scroll.setBackgroundColor(dark ? Color.rgb(21,21,23) : Color.WHITE);
-        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
-            scroll.setPadding(bars.left, bars.top, bars.right, bars.bottom); return insets;
-        });
-        setContentView(scroll); scroll.requestApplyInsets();
+        NfcUi.show(this, body);
     }
 
     @Override protected void onResume() {
