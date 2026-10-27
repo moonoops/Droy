@@ -9,9 +9,10 @@ export const BASE_TOOL_NAMES = new Set([
   'android_open_settings', 'android_file_grants', 'android_file_export', 'ask_user_question',
   'droy_pet_progress', 'droy_load_tools', 'web_search', 'web_fetch', 'read_image',
 ]);
-const manuals = Object.fromEntries(['memory', 'audio', 'notifications', 'device', 'browser'].map(name =>
+const manuals = Object.fromEntries(['memory', 'audio', 'notifications', 'device', 'browser', 'hardware'].map(name =>
   [name, Object.fromEntries(['zh', 'en'].map(locale => [locale, readFileSync(new URL(`./prompts/extensions/${name}${locale === 'en' ? '.en' : ''}.md`, import.meta.url), 'utf8').trim()]))]));
 export const TOOL_GROUPS = {
+  hardware: { label: '传感器、定位、红外、蓝牙、NFC、网络诊断与设备数据', names: ['android_sensor', 'android_location', 'android_infrared', 'android_bluetooth', 'android_nfc', 'android_nfc_emulation', 'android_wifi', 'android_cellular', 'android_network_probe', 'android_device_data', 'android_device_shortcut'] },
   memory: { label: '指定应用进程内存查询/扫描/读写', names: ['android_process_memory', 'android_memory_scan', 'android_memory_read', 'android_memory_write'] },
   audio: { label: '录音、转写及助手音色查询与切换', names: ['android_audio_start', 'android_audio_status', 'android_audio_stop', 'audio_transcribe', 'audio_transcript_read', 'audio_transcription_stop', 'droy_voice'] },
   notifications: { label: '通知查询、管理规则及主动通知', names: ['android_notifications_query', 'droy_notification_rules', 'droy_notification_channels', 'droy_notify'] },
@@ -25,6 +26,7 @@ export const TOOL_GROUPS = {
   extensions: { label: '其他已安装插件工具及展示能力', names: [] },
 };
 export const TOOL_GROUP_LABELS_EN = {
+  hardware: 'Sensors, location, infrared, Bluetooth, NFC, network diagnostics and saved device data',
   memory: 'Query, scan, read, and write a specified app process memory',
   audio: 'Record, transcribe, query, and select assistant voices',
   notifications: 'Query notifications, manage rules, and notify proactively',

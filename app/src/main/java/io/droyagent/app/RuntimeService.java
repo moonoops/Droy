@@ -50,6 +50,7 @@ public final class RuntimeService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         NotificationManagement.refreshAccess(this);
         if (intent != null && STOP.equals(intent.getAction())) {
+            HardwareRuntime.stopAll(this);
             BackgroundRuntime.stoppedByUser(this); stopGracefully(); return START_NOT_STICKY;
         }
         if (intent != null && CANCEL_TASK.equals(intent.getAction())) {
@@ -418,6 +419,7 @@ public final class RuntimeService extends Service {
     }
     static void pauseOperations(Context context) {
         ProductPermissions.setStopped(context, true);
+        HardwareRuntime.stopAll(context);
         MemoryRuntime.get(context).operationsChanged();
         VoiceRuntime.stop("operations_paused");
         AudioCapture.get(context).stopAll("operations_paused");
@@ -450,6 +452,7 @@ public final class RuntimeService extends Service {
                 boolean paused = ProductPermissions.stopped(this);
                 if (paused && !bridge.policy.isStopped()) {
                     bridge.policy.stop();
+                    HardwareRuntime.stopAll(this);
                     io.droyagent.androiduse.ProcessMemoryTools.get(this).closeAll();
                 }
                 else if (!paused && bridge.policy.isStopped()) bridge.policy.enable();
@@ -458,6 +461,7 @@ public final class RuntimeService extends Service {
     }
     void stopOperations() {
         if (bridge != null) bridge.policy.stop();
+        HardwareRuntime.releaseTransient(this);
         io.droyagent.androiduse.ProcessMemoryTools.get(this).closeAll();
         ToolProgress.clearScreenOperations();
         AutomationScreenOverlay.refresh(this);
@@ -490,6 +494,7 @@ public final class RuntimeService extends Service {
     }
 
     static void requestStop(Context context) {
+        HardwareRuntime.stopAll(context);
         MemoryRuntime.get(context).runtimeStopped();
         VoiceRuntime.stop("user_stop");
         AudioCapture.get(context).stopAll("user_stop");

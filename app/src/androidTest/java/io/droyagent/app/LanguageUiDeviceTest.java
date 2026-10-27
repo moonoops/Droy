@@ -38,7 +38,10 @@ public final class LanguageUiDeviceTest {
         if (hadHome) assertTrue(home.renameTo(backup));
         assertTrue(home.mkdirs());
         MainActivity activity = null;
+        SharedPreferences installation = context.getSharedPreferences("installation", Context.MODE_PRIVATE);
+        Boolean completed = installation.contains("completed") ? installation.getBoolean("completed", false) : null;
         try {
+            assertTrue(installation.edit().putBoolean("completed", true).commit());
             assertTrue(preferences.edit().putString("languagePreference", "en").putBoolean("petEnabled", false)
                 .putBoolean("backgroundRuntimeEnabled", false).commit());
             activity = (MainActivity) instrumentation.startActivitySync(new Intent(context, MainActivity.class)
@@ -105,6 +108,9 @@ public final class LanguageUiDeviceTest {
                 else restore.remove(key);
             }
             assertTrue(restore.commit());
+            SharedPreferences.Editor setupRestore = installation.edit();
+            if (completed == null) setupRestore.remove("completed"); else setupRestore.putBoolean("completed", completed);
+            assertTrue(setupRestore.commit());
         }
     }
 

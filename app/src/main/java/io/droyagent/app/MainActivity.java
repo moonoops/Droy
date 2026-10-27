@@ -827,6 +827,10 @@ public final class MainActivity extends Activity {
         boolean notifications = Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
         system.put("brightness", Settings.System.canWrite(this)); system.put("runtimeNotifications", notifications);
         system.put("microphone", checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED);
+        JSONObject hardwarePermissions = HardwarePermissionState.status(this);
+        for (java.util.Iterator<String> keys = hardwarePermissions.keys(); keys.hasNext();) {
+            String key = keys.next(); system.put(key, hardwarePermissions.get(key));
+        }
         JSONObject result = new JSONObject().put("assistantName", AppBranding.name(this, preferences))
             .put("branding", AppBranding.state(this, preferences))
             .put("petEnabled", PetOverlay.enabled(this)).put("petName", PetOverlay.name(this))
@@ -860,6 +864,15 @@ public final class MainActivity extends Activity {
     }
 
     private void requestSystemPermission(String name) {
+        String[] hardwarePermissions = HardwarePermissionState.runtimePermissions(name, Build.VERSION.SDK_INT);
+        if (hardwarePermissions != null) {
+            boolean missing = false;
+            for (String permission : hardwarePermissions)
+                missing |= checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED;
+            if (missing) requestPermissions(hardwarePermissions, 73);
+            else startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
+            return;
+        }
         switch (name) {
             case "notifications": {
                 if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -889,6 +902,10 @@ public final class MainActivity extends Activity {
             case "calendar": requestPermissions(new String[]{Manifest.permission.READ_CALENDAR}, 21); break;
             case "contacts": requestPermissions(new String[]{Manifest.permission.READ_CONTACTS}, 22); break;
             case "microphone": requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 72); break;
+            case "locationSettings": startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)); break;
+            case "bluetoothSettings": startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); break;
+            case "wifiSettings": startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS)); break;
+            case "nfcSettings": startActivity(new Intent(Settings.ACTION_NFC_SETTINGS)); break;
             case "notificationAccess": startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)); break;
             case "usage": startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS, Uri.parse("package:" + getPackageName()))); break;
             case "brightness": startActivity(new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + getPackageName()))); break;
@@ -1030,7 +1047,7 @@ public final class MainActivity extends Activity {
               const install = () => {
                 const root = document.documentElement;
                 if (!root) return false;
-                root.setAttribute('data-droy-mobile', '0.2.1-rc.2');
+                root.setAttribute('data-droy-mobile', '0.2.1-rc.4');
                 let sheet = document.getElementById('droy-mobile-layout');
                 if (!sheet) {
                   sheet = document.createElement('style');
@@ -1163,6 +1180,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
         super.onRequestPermissionsResult(request, permissions, grants);
+        HardwareRuntime.onPermissionsChanged(this);
         if (chatMicrophone != null) chatMicrophone.result(request);
         if (chatCamera != null) chatCamera.result(request);
         NotificationManagement.refreshAccess(this);
@@ -1438,6 +1456,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        HardwareRuntime.onPermissionsChanged(this);
         io.droyagent.androiduse.AccessibilityRecovery.get(this).onAppOpened(ProductPermissions.allowed(preferences, "allowRoot"));
         NotificationManagement.get(this).rescan();
         applyNativeTheme(); pushWindowInsets(); refreshWebState();

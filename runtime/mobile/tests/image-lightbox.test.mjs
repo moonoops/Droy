@@ -4,10 +4,10 @@ import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {patchImageLightbox} from '../../../tools/mobile_ui_patch.mjs';
 
-const asset='@deepseek-ai/dsh-web-frontend/dist/assets/index-CN7NIWNw.js';
+const asset='@deepseek-ai/dsh-web-frontend/dist/assets/index-BXV-oxvX.js';
 const upstream=await readFile(new URL('../../dsh/node_modules/'+asset,import.meta.url),'utf8');
 const patched=patchImageLightbox(upstream);
-const component=patched.slice(patched.indexOf('function aw('),patched.indexOf('function qF(',patched.indexOf('function aw(')));
+const component=patched.slice(patched.indexOf('function lw('),patched.indexOf('function QF(',patched.indexOf('function lw(')));
 
 function nodes(tree) {
   if(!tree||typeof tree!=='object')return[];
@@ -31,7 +31,7 @@ function mount({mobile=true,native=false,id='preview-1'}={}) {
   const react={useRef:value=>({current:value}),useId:()=>id,useEffect:effect=>effects.push(effect)};
   const jsx=(type,props)=>({type,props});
   const portals=[];
-  const make=new Function('C','$n','u','Cs','ru','window','document','HTMLElement',`${component};return aw;`);
+  const make=new Function('C','Sn','d','Cs','ru','window','document','HTMLElement',`${component};return lw;`);
   const Lightbox=make(react,{createPortal:(tree,target)=>{portals.push(target);return tree;}},{jsx,jsxs:jsx},
     {backdrop:'backdrop',stage:'stage',mask:'mask',image:'image',close:'close'},'close-icon',window,document,Element);
   let closed=0;
@@ -95,7 +95,7 @@ test('shared image component patch is locked, unique, and included in packaging'
   assert.equal(lock.sha256[asset],createHash('sha256').update(upstream).digest('hex'));
   assert.equal(patched.split('data-droy-attachment-lightbox').length,2);
   assert.throws(()=>patchImageLightbox(patched),/already adapted/);
-  assert.throws(()=>patchImageLightbox(upstream.replace('function aw({src:e,alt:t,labels:r,onClose:i}){','function upstreamChanged(){')),/shared image lightbox/);
+  assert.throws(()=>patchImageLightbox(upstream.replace('function lw({src:e,alt:t,labels:r,onClose:i}){','function upstreamChanged(){')),/shared image lightbox/);
   const prepare=await readFile(new URL('../../../tools/prepare_dsh.mjs',import.meta.url),'utf8');
   assert.ok(prepare.includes(`await patch('${asset}', patchImageLightbox);`));
 });

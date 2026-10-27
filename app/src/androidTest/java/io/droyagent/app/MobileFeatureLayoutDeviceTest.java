@@ -56,6 +56,10 @@ public final class MobileFeatureLayoutDeviceTest {
     private SharedPreferences preferences;
     private String originalTheme;
     private boolean hadOriginalTheme;
+    private String originalLanguage;
+    private boolean hadOriginalLanguage;
+    private Boolean originalSetupCompleted;
+    private boolean setupCompletionOwned;
     private static final String OPTIONS = "[data-droy-settings-options]";
     private static final String TABS = "[data-droy-settings-tabs]";
 
@@ -65,6 +69,8 @@ public final class MobileFeatureLayoutDeviceTest {
         preferences = context.getSharedPreferences("product", Context.MODE_PRIVATE);
         hadOriginalTheme = preferences.contains("themePreference");
         originalTheme = preferences.getString("themePreference", "system");
+        hadOriginalLanguage = preferences.contains("languagePreference");
+        originalLanguage = preferences.getString("languagePreference", "system");
         assertTrue("Layout fixtures require a dedicated emulator",
             Build.FINGERPRINT.startsWith("generic") || Build.FINGERPRINT.contains("emulator")
                 || Build.MODEL.contains("sdk_gphone") || Build.PRODUCT.contains("sdk_gphone"));
@@ -79,6 +85,15 @@ public final class MobileFeatureLayoutDeviceTest {
         homeOwned = true;
         assertTrue("Could not create the isolated layout home", isolatedHome.mkdirs());
         seedFutureAutomation();
+        SharedPreferences installation = context.getSharedPreferences("installation", Context.MODE_PRIVATE);
+        originalSetupCompleted = installation.contains("completed") ? installation.getBoolean("completed", false) : null;
+        assertTrue(installation.edit().putBoolean("completed", true).commit());
+        setupCompletionOwned = true;
+        String locale = InstrumentationRegistry.getArguments().getString("layoutLocale");
+        if (locale != null) {
+            assertTrue("Unsupported layout locale", locale.equals("zh") || locale.equals("en"));
+            assertTrue(preferences.edit().putString("languagePreference", locale).commit());
+        }
         activity = (MainActivity) instrumentation.startActivitySync(new Intent(context, MainActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         ui = new DeviceUi(instrumentation, activity);
@@ -86,7 +101,8 @@ public final class MobileFeatureLayoutDeviceTest {
         ui.hideKeyboard();
         awaitMainMenu();
         if ("true".equals(InstrumentationRegistry.getArguments().getString("layoutMaxTextFont"))) maximizeDshTextFont();
-        if ("dark".equals(InstrumentationRegistry.getArguments().getString("layoutTheme"))) chooseDarkTheme();
+        String theme = InstrumentationRegistry.getArguments().getString("layoutTheme");
+        if (theme != null) chooseTheme(theme);
     }
 
     @After public void tearDown() throws Exception {
@@ -113,7 +129,15 @@ public final class MobileFeatureLayoutDeviceTest {
             assertEquals("The layout fixture changed original DSH data", originalFiles, snapshot(isolatedHome.toPath()));
             SharedPreferences.Editor restore = preferences.edit();
             if (hadOriginalTheme) restore.putString("themePreference", originalTheme); else restore.remove("themePreference");
+            if (hadOriginalLanguage) restore.putString("languagePreference", originalLanguage); else restore.remove("languagePreference");
             assertTrue("Could not restore the native theme preference", restore.commit());
+            if (setupCompletionOwned) {
+                SharedPreferences.Editor installation = context.getSharedPreferences("installation", Context.MODE_PRIVATE).edit();
+                if (originalSetupCompleted == null) installation.remove("completed");
+                else installation.putBoolean("completed", originalSetupCompleted);
+                assertTrue("Could not restore installation completion", installation.commit());
+                setupCompletionOwned = false;
+            }
             homeOwned = false;
         }
     }
@@ -412,14 +436,15 @@ public final class MobileFeatureLayoutDeviceTest {
         fail("The command menu item cannot be reached by actual vertical touch scrolling: " + selector + " " + position);
     }
 
-    private void chooseDarkTheme() throws Exception {
+    private void chooseTheme(String theme) throws Exception {
+        assertTrue("Unsupported layout theme", List.of("light", "dark", "system").contains(theme));
         ui.evaluate("window.dispatchEvent(new CustomEvent('droy-mobile-open-settings',{detail:{section:'general'}}))");
-        DeviceUi.await("The actual DSH dark theme choice did not load", 10000,
-            () -> ui.truth("!!document.querySelector('[data-droy-theme-choice=dark]')"));
-        ui.tap("[data-droy-theme-choice=dark]");
-        DeviceUi.await("The DSH page did not apply the dark palette", 5000,
-            () -> ui.truth("document.body.hasAttribute('data-ds-dark-theme')")
-                && "dark".equals(preferences.getString("themePreference", "")));
+        String selector = "[data-droy-theme-choice=" + theme + "]";
+        DeviceUi.await("The actual DSH theme choice did not load", 10000,
+            () -> ui.truth("!!document.querySelector(" + JSONObject.quote(selector) + ")"));
+        ui.tap(selector);
+        DeviceUi.await("The DSH page did not apply the requested theme", 5000,
+            () -> theme.equals(preferences.getString("themePreference", "")));
         ui.tap("[data-droy-settings-back]");
         awaitMainMenu();
     }
@@ -469,13 +494,23 @@ public final class MobileFeatureLayoutDeviceTest {
         try (ServerSocket socket = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))) { port = socket.getLocalPort(); }
         String script = """
             import {pathToFileURL} from 'node:url';
+            import {createServer} from 'node:http';
             const base=process.env.DROY_RUNTIME_DIR;
+            const fixtureBridge=createServer((req,res)=>{
+              if(req.url==='/memory') {res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,result:{settings:{enabled:false,recallEnabled:true,automaticExtraction:false,privacyEverActivated:false},root:{authorized:false,checkedAt:0},execution:{ready:false,reason:'MEMORY_DISABLED'}}}));return;}
+              if(req.url!=='/companion') {res.writeHead(404,{'content-type':'application/json'});res.end(JSON.stringify({ok:false,error:{code:'FIXTURE_ROUTE_MISSING',message:req.url}}));return;}
+              res.writeHead(200,{'content-type':'application/json'});
+              res.end(JSON.stringify({ok:true,result:{name:'Fixture',displayName:'Fixture',appearanceId:'default',personality:''}}));
+            });
+            await new Promise(resolve=>fixtureBridge.listen(0,'127.0.0.1',resolve));
+            process.env.DROY_BRIDGE_PORT=String(fixtureBridge.address().port);
+            let instance;
+            try {
             await import(pathToFileURL(base+'/mobile/bootstrap.mjs'));
             const {runProfile}=await import(pathToFileURL(base+'/node_modules/@deepseek-ai/dsh/lib/profile-boot.js'));
             const {createLaunchEnvironmentSnapshot}=await import(pathToFileURL(base+'/node_modules/@deepseek-ai/dsh-launch-environment/lib/index.js'));
             const {createUserMessage}=await import(pathToFileURL(base+'/node_modules/@deepseek-ai/dsh-llm/lib/index.js'));
-            const instance=await runProfile({profile:'mobile',patchFiles:[],args:['--no-open'],environment:createLaunchEnvironmentSnapshot([{source:'process',values:process.env}])});
-            try {
+            instance=await runProfile({profile:'mobile',patchFiles:[],args:['--no-open'],environment:createLaunchEnvironmentSnapshot([{source:'process',values:process.env}])});
               const {ctx}=instance,workspace=ctx.workspaceRegistry.list()[0];
               if((await ctx.sessionPersistence.list()).length!==0)throw Error('Fixture home was not empty');
               const created=await ctx.sessionController.create({sessionId:'droy-layout-fixture',workspaceId:workspace.id,agentPreset:'standard'});
@@ -486,7 +521,10 @@ public final class MobileFeatureLayoutDeviceTest {
               await ctx.schedule.create(created.sessionId,{title:'Fictional layout task',prompt:'Fictional layout fixture. Never deliver in this test.',after_seconds:86400});
               await ctx.sessions.flush(ctx.sessions.get(created.sessionId));
               console.log('DROY_LAYOUT_SEEDED');
-            } finally {await instance.shutdown.shutdown(0);}
+            } finally {
+              try {await instance?.shutdown.shutdown(0);}
+              finally {await new Promise(resolve=>fixtureBridge.close(resolve));}
+            }
             """;
         String nativeDir = context.getApplicationInfo().nativeLibraryDir;
         ProcessBuilder builder = new ProcessBuilder(nativeDir + "/libdroy_node.so", "--expose-internals", "--input-type=module", "-e", script);

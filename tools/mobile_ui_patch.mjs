@@ -686,11 +686,12 @@ export function patchModelSelection(source) {
 
 export function patchImageLightbox(source) {
   if (source.includes('data-droy-attachment-lightbox')) throw new Error('Mobile UI patch anchor: image lightbox already adapted');
-  const start = source.indexOf('function aw({src:e,alt:t,labels:r,onClose:i}){');
-  const end = source.indexOf('function qF(', start);
+  const start = source.indexOf('function lw({src:e,alt:t,labels:r,onClose:i}){');
+  const end = source.indexOf('function QF(', start);
   if (start < 0 || end < 0) throw new Error('Mobile UI patch anchor: shared image lightbox');
   const original = source.slice(start, end);
-  let updated = replaceOnce(original, 'const n=C.useRef(null),s=C.useRef(null);return', `const n=C.useRef(null),s=C.useRef(null),o=C.useRef(null),a=document.documentElement.hasAttribute("data-droy-mobile")||typeof window.DroyNative!=="undefined",f=C.useRef(i),d=C.useId();f.current=i;C.useEffect(()=>{if(!a)return;let dispose;const id="attachment-lightbox:"+d;const bind=()=>{dispose?.();dispose=window.DroyTouch?.bindMenu(id,{isOpen:()=>o.current?.isConnected===true,close:()=>f.current(),getElement:()=>o.current});window.DroyTouch?.menuOpened?.(id)};bind();window.addEventListener("droy-touch-ready",bind);return()=>{dispose?.();window.removeEventListener("droy-touch-ready",bind)}},[a,d]);return`);
+  // rc.4 uses `d` for JSX; the injected hook ID must not shadow that binding.
+  let updated = replaceOnce(original, 'const n=C.useRef(null),s=C.useRef(null);return', `const n=C.useRef(null),s=C.useRef(null),o=C.useRef(null),a=document.documentElement.hasAttribute("data-droy-mobile")||typeof window.DroyNative!=="undefined",f=C.useRef(i),droyLightboxId=C.useId();f.current=i;C.useEffect(()=>{if(!a)return;let dispose;const id="attachment-lightbox:"+droyLightboxId;const bind=()=>{dispose?.();dispose=window.DroyTouch?.bindMenu(id,{isOpen:()=>o.current?.isConnected===true,close:()=>f.current(),getElement:()=>o.current});window.DroyTouch?.menuOpened?.(id)};bind();window.addEventListener("droy-touch-ready",bind);return()=>{dispose?.();window.removeEventListener("droy-touch-ready",bind)}},[a,droyLightboxId]);return`);
   updated = replaceOnce(updated, 'C.useEffect(()=>{s.current=', 'C.useEffect(()=>{const closingOwner=o.current;s.current=');
   updated = replaceOnce(updated, 's.current?.focus()', 'a&&window.DroyTouch?window.DroyTouch.restoreFocus(s.current,document.querySelector("[data-droy-menu]"),closingOwner):s.current?.focus()');
   updated = replaceOnce(updated, 'className:Cs.backdrop,role:', 'ref:o,"data-droy-attachment-lightbox":a||void 0,className:Cs.backdrop,role:');

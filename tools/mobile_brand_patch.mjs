@@ -91,6 +91,18 @@ export function patchProductCopy(source, count) {
   return source.replaceAll('DeepSeek Harness', 'Droy');
 }
 
+export function patchEntryCustomizationCopy(source) {
+  for (const [before, after] of [
+    ['Create a DSH plugin with a left sidebar entry.', 'Create a Droy plugin with a left sidebar entry.'],
+    ['Create a DSH conversation view plugin.', 'Create a Droy conversation view plugin.'],
+    ['Create a DSH plugin with a right sidebar entry.', 'Create a Droy plugin with a right sidebar entry.'],
+    ['创建一个带左侧栏入口的 DSH 插件。', '创建一个带左侧栏入口的 Droy 插件。'],
+    ['创建一个 DSH 会话视图插件。', '创建一个 Droy 会话视图插件。'],
+    ['创建一个带右侧栏入口的 DSH 插件。', '创建一个带右侧栏入口的 Droy 插件。'],
+  ]) source = replaceOnce(source, JSON.stringify(before), JSON.stringify(after));
+  return source;
+}
+
 export function patchSpaceCopy(source) {
   return source.replaceAll('工作区', '空间');
 }

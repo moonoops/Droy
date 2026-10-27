@@ -238,9 +238,9 @@ window.__ModuleLoader__.load({
       function Wave({ level = 0, sequence = 0, active = true, large = false }) {
         const [samples, setSamples] = React.useState(() => Array(24).fill(0));
         React.useEffect(() => {
-          // Each measured sample advances the trace, including equal successive levels.
-          setSamples(previous => !active || level <= 0 ? Array(24).fill(0)
-            : [...previous.slice(1), Math.min(1, Math.sqrt(level) * 3.2)]);
+          // Silence advances time too; only inactive capture clears the history.
+          setSamples(previous => !active ? Array(24).fill(0)
+            : [...previous.slice(1), Math.min(1, Math.sqrt(Math.max(0, level)) * 3.2)]);
         }, [level, sequence, active]);
         return h('div', { className: `droy-voice-wave${large ? ' is-large' : ''}${!active ? ' is-inactive' : ''}`, 'aria-hidden': true },
           samples.map((sample, key) => h('i', { key, style: { transform: `scaleY(${Math.max(.06, active ? sample : 0)})` } })));

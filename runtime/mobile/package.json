@@ -36,11 +36,11 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/dsh-attachment-local": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-scope": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-attachment-local": "0.2.1-rc.4",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.4",
+    "@deepseek-ai/dsh-scope": "0.2.1-rc.4",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.4",
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.4",
     "yaml": "2.9.1",
     "zod": "4.6.7"
   }

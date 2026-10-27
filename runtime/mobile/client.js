@@ -373,6 +373,15 @@ window.__ModuleLoader__.load({
         : diagnostics?.available === false ? droyText("待配置，请通过电脑端权限配置工具授权")
         : droyText("状态暂不可用");
       const yesNo = value => value === true ? droyText("已授权") : value === false ? droyText("待授权") : droyText("状态暂不可用");
+      const hardware = system.hardware || {};
+      const supported = (kind, status) => hardware[kind] === false ? droyText("设备不支持") : status;
+      const enabled = value => value === true ? droyText("已开启") : value === false ? droyText("未开启") : droyText("状态暂不可用");
+      const locationStatus = system.locationPrecise === true ? droyText("精确位置已授权")
+        : system.locationApproximate === true ? droyText("大致位置已授权") : yesNo(system.locationApproximate);
+      const bluetoothStatus = system.bluetoothScan === true && system.bluetoothConnect === true ? droyText("已授权")
+        : system.bluetoothScan === false || system.bluetoothConnect === false ? droyText("待授权") : droyText("状态暂不可用");
+      const wifiScanStatus = system.locationPrecise === false ? droyText("需要精确位置权限")
+        : system.locationEnabled === false ? droyText("请开启系统定位") : yesNo(system.wifiScan);
       const recovery = caps.accessibilityRecovery || {};
       let accessibilityStatus = droyText("待连接");
       if (caps.accessibilityConnected) accessibilityStatus = droyText("已连接");
@@ -390,6 +399,17 @@ window.__ModuleLoader__.load({
         ['calendar', droyText("日历读取"), yesNo(system.calendar), droyText("设置日历读取权限")],
         ['contacts', droyText("联系人读取"), yesNo(system.contacts), droyText("设置联系人读取权限")],
         ['microphone', droyText("麦克风"), yesNo(system.microphone), droyText("设置麦克风权限")],
+        ['location', droyText("位置访问"), locationStatus, droyText("设置位置权限")],
+        ['locationSettings', droyText("系统定位"), enabled(system.locationEnabled), droyText("打开定位设置")],
+        ['bluetooth', droyText("附近蓝牙设备"), supported('bluetooth', bluetoothStatus), hardware.bluetooth === false ? null : droyText("设置蓝牙权限")],
+        ['bluetoothSettings', droyText("蓝牙开关"), supported('bluetooth', enabled(system.bluetoothEnabled)), hardware.bluetooth === false ? null : droyText("打开蓝牙设置")],
+        ['wifiScan', droyText("Wi-Fi 扫描"), supported('wifi', wifiScanStatus), hardware.wifi === false ? null : droyText("设置扫描位置权限")],
+        ['nearbyWifi', droyText("附近 Wi-Fi 设备"), supported('wifi', yesNo(system.nearbyWifi)), hardware.wifi === false ? null : droyText("设置附近 Wi-Fi 权限")],
+        ['wifiSettings', droyText("Wi-Fi 开关"), supported('wifi', enabled(system.wifiEnabled)), hardware.wifi === false ? null : droyText("打开 Wi-Fi 设置")],
+        ['nfcSettings', droyText("NFC 开关"), supported('nfc', enabled(system.nfcEnabled)), hardware.nfc === false ? null : droyText("打开 NFC 设置")],
+        ['phoneState', droyText("蜂窝网络信息"), supported('telephony', yesNo(system.phoneState)), hardware.telephony === false ? null : droyText("设置电话状态权限")],
+        ['activityRecognition', droyText("计步与活动识别"), supported('stepCounter', yesNo(system.activityRecognition)), hardware.stepCounter === false ? null : droyText("设置活动识别权限")],
+        ['bodySensors', droyText("心率传感器"), supported('heartRate', yesNo(system.bodySensors)), hardware.heartRate === false ? null : droyText("设置心率权限")],
         ['notificationAccess', droyText("通知访问"), notifications.permissionGranted === true
           ? notifications.connected ? droyText("已授权，服务已连接") : droyText("已授权，服务待连接")
           : notifications.permissionGranted === false ? droyText("待授权") : droyText("状态暂不可用"), droyText("打开通知访问设置")],

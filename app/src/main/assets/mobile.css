@@ -1,4 +1,4 @@
-/* DSH 0.2.1-rc.2 settings classes, verified in the Android WebView.
+/* DSH 0.2.1-rc.4 settings classes, verified in the Android WebView.
    Keep this adapter scoped to the packaged app and recheck it on DSH upgrades. */
 html[data-droy-mobile] {
   --droy-mobile-layout-ready: 1;

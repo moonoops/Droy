@@ -39,6 +39,12 @@ ACCESSIBILITY_POLL_SECONDS = 0.2
 ACCESSIBILITY_REBIND_SECONDS = 0.5
 WORKSPACE_DIR = Path(__file__).resolve().parents[2]
 PLATFORM_TOOLS_URL = "https://developer.android.com/tools/releases/platform-tools"
+HARDWARE_PERMISSION_LABELS_EN = {
+    "大致位置": "Approximate location", "精确位置": "Precise location",
+    "蓝牙扫描": "Bluetooth scan", "蓝牙连接": "Bluetooth connection",
+    "附近 Wi-Fi 设备": "Nearby Wi-Fi devices", "电话状态": "Phone state",
+    "活动识别": "Activity recognition", "心率读取": "Read heart rate", "身体传感器": "Body sensors",
+}
 
 
 class SetupError(Exception):
@@ -389,11 +395,33 @@ class PermissionSetup:
         """
         selected = list(dict.fromkeys(permissions))
         allowed = {"accessibility", "calendar", "contacts", "microphone", "notifications",
-                   "notificationAccess", "usage", "diagnostics", "brightness", "overlay"}
+                   "notificationAccess", "usage", "diagnostics", "brightness", "overlay",
+                   "location", "bluetooth", "nearbyWifi", "phoneState", "activityRecognition", "bodySensors"}
         if any(not isinstance(name, str) or name not in allowed for name in selected):
             raise ValueError("安装方案包含不支持的系统权限")
+        granted_runtime = set()
+        location = (("大致位置", "android.permission.ACCESS_COARSE_LOCATION"),
+                    ("精确位置", "android.permission.ACCESS_FINE_LOCATION"))
+        hardware = {
+            "location": location,
+            "bluetooth": (("蓝牙扫描", "android.permission.BLUETOOTH_SCAN"),
+                          ("蓝牙连接", "android.permission.BLUETOOTH_CONNECT")) if self.api >= 31 else location,
+            "nearbyWifi": (("附近 Wi-Fi 设备", "android.permission.NEARBY_WIFI_DEVICES"),) if self.api >= 33 else location,
+            "phoneState": (("电话状态", "android.permission.READ_PHONE_STATE"),),
+            "activityRecognition": (("活动识别", "android.permission.ACTIVITY_RECOGNITION"),),
+            "bodySensors": (("心率读取", "android.permission.health.READ_HEART_RATE"),) if self.api >= 36
+                else (("身体传感器", "android.permission.BODY_SENSORS"),),
+        }
         for name in selected:
-            if name == "accessibility":
+            if name in hardware:
+                for label, permission in hardware[name]:
+                    if permission in granted_runtime:
+                        continue
+                    granted_runtime.add(permission)
+                    self.item(label + " / " + HARDWARE_PERMISSION_LABELS_EN[label],
+                              lambda permission=permission: self.runtime_permission(permission),
+                              detail="已开启并确认 / Enabled and verified")
+            elif name == "accessibility":
                 self.accessibility_recovery()
                 self.item("无障碍操作", self.accessibility)
             elif name in ("calendar", "contacts", "microphone"):

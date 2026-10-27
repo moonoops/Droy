@@ -1,0 +1,33 @@
+<resources>
+    <string name="nfc_title">NFC 读卡</string>
+    <string name="nfc_waiting">请将卡片贴近手机。Droy 通信期间请保持此页面打开。</string>
+    <string name="nfc_detected">已发现卡片。操作结束前请保持卡片贴近手机。</string>
+    <string name="nfc_cancel">关闭 NFC 读卡</string>
+    <string name="nfc_unavailable">NFC 不可用或未开启，请检查系统 NFC 设置。</string>
+    <string name="nfc_denied">NFC 操作已暂停，或尚未在 Droy 权限设置中允许。</string>
+    <string name="nfc_invalid_request">NFC 操作或参数无效。</string>
+    <string name="nfc_session_lost">卡片会话已失效，请打开读卡入口并重新贴卡。</string>
+    <string name="nfc_reader_busy">另一项 NFC 操作正在进行。</string>
+    <string name="nfc_timeout">等待超时，未发现卡片。</string>
+    <string name="nfc_unsupported_tech">手机不支持此卡片技术。</string>
+    <string name="nfc_write_rejected">目标不可写、容量不足，或包含受保护的配置字节。</string>
+    <string name="nfc_auth_required">此操作需要已保存的 NFC 凭据引用。</string>
+    <string name="nfc_credential_missing">未找到该 NFC 凭据引用。</string>
+    <string name="nfc_save_failed">NFC 数据未能保存。</string>
+    <string name="nfc_hce_active">请先停用卡片模拟，再启动 NFC 读卡。</string>
+    <string name="nfc_credential_title">添加 NFC 凭据</string>
+    <string name="nfc_credential_help">输入你已有的 MIFARE Classic 密钥。密钥加密保留在手机中，工具通过引用使用。</string>
+    <string name="nfc_credential_name">凭据名称</string>
+    <string name="nfc_credential_key">密钥：12 个十六进制字符</string>
+    <string name="nfc_credential_save">保存凭据</string>
+    <string name="nfc_credential_saved">凭据已保存。返回 Droy 后查询 NFC 凭据列表即可使用其引用。</string>
+    <string name="nfc_back">返回 Droy</string>
+    <string name="nfc_hce_unavailable">手机不支持卡片模拟、读卡器正在使用，或设备已锁定。</string>
+    <string name="nfc_hce_invalid">HCE 配置无效或不存在。</string>
+    <string name="nfc_hce_route_failed">Android 未能注册所需的 AID 路由。</string>
+    <string name="nfc_io_failed">NFC 通信失败，请保持卡片位置，继续前先核实最后一次操作。</string>
+    <string name="nfc_data_ndef">NFC NDEF 消息</string>
+    <string name="nfc_data_block">NFC 数据块</string>
+    <string name="nfc_data_pages">NFC 数据页</string>
+    <string name="nfc_data_response">NFC 响应</string>
+</resources>

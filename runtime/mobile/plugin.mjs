@@ -18,6 +18,7 @@ import { renderPhoneResult } from './tool-result.mjs';
 import { installSetupServices } from './setup.mjs';
 import { resolveMobileLocale } from './locale.mjs';
 import { translateBackendText } from './backend-i18n.mjs';
+import { protectHardwareDisclosure } from './hardware-disclosure.mjs';
 
 export const name = 'droy-android-use';
 export const inject = ['tools', 'llm', 'attachments', 'webServer', 'settings', 'agents', 'userQuestions', 'systemPrompt', 'droyPluginPolicy'];
@@ -101,8 +102,12 @@ export function apply(ctx) {
         }
         active.add(String(exec.agent.id));
         let result;
-        try { result = action.startsWith('audio_') ? await audio.execute(action, args, exec)
-          : action === 'verification' ? await verification(args, exec) : await bridge.call(action, args, exec); }
+        try {
+          // A denied processing route must be discovered before a physical write.
+          await protectHardwareDisclosure(ctx, action, args, exec);
+          result = action.startsWith('audio_') ? await audio.execute(action, args, exec)
+            : action === 'verification' ? await verification(args, exec) : await bridge.call(action, args, exec);
+        }
         catch (error) {
           progress.toolFailure(exec.agent.id, exec.callId, error);
           throw error;

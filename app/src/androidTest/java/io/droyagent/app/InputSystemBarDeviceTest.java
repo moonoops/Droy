@@ -132,8 +132,13 @@ public final class InputSystemBarDeviceTest {
         assertEquals(message, editorText());
     }
 
-    @Test public void tappingTheSamePartiallyCoveredNodeStillRequiresTheWholeTargetUnobscured() throws Exception {
-        reject("tap", arguments());
+    @Test public void semanticTapUsesTheVisibleEditorBodyDespiteItsNavigationCoveredEdge() throws Exception {
+        AtomicInteger clicks = new AtomicInteger(), dispatched = new AtomicInteger();
+        instrumentation.runOnMainSync(() -> editor.setOnClickListener(view -> clicks.incrementAndGet()));
+        JSONObject result = executor.execute("tap", arguments(), false, ticket(dispatched));
+        assertEquals("action_completed", result.getString("status"));
+        assertEquals(1, dispatched.get());
+        assertEquals(1, clicks.get());
         assertEquals("", editorText());
     }
 
@@ -146,6 +151,7 @@ public final class InputSystemBarDeviceTest {
         instrumentation.waitForIdleSync();
         instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES).waitForIdle(250, 3000);
         reject("input_text", arguments().put("text", "不能覆盖"));
+        reject("tap", arguments());
         assertEquals("", editorText());
     }
 

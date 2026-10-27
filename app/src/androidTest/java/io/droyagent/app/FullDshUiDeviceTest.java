@@ -80,12 +80,10 @@ public final class FullDshUiDeviceTest {
         assertEquals("The standard fixture must be created through DSH", 1, seeded.getInt("sessions"));
         assertEquals("The fixture must belong to the real workspace", 1, seeded.getInt("accounted"));
         fixtureSeeded = true;
-        if (statsFixture()) {
-            android.content.SharedPreferences setup = context.getSharedPreferences("installation", Context.MODE_PRIVATE);
-            savedSetupCompleted = setup.contains("completed") ? setup.getBoolean("completed", false) : null;
-            assertTrue(setup.edit().putBoolean("completed", true).commit());
-            setupCompletionOwned = true;
-        }
+        android.content.SharedPreferences setup = context.getSharedPreferences("installation", Context.MODE_PRIVATE);
+        savedSetupCompleted = setup.contains("completed") ? setup.getBoolean("completed", false) : null;
+        assertTrue(setup.edit().putBoolean("completed", true).commit());
+        setupCompletionOwned = true;
         activity = (MainActivity) instrumentation.startActivitySync(new Intent(context, MainActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         ui = new DeviceUi(instrumentation, activity);
@@ -149,6 +147,147 @@ public final class FullDshUiDeviceTest {
         assertAttachmentsIntakeAndUpload();
         assertExportStreamsRealSessionLog();
         assertBrowserEntryOpensTheSharedDshPage();
+    }
+
+    @Test public void upgradedMoreMenusAndUnsentDraftWorkInBothLanguages() throws Exception {
+        android.content.SharedPreferences preferences = context.getSharedPreferences("product", Context.MODE_PRIVATE);
+        String savedLanguage = preferences.getString("languagePreference", null);
+        try {
+            for (String language : new String[]{"zh", "en"}) {
+                selectUpgradeLanguage(language);
+                selectFixture();
+                openDrawer();
+                exerciseUpgradeMenu("[data-droy-sidebar] button[aria-label='更多'],[data-droy-sidebar] button[aria-label='More']", language + "-sidebar");
+                selectFixture();
+                exerciseUpgradeMenu("button[aria-label='更多会话视图'],button[aria-label='More conversation views']", language + "-conversation");
+                selectFixture();
+                ui.tap("button[aria-label='打开右侧边栏'],button[aria-label='Open right sidebar']");
+                DeviceUi.await("The right tools panel did not open", 10000,
+                    () -> ui.truth("!!document.querySelector('[data-sidebar-right-open]')"));
+                exerciseUpgradeMenu("button[aria-label='更多工具'],button[aria-label='More tools']", language + "-tools");
+                if (ui.truth("!!document.querySelector('[data-sidebar-right-open]')")) {
+                    ui.pressBack();
+                    DeviceUi.await("The right panel did not close", 5000,
+                        () -> ui.truth("!document.querySelector('[data-sidebar-right-open]')"));
+                }
+                selectBlankBrowserFixture();
+                String draft = "DSH upgrade unsent draft " + language;
+                ui.tap("[data-composer-input][contenteditable=true]");
+                DeviceUi.await("Draft editing did not open the keyboard", 10000, ui::keyboardVisible);
+                instrumentation.sendStringSync(draft);
+                DeviceUi.await("The real input did not accept the draft", 5000,
+                    () -> ui.truth("document.querySelector('[data-composer-input]').textContent.includes(" + JSONObject.quote(draft) + ")"));
+                ui.evaluate("document.activeElement?.blur()");
+                ui.hideKeyboard();
+                String blankId = String.valueOf(ui.evaluate("document.querySelector('[data-conversation-session][data-content-phase=hero]').getAttribute('data-conversation-session')"));
+                selectFixture();
+                selectBlankBrowserFixture();
+                DeviceUi.await("New session did not restore the original unsent draft", 10000,
+                    () -> ui.truth("document.querySelector('[data-conversation-session][data-content-phase=hero]')?.getAttribute('data-conversation-session')==="
+                        + JSONObject.quote(blankId) + "&&document.querySelector('[data-composer-input]').textContent.includes(" + JSONObject.quote(draft) + ")"));
+                try {
+                    DeviceUi.await("The restored draft did not settle to one visible input", 15000,
+                        () -> ui.truth("[...document.querySelectorAll('[data-composer-input]')].filter(e=>{const r=e.getBoundingClientRect();"
+                            + "return r.width>0&&r.height>0&&getComputedStyle(e).display!=='none'&&!['hidden','collapse'].includes(getComputedStyle(e).visibility)}).length===1"));
+                } catch (AssertionError failure) {
+                    captureUpgrade(language + "-restored-draft");
+                    Object diagnostic = ui.evaluate("[...document.querySelectorAll('[data-composer-input]')].map(e=>{const r=e.getBoundingClientRect(),ancestors=[];"
+                        + "for(let p=e;p&&ancestors.length<8;p=p.parentElement){const b=p.getBoundingClientRect(),s=getComputedStyle(p);ancestors.push({"
+                        + "tag:p.tagName,className:String(p.className),session:p.getAttribute('data-conversation-session'),phase:p.getAttribute('data-content-phase'),"
+                        + "hidden:p.hidden,inert:p.inert,ariaHidden:p.getAttribute('aria-hidden'),display:s.display,visibility:s.visibility,opacity:s.opacity,"
+                        + "rect:{left:b.left,top:b.top,width:b.width,height:b.height}})}return {editable:e.getAttribute('contenteditable'),"
+                        + "rect:{left:r.left,top:r.top,width:r.width,height:r.height},ancestors}})");
+                    throw new AssertionError(failure.getMessage() + "; input geometry=" + diagnostic, failure);
+                }
+                captureUpgrade(language + "-restored-draft");
+            }
+        } finally {
+            android.content.SharedPreferences.Editor restore = preferences.edit();
+            if (savedLanguage == null) restore.remove("languagePreference"); else restore.putString("languagePreference", savedLanguage);
+            assertTrue("The original native language preference was not restored", restore.commit());
+        }
+    }
+
+    private void selectUpgradeLanguage(String language) throws Exception {
+        ui.evaluate("window.dispatchEvent(new CustomEvent('droy-mobile-open-settings',{detail:{section:'general'}}))");
+        DeviceUi.await("General settings did not open", 10000,
+            () -> ui.truth("!!document.querySelector('[data-droy-settings-panel]')"));
+        assertTrue(ui.truth("(()=>{const e=[...document.querySelectorAll('[data-droy-settings-panel] button[aria-haspopup=menu]')].find(e=>['中文','English'].includes(e.textContent.trim()));if(!e)return false;e.setAttribute('data-upgrade-language','');return true})()"));
+        ui.tap("[data-upgrade-language]");
+        String label = language.equals("zh") ? "中文" : "English";
+        assertTrue(ui.truth("(()=>{const e=[...document.querySelectorAll('[role=menuitem],[role=menuitemradio]')].find(e=>e.getClientRects().length&&e.textContent.trim()==="
+            + JSONObject.quote(label) + ");if(!e)return false;e.setAttribute('data-upgrade-language-option','');return true})()"));
+        ui.tap("[data-upgrade-language-option]");
+        DeviceUi.await("The selected language did not reach the real UI", 10000,
+            () -> ui.truth("document.documentElement.lang.startsWith(" + JSONObject.quote(language) + ")"));
+        String coding = "[role=switch][aria-label='显示代码工作视图'],[role=switch][aria-label='Show coding view']";
+        if (!ui.truth("document.querySelector(" + JSONObject.quote(coding) + ")?.getAttribute('aria-checked')==='true'")) {
+            ui.tap(coding);
+            DeviceUi.await("Coding view did not enable its conversation views", 10000,
+                () -> ui.truth("document.querySelector(" + JSONObject.quote(coding) + ")?.getAttribute('aria-checked')==='true'"));
+        }
+        ui.tap("[data-droy-settings-back]");
+        DeviceUi.await("Settings did not close", 5000,
+            () -> ui.truth("!document.querySelector('[data-droy-settings-panel]')"));
+    }
+
+    private void exerciseUpgradeMenu(String anchor, String evidence) throws Exception {
+        ui.tap(anchor);
+        DeviceUi.await("The new More menu did not open: " + evidence, 5000,
+            () -> ui.truth("[...document.querySelectorAll('[role=menu]')].some(e=>e.getClientRects().length&&/浏览更多插件|Browse other plugins/.test(e.textContent))"));
+        assertTrue("More menu text is clipped or outside the viewport: " + evidence, ui.truth(
+            "[...document.querySelectorAll('[role=menu]')].filter(e=>e.getClientRects().length).every(menu=>{const r=menu.getBoundingClientRect();"
+            + "return r.left>=0&&r.right<=innerWidth+1&&r.top>=0&&r.bottom<=innerHeight+1&&[...menu.querySelectorAll('[role=menuitem]')].every(e=>{"
+            + "const b=e.getBoundingClientRect(),t=document.createRange();t.selectNodeContents(e);return [...t.getClientRects()].every(x=>x.left>=b.left-1&&x.right<=b.right+1&&x.top>=b.top-1&&x.bottom<=b.bottom+1)})})"));
+        captureUpgrade(evidence);
+        ui.pressBack();
+        DeviceUi.await("Android Back did not dismiss the More menu: " + evidence, 5000,
+            () -> ui.truth("![...document.querySelectorAll('[role=menu]')].some(e=>e.getClientRects().length)"));
+        assertTrue("Dismissing More left the app", ui.nativeNavigationState().getBoolean("activityFocus"));
+        ui.tap(anchor);
+        DeviceUi.await("More could not be reopened", 5000,
+            () -> ui.truth("[...document.querySelectorAll('[role=menuitem]')].some(e=>e.getClientRects().length&&['浏览更多插件','Browse other plugins'].includes(e.textContent.trim()))"));
+        assertTrue(ui.truth("(()=>{const e=[...document.querySelectorAll('[role=menuitem]')].find(e=>e.getClientRects().length&&['浏览更多插件','Browse other plugins'].includes(e.textContent.trim()));if(!e)return false;e.setAttribute('data-upgrade-browse','');return true})()"));
+        ui.tap("[data-upgrade-browse]");
+        DeviceUi.await("Browse plugins did not reach the plugin list", 10000,
+            () -> ui.truth("!!document.querySelector('[data-plugin-panel]')&&!document.querySelector('[data-droy-drawer-open=true]')"));
+        ui.pressBack();
+        DeviceUi.await("Back from plugins did not return to the conversation", 10000,
+            () -> ui.truth("!document.querySelector('[data-plugin-panel]')&&!!document.querySelector('[data-composer-input]')"));
+        // Global navigation preserves the previously opened tools panel. Close
+        // that layer with another Back before expecting the main menu target.
+        if (ui.truth("!!document.querySelector('[data-sidebar-right-open]')")) {
+            ui.pressBack();
+            DeviceUi.await("Back did not close the retained tools panel", 5000,
+                () -> ui.truth("!document.querySelector('[data-sidebar-right-open]')"));
+        }
+        awaitMainMenuHitTarget();
+    }
+
+    private void captureUpgrade(String name) throws Exception {
+        DeviceUi.await("The upgrade screenshot transition did not settle: " + name, 5000,
+            () -> ui.truth("!document.getAnimations().some(a=>a.playState==='running'&&a.effect?.getComputedTiming().iterations!==Infinity)"));
+        ui.awaitPaint();
+        android.graphics.Bitmap image = ui.automation().takeScreenshot();
+        assertNotNull(image);
+        File directory = new File(context.getExternalFilesDir(null), "dsh-upgrade-evidence");
+        assertTrue(directory.isDirectory() || directory.mkdirs());
+        if (name.endsWith("-restored-draft")) {
+            JSONObject geometry = (JSONObject) ui.evaluate("(()=>{const describe=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return {"
+                + "tag:e.tagName,id:e.id,className:String(e.className),data:Object.fromEntries([...e.attributes].filter(a=>a.name.startsWith('data-')).map(a=>[a.name,a.value])),"
+                + "hidden:e.hidden,inert:e.inert,ariaHidden:e.getAttribute('aria-hidden'),role:e.getAttribute('role'),editable:e.getAttribute('contenteditable'),"
+                + "display:s.display,visibility:s.visibility,opacity:s.opacity,position:s.position,zIndex:s.zIndex,overflowX:s.overflowX,overflowY:s.overflowY,"
+                + "rect:{left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height}}};"
+                + "const selectors='[data-conversation-content],[data-conversation-session],[data-composer-seat],[data-composer-input]';"
+                + "return {language:document.documentElement.lang,viewport:{width:innerWidth,height:innerHeight,scale:visualViewport?.scale},"
+                + "elements:[...document.querySelectorAll(selectors)].map(e=>{const ancestors=[];for(let p=e.parentElement;p;p=p.parentElement){ancestors.push(describe(p));if(p===document.body)break}"
+                + "return {...describe(e),ancestors,fallbackChain:[...e.querySelectorAll('*')].filter(n=>[...n.attributes].some(a=>a.name.startsWith('data-')&&/slot|chain|fallback/.test(a.name))"
+                + "||String(n.className).toLowerCase().includes('fallback')).map(describe)}})}})()");
+            Files.write(new File(directory, name + ".json").toPath(), (geometry.toString(2) + "\n").getBytes(StandardCharsets.UTF_8));
+        }
+        try (java.io.FileOutputStream output = new java.io.FileOutputStream(new File(directory, name + ".png"))) {
+            assertTrue(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output));
+        } finally { image.recycle(); }
     }
 
     private boolean statsFixture() {
@@ -352,9 +491,12 @@ public final class FullDshUiDeviceTest {
             () -> ui.truth("document.querySelectorAll('[data-trigger-menu] [role=option]').length>0"));
         // Read the real registered/filtered menu. Expected public commands are
         // acceptance criteria, not a synthetic replacement command catalog.
-        JSONArray names = (JSONArray) ui.evaluate("[...document.querySelectorAll('[data-trigger-menu] [role=option] span')].map(e=>e.textContent.trim())");
+        // DSH omits the command alias when its label differs only in case
+        // (for example English "Goal"); Chinese labels retain the raw alias.
+        JSONArray names = (JSONArray) ui.evaluate("[...document.querySelectorAll('[data-trigger-menu] [role=option] span')].filter(e=>"
+            + "[...e.classList].some(c=>c.endsWith('_itemName')||c.endsWith('_itemAlias'))).map(e=>e.textContent.trim())");
         List<String> actual = new ArrayList<>();
-        for (int i = 0; i < names.length(); i++) actual.add(names.getString(i));
+        for (int i = 0; i < names.length(); i++) actual.add(names.getString(i).toLowerCase(java.util.Locale.ROOT));
         for (String command : new String[]{"goal", "plan", "feedback", "compact", "permission", "model", "export", "file"})
             assertTrue("The standard-session menu omitted /" + command + ": " + actual, actual.contains(command));
         ui.tap("[data-droy-composer-add]");
@@ -501,23 +643,21 @@ public final class FullDshUiDeviceTest {
                 import {pathToFileURL} from 'node:url';
                 import {createServer} from 'node:http';
                 const base=process.env.DROY_RUNTIME_DIR;
-                let statsBridge;
-                if(process.env.DROY_COMPOSER_STATS_FIXTURE==='1') {
-                  statsBridge=createServer((req,res)=>{
+                const fixtureBridge=createServer((req,res)=>{
                     if(req.url==='/memory') {res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,result:{settings:{enabled:false,recallEnabled:true,automaticExtraction:false,privacyEverActivated:false},root:{authorized:false,checkedAt:0},execution:{ready:false,reason:'MEMORY_DISABLED'}}}));return;}
                     if(req.url!=='/companion') {res.writeHead(404,{'content-type':'application/json'});res.end(JSON.stringify({ok:false,error:{code:'FIXTURE_ROUTE_MISSING',message:req.url}}));return;}
                     res.writeHead(200,{'content-type':'application/json'});
                     res.end(JSON.stringify({ok:true,result:{name:'Fixture',displayName:'Fixture',appearanceId:'default',personality:''}}));
                   });
-                  await new Promise(resolve=>statsBridge.listen(0,'127.0.0.1',resolve));
-                  process.env.DROY_BRIDGE_PORT=String(statsBridge.address().port);
-                }
+                await new Promise(resolve=>fixtureBridge.listen(0,'127.0.0.1',resolve));
+                process.env.DROY_BRIDGE_PORT=String(fixtureBridge.address().port);
+                let instance;
+                try {
                 await import(pathToFileURL(base+'/mobile/bootstrap.mjs'));
                 const {runProfile}=await import(pathToFileURL(base+'/node_modules/@deepseek-ai/dsh/lib/profile-boot.js'));
                 const {createLaunchEnvironmentSnapshot}=await import(pathToFileURL(base+'/node_modules/@deepseek-ai/dsh-launch-environment/lib/index.js'));
                 const {createUserMessage,createAssistantMessage}=await import(pathToFileURL(base+'/node_modules/@deepseek-ai/dsh-llm/lib/index.js'));
-                const instance=await runProfile({profile:'mobile',patchFiles:[],args:['--no-open'],environment:createLaunchEnvironmentSnapshot([{source:'process',values:process.env}])});
-                try {
+                instance=await runProfile({profile:'mobile',patchFiles:[],args:['--no-open'],environment:createLaunchEnvironmentSnapshot([{source:'process',values:process.env}])});
                   const {ctx}=instance,workspace=ctx.workspaceRegistry.list()[0];
                   if(process.env.DROY_FULL_UI_SEED==='1') {
                     if((await ctx.sessionPersistence.list()).length!==0)throw Error('Fixture home was not empty');
@@ -559,7 +699,10 @@ public final class FullDshUiDeviceTest {
                     } finally {await handle.close();}
                   }
                   console.log('DROY_FULL_UI_RESULT '+JSON.stringify({sessions:headers.length,workspaces:ctx.workspaceRegistry.list().length,accounted:workspace.sessionIds.filter(id=>id.startsWith('droy-full-ui-')).length,turns,modelOrToolEvents,extraTurns,extraModelOrToolEvents}));
-                } finally {await instance.shutdown.shutdown(0);if(statsBridge)await new Promise(resolve=>statsBridge.close(resolve));}
+                } finally {
+                  try {await instance?.shutdown.shutdown(0);}
+                  finally {await new Promise(resolve=>fixtureBridge.close(resolve));}
+                }
                 """;
         String nativeDir = context.getApplicationInfo().nativeLibraryDir;
         ProcessBuilder builder = new ProcessBuilder(nativeDir + "/libdroy_node.so", "--expose-internals", "--input-type=module", "-e", script);

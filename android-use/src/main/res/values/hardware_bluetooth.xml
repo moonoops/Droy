@@ -1,0 +1,15 @@
+<resources>
+    <string name="hardware_bt_unavailable">Bluetooth hardware is unavailable.</string>
+    <string name="hardware_bt_off">Bluetooth is off. Enable it in system settings.</string>
+    <string name="hardware_bt_permission">The required Bluetooth system permission has not been granted.</string>
+    <string name="hardware_bt_argument">Invalid Bluetooth operation or parameter.</string>
+    <string name="hardware_bt_reference">This Bluetooth reference is unavailable or belongs to another task.</string>
+    <string name="hardware_bt_disconnected">The Bluetooth connection is closed.</string>
+    <string name="hardware_bt_busy">Another Bluetooth operation is still running.</string>
+    <string name="hardware_bt_rejected">Android rejected the Bluetooth operation.</string>
+    <string name="hardware_bt_timeout">The Bluetooth operation timed out. Check the device state before sending again.</string>
+    <string name="hardware_bt_failed">The Bluetooth operation failed. Inspect the returned system status.</string>
+    <string name="hardware_bt_size">The payload exceeds the connection limit. This tool does not split protocol messages.</string>
+    <string name="hardware_bt_attribute">The selected Bluetooth attribute does not support this operation.</string>
+    <string name="hardware_bt_limit">Close an existing Bluetooth connection before opening another.</string>
+</resources>

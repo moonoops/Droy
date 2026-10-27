@@ -8,6 +8,11 @@ import org.json.JSONObject;
 final class ProductPermissions {
     static final String STOPPED = "toolsStopped";
     static final String DEFAULT_DENY = "capabilitiesDefaultDeny";
+    private static final java.util.Set<String> HARDWARE_CAPABILITIES = java.util.Set.of(
+        "allowSensorsRead", "allowLocationRead", "allowInfrared", "allowBluetoothRead", "allowBluetoothControl",
+        "allowNfcRead", "allowNfcWrite", "allowNfcEmulation", "allowWifiRead", "allowWifiControl",
+        "allowCellularRead", "allowNetworkProbe", "allowDeviceDataRead", "allowDeviceDataWrite",
+        "allowActivitySensors", "allowBodySensors");
     private ProductPermissions() {}
 
     static SharedPreferences preferences(Context context) {
@@ -15,8 +20,10 @@ final class ProductPermissions {
     }
 
     static boolean allowed(SharedPreferences preferences, String key) {
-        return preferences.getBoolean(key, !preferences.getBoolean(DEFAULT_DENY, false));
+        return preferences.getBoolean(key, !isHardwareCapability(key) && !preferences.getBoolean(DEFAULT_DENY, false));
     }
+
+    static boolean isHardwareCapability(String key) { return HARDWARE_CAPABILITIES.contains(key); }
 
     static boolean stopped(Context context) {
         return preferences(context).getBoolean(STOPPED, false);

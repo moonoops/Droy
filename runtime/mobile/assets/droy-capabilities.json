@@ -168,6 +168,166 @@
       "label": "单次修改进程数据",
       "section": "应用进程数据",
       "description": "修改已定位的单个值并读回核验；需进程读取和 Root，不锁定数值。"
+    },
+    {
+      "id": "sensors",
+      "preference": "allowSensorsRead",
+      "label": "运动与环境传感器",
+      "labelEn": "Motion and environment sensors",
+      "section": "传感器与定位",
+      "sectionEn": "Sensors and location",
+      "description": "按任务读取或短时采样，相关结果发送当前模型。",
+      "descriptionEn": "Read or briefly sample for the task; relevant results go to the current model."
+    },
+    {
+      "id": "sensorsActivity",
+      "preference": "allowActivitySensors",
+      "label": "活动传感器",
+      "labelEn": "Activity sensors",
+      "section": "传感器与定位",
+      "sectionEn": "Sensors and location",
+      "description": "计步和步伐检测；另需系统活动识别权限。",
+      "descriptionEn": "Step counts and detection; also requires system activity recognition permission."
+    },
+    {
+      "id": "sensorsBody",
+      "preference": "allowBodySensors",
+      "label": "身体传感器",
+      "labelEn": "Body sensors",
+      "section": "传感器与定位",
+      "sectionEn": "Sensors and location",
+      "description": "读取手机实际提供的身体传感器；另需对应系统权限。",
+      "descriptionEn": "Read body sensors exposed by this phone; corresponding system permission is also required."
+    },
+    {
+      "id": "location",
+      "preference": "allowLocationRead",
+      "label": "获取当前位置",
+      "labelEn": "Get current location",
+      "section": "传感器与定位",
+      "sectionEn": "Sensors and location",
+      "description": "本次任务定位或短时采样；结果发送当前模型，不开启记忆位置记录。",
+      "descriptionEn": "Locate or briefly sample for this task; results go to the current model without starting memory location recording."
+    },
+    {
+      "id": "infrared",
+      "preference": "allowInfrared",
+      "label": "红外发射",
+      "labelEn": "Infrared transmission",
+      "section": "附近设备与连接",
+      "sectionEn": "Nearby devices and connections",
+      "description": "发送指定波形；只能确认发射，设备响应需另行判断。",
+      "descriptionEn": "Transmit supplied waveforms; appliance response requires separate observation."
+    },
+    {
+      "id": "bluetoothRead",
+      "preference": "allowBluetoothRead",
+      "label": "发现蓝牙设备",
+      "labelEn": "Discover Bluetooth devices",
+      "section": "附近设备与连接",
+      "sectionEn": "Nearby devices and connections",
+      "description": "读取状态和附近广播，结果发送当前模型；需系统附近设备权限。",
+      "descriptionEn": "Read status and nearby advertisements for the current model; requires nearby device permission."
+    },
+    {
+      "id": "bluetoothControl",
+      "preference": "allowBluetoothControl",
+      "label": "蓝牙通信",
+      "labelEn": "Bluetooth communication",
+      "section": "附近设备与连接",
+      "sectionEn": "Nearby devices and connections",
+      "description": "配对、连接、发现服务、读写和接收通知。",
+      "descriptionEn": "Pair, connect, discover services, read, write and receive notifications."
+    },
+    {
+      "id": "nfcRead",
+      "preference": "allowNfcRead",
+      "label": "读取 NFC 卡片",
+      "labelEn": "Read NFC tags",
+      "section": "附近设备与连接",
+      "sectionEn": "Nearby devices and connections",
+      "description": "前台贴卡识别和读取，相关结果发送当前模型。",
+      "descriptionEn": "Identify and read a tag held near the foreground reader; relevant results go to the current model."
+    },
+    {
+      "id": "nfcWrite",
+      "preference": "allowNfcWrite",
+      "label": "NFC 交互与写入",
+      "labelEn": "NFC interaction and writing",
+      "section": "附近设备与连接",
+      "sectionEn": "Nearby devices and connections",
+      "description": "认证、原始指令、写入和格式化；原始指令可能改变卡片。",
+      "descriptionEn": "Authenticate, exchange raw commands, write and format; raw commands can change the tag."
+    },
+    {
+      "id": "nfcEmulation",
+      "preference": "allowNfcEmulation",
+      "label": "NFC 卡片模拟",
+      "labelEn": "NFC card emulation",
+      "section": "附近设备与连接",
+      "sectionEn": "Nearby devices and connections",
+      "description": "管理本地 HCE 应答配置；支持的协议决定可模拟范围。",
+      "descriptionEn": "Manage local HCE response profiles; supported protocols determine emulation coverage."
+    },
+    {
+      "id": "wifiRead",
+      "preference": "allowWifiRead",
+      "label": "Wi-Fi 信息与扫描",
+      "labelEn": "Wi-Fi information and scanning",
+      "section": "网络诊断",
+      "sectionEn": "Network diagnostics",
+      "description": "读取连接和附近网络，结果发送当前模型；扫描另需精确位置权限。",
+      "descriptionEn": "Read connections and nearby networks for the current model; scanning also requires precise location permission."
+    },
+    {
+      "id": "wifiWrite",
+      "preference": "allowWifiControl",
+      "label": "管理 Wi-Fi 连接",
+      "labelEn": "Manage Wi-Fi connections",
+      "section": "网络诊断",
+      "sectionEn": "Network diagnostics",
+      "description": "发起本应用网络请求，由系统确认；不静默切换全局无线开关。",
+      "descriptionEn": "Request an app network connection with system confirmation; does not silently toggle the global radio."
+    },
+    {
+      "id": "cellularRead",
+      "preference": "allowCellularRead",
+      "label": "蜂窝网络信息",
+      "labelEn": "Cellular network information",
+      "section": "网络诊断",
+      "sectionEn": "Network diagnostics",
+      "description": "读取订阅、信号和可用小区数据并发送当前模型；另需系统权限。",
+      "descriptionEn": "Read subscriptions, signal and available cell data for the current model; system permissions are also required."
+    },
+    {
+      "id": "networkProbe",
+      "preference": "allowNetworkProbe",
+      "label": "网络测量",
+      "labelEn": "Network measurements",
+      "section": "网络诊断",
+      "sectionEn": "Network diagnostics",
+      "description": "向指定目标进行有限连接或下载测试，可能消耗流量。",
+      "descriptionEn": "Perform bounded connection or download tests to specified targets; may use data."
+    },
+    {
+      "id": "deviceDataRead",
+      "preference": "allowDeviceDataRead",
+      "label": "读取设备数据与配置",
+      "labelEn": "Read saved device data",
+      "section": "设备数据",
+      "sectionEn": "Device data",
+      "description": "读取已保存数据、原始记录与快捷方式；请求内容可发送当前模型。",
+      "descriptionEn": "Read saved data, raw records and shortcuts; requested content can be sent to the current model."
+    },
+    {
+      "id": "deviceDataWrite",
+      "preference": "allowDeviceDataWrite",
+      "label": "保存设备数据与配置",
+      "labelEn": "Save device data",
+      "section": "设备数据",
+      "sectionEn": "Device data",
+      "description": "保存、删除、导入数据及创建快捷方式；导出需选定目录授权。",
+      "descriptionEn": "Save, delete and import data and create shortcuts; exporting requires selected directory access."
     }
   ],
   "tools": [
@@ -526,7 +686,10 @@
             "privacy",
             "battery_saver",
             "usage_access",
-            "wifi"
+            "wifi",
+            "bluetooth",
+            "location",
+            "nfc"
           ]
         },
         "packageName": {
@@ -2154,6 +2317,776 @@
         "memoryRead",
         "memoryWrite"
       ],
+      "screen": false
+    },
+    {
+      "action": "sensor",
+      "name": "android_sensor",
+      "description": "列出传感器、读取单次值或进行限时采样。返回单位、坐标轴、精度、原始值和实际时间；未知厂商类型不推断含义。",
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "list",
+            "read",
+            "sample"
+          ]
+        },
+        "sensorType": {
+          "type": "integer",
+          "description": "读取/采样使用列表返回的传感器类型"
+        },
+        "sensorName": {
+          "type": "string",
+          "description": "可选的传感器名称，原样使用列表返回值"
+        },
+        "durationMs": {
+          "type": "integer",
+          "description": "等待/采样时长，100–10000毫秒"
+        },
+        "intervalMs": {
+          "type": "integer",
+          "description": "采样间隔，10–1000毫秒，不保证硬件实际频率"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "最多样本数，1–1000；超过20条时返回预览和本地完整数据引用"
+        }
+      },
+      "permissions": [
+        "sensors"
+      ],
+      "screen": false
+    },
+    {
+      "action": "location",
+      "name": "android_location",
+      "description": "查询定位状态或为当前任务获取位置、限时采样。与记忆的位置记录独立；坐标采用WGS84，精度与缓存时间明确返回。",
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "status",
+            "current",
+            "sample"
+          ]
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "gps",
+            "network",
+            "passive"
+          ],
+          "description": "定位来源；gps需要精确位置权限，auto优先可用的系统融合或网络定位"
+        },
+        "durationMs": {
+          "type": "integer",
+          "description": "等待/采样时长，100–10000毫秒"
+        },
+        "intervalMs": {
+          "type": "integer",
+          "description": "连续定位间隔，250–10000毫秒"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "连续定位最多样本数，1–40"
+        },
+        "maxAgeMs": {
+          "type": "integer",
+          "description": "允许的位置年龄，0–300000毫秒；0只接受请求开始后的新位置"
+        }
+      },
+      "permissions": [],
+      "operationPermissions": {
+        "status": [],
+        "current": [
+          "location"
+        ],
+        "sample": [
+          "location"
+        ]
+      },
+      "screen": false
+    },
+    {
+      "action": "infrared",
+      "name": "android_infrared",
+      "description": "检测红外发射器及载波范围，或发送指定微秒波形。仅确认信号发射，不证明空调等设备已响应；中断后不自动重放。",
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "status",
+            "transmit"
+          ]
+        },
+        "carrierHz": {
+          "type": "integer",
+          "description": "发射载波频率，单位Hz；使用设备支持的范围"
+        },
+        "patternMicros": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "交替开/关的正整数微秒时长，1–4096项，总时长小于两秒"
+        },
+        "dataRef": {
+          "type": "string",
+          "description": "替代patternMicros的本地数据引用，内容须为UTF-8 JSON整数数组"
+        },
+        "repeat": {
+          "type": "integer",
+          "description": "发射次数，1–5"
+        },
+        "intervalMs": {
+          "type": "integer",
+          "description": "两次发射之间的间隔，0–2000毫秒；整个序列最多十秒"
+        }
+      },
+      "permissions": [],
+      "operationPermissions": {
+        "status": [],
+        "transmit": [
+          "infrared"
+        ]
+      },
+      "screen": false
+    },
+    {
+      "action": "bluetooth",
+      "name": "android_bluetooth",
+      "description": "扫描蓝牙设备并对已发现设备进行配对、BLE GATT 或 RFCOMM 通信；结果区分请求、传输完成与设备响应。",
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "status",
+            "scan",
+            "bond",
+            "services",
+            "connect",
+            "discover",
+            "read",
+            "write",
+            "subscribe",
+            "events",
+            "disconnect"
+          ]
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "ble",
+            "classic",
+            "rfcomm"
+          ]
+        },
+        "deviceRef": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "attributeRef": {
+          "type": "string"
+        },
+        "uuid": {
+          "type": "string"
+        },
+        "durationMs": {
+          "type": "integer"
+        },
+        "timeoutMs": {
+          "type": "integer"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "mtu": {
+          "type": "integer"
+        },
+        "hex": {
+          "type": "string"
+        },
+        "dataRef": {
+          "type": "string"
+        },
+        "writeType": {
+          "type": "string",
+          "enum": [
+            "with_response",
+            "without_response",
+            "signed"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "notification",
+            "indication",
+            "off"
+          ]
+        },
+        "cursor": {
+          "type": "integer"
+        },
+        "maxBytes": {
+          "type": "integer"
+        }
+      },
+      "permissions": [],
+      "operationPermissions": {
+        "status": [
+          "bluetoothRead"
+        ],
+        "scan": [
+          "bluetoothRead"
+        ],
+        "bond": [
+          "bluetoothRead",
+          "bluetoothControl"
+        ],
+        "connect": [
+          "bluetoothRead",
+          "bluetoothControl"
+        ],
+        "discover": [
+          "bluetoothRead",
+          "bluetoothControl"
+        ],
+        "read": [
+          "bluetoothRead",
+          "bluetoothControl"
+        ],
+        "write": [
+          "bluetoothRead",
+          "bluetoothControl"
+        ],
+        "subscribe": [
+          "bluetoothRead",
+          "bluetoothControl"
+        ],
+        "events": [
+          "bluetoothRead",
+          "bluetoothControl"
+        ],
+        "disconnect": [],
+        "services": [
+          "bluetoothRead",
+          "bluetoothControl"
+        ]
+      },
+      "screen": false
+    },
+    {
+      "action": "wifi",
+      "name": "android_wifi",
+      "description": "查询Wi-Fi连接与信号、扫描周边网络、限时采样；connect请求本应用连接并可能需要系统确认，disconnect只释放本任务请求。",
+      "permissions": [],
+      "operationPermissions": {
+        "status": [
+          "wifiRead"
+        ],
+        "scan": [
+          "wifiRead"
+        ],
+        "sample": [
+          "wifiRead"
+        ],
+        "connect": [
+          "wifiRead",
+          "wifiWrite"
+        ],
+        "disconnect": [],
+        "credentials": [
+          "wifiRead",
+          "wifiWrite"
+        ],
+        "credential_add": [
+          "wifiRead",
+          "wifiWrite"
+        ],
+        "credential_delete": [
+          "wifiRead",
+          "wifiWrite"
+        ]
+      },
+      "screen": false,
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "status",
+            "scan",
+            "sample",
+            "connect",
+            "disconnect",
+            "credentials",
+            "credential_add",
+            "credential_delete"
+          ]
+        },
+        "ssid": {
+          "type": "string"
+        },
+        "bssid": {
+          "type": "string"
+        },
+        "security": {
+          "type": "string",
+          "enum": [
+            "open",
+            "wpa2",
+            "wpa3"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "type": "integer"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "durationMs": {
+          "type": "integer"
+        },
+        "intervalMs": {
+          "type": "integer"
+        },
+        "credentialRef": {
+          "type": "string",
+          "description": "本机凭据页面保存后返回的引用；工具不接收密码。"
+        }
+      }
+    },
+    {
+      "action": "cellular",
+      "name": "android_cellular",
+      "description": "查询运营商、订阅、网络注册、小区与LTE/NR信号；标明缓存时间与缺失数据，不推测VIP优先级。",
+      "permissions": [
+        "cellularRead"
+      ],
+      "screen": false,
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "status",
+            "query",
+            "sample"
+          ]
+        },
+        "subscriptionId": {
+          "type": "integer"
+        },
+        "includeCells": {
+          "type": "boolean"
+        },
+        "refresh": {
+          "type": "boolean"
+        },
+        "timeoutMs": {
+          "type": "integer"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "durationMs": {
+          "type": "integer"
+        },
+        "intervalMs": {
+          "type": "integer"
+        }
+      }
+    },
+    {
+      "action": "network_probe",
+      "name": "android_network_probe",
+      "description": "在明确选择的实际网络上执行有限DNS/TCP连接或HTTP下载测量；wifi/cellular不回退其他网络，下载最多1MiB且不跟随重定向。",
+      "permissions": [
+        "networkProbe"
+      ],
+      "screen": false,
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "probe",
+            "download"
+          ]
+        },
+        "network": {
+          "type": "string",
+          "enum": [
+            "default",
+            "wifi",
+            "cellular"
+          ]
+        },
+        "networkId": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "addressIndex": {
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        },
+        "maxBytes": {
+          "type": "integer"
+        },
+        "timeoutMs": {
+          "type": "integer"
+        }
+      }
+    },
+    {
+      "action": "device_data",
+      "name": "android_device_data",
+      "description": "保存、分页读取、删除和导入导出手机能力的二进制数据。临时引用属于当前任务；已保存记录跨任务保留。",
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "list",
+            "read",
+            "save",
+            "delete",
+            "import",
+            "export"
+          ]
+        },
+        "dataRef": {
+          "type": "string",
+          "description": "工具返回的数据引用；与hex二选一"
+        },
+        "hex": {
+          "type": "string",
+          "description": "十六进制数据；与dataRef二选一，最多4MiB"
+        },
+        "name": {
+          "type": "string",
+          "description": "保存名称或导出文件名"
+        },
+        "metadata": {
+          "type": "json",
+          "description": "可选附加元数据；已有来源和读取范围不会被覆盖"
+        },
+        "offset": {
+          "type": "integer",
+          "description": "读取字节偏移，默认0"
+        },
+        "limit": {
+          "type": "integer",
+          "description": "读取字节数，默认4096，最多16384"
+        },
+        "persistentOnly": {
+          "type": "boolean",
+          "description": "list仅列出永久保存项，默认false"
+        },
+        "fileId": {
+          "type": "string",
+          "description": "import使用已授权的文件引用"
+        },
+        "grantId": {
+          "type": "string",
+          "description": "export使用已授权的可写目录引用"
+        }
+      },
+      "permissions": [],
+      "operationPermissions": {
+        "list": [
+          "deviceDataRead"
+        ],
+        "read": [
+          "deviceDataRead"
+        ],
+        "save": [
+          "deviceDataWrite"
+        ],
+        "delete": [
+          "deviceDataWrite"
+        ],
+        "import": [
+          "deviceDataWrite",
+          "files"
+        ],
+        "export": [
+          "deviceDataRead",
+          "files",
+          "fileExport"
+        ]
+      },
+      "screen": false
+    },
+    {
+      "action": "nfc",
+      "name": "android_nfc",
+      "description": "识别、读取和操作当前贴近手机的 NFC 卡片。scan 打开前台读卡界面；原始指令需要操作授权，不自动重试。",
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "status",
+            "scan",
+            "inspect",
+            "read",
+            "block_read",
+            "page_read",
+            "credentials",
+            "credential_add",
+            "credential_delete",
+            "ndef_write",
+            "format",
+            "authenticate",
+            "block_write",
+            "page_write",
+            "transceive",
+            "close"
+          ]
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "scan返回的当前卡片会话；移卡或换卡后失效"
+        },
+        "hex": {
+          "type": "string",
+          "description": "原始十六进制载荷，与dataRef二选一"
+        },
+        "dataRef": {
+          "type": "string",
+          "description": "已读取或保存的本地数据引用"
+        },
+        "credentialRef": {
+          "type": "string",
+          "description": "用户在本地输入后返回的认证凭据引用"
+        },
+        "keyType": {
+          "type": "string",
+          "enum": [
+            "A",
+            "B"
+          ]
+        },
+        "technology": {
+          "type": "string",
+          "enum": [
+            "IsoDep",
+            "NfcA",
+            "NfcB",
+            "NfcF",
+            "NfcV",
+            "MifareClassic",
+            "MifareUltralight"
+          ]
+        },
+        "sector": {
+          "type": "integer"
+        },
+        "block": {
+          "type": "integer"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "count": {
+          "type": "integer"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "description": "等待贴卡时间500–30000毫秒"
+        }
+      },
+      "permissions": [],
+      "operationPermissions": {
+        "status": [],
+        "scan": [
+          "nfcRead"
+        ],
+        "inspect": [
+          "nfcRead"
+        ],
+        "read": [
+          "nfcRead"
+        ],
+        "block_read": [
+          "nfcRead"
+        ],
+        "page_read": [
+          "nfcRead"
+        ],
+        "credentials": [
+          "nfcRead",
+          "nfcWrite"
+        ],
+        "credential_add": [
+          "nfcRead",
+          "nfcWrite"
+        ],
+        "credential_delete": [
+          "nfcRead",
+          "nfcWrite"
+        ],
+        "ndef_write": [
+          "nfcRead",
+          "nfcWrite"
+        ],
+        "format": [
+          "nfcRead",
+          "nfcWrite"
+        ],
+        "authenticate": [
+          "nfcRead",
+          "nfcWrite"
+        ],
+        "block_write": [
+          "nfcRead",
+          "nfcWrite"
+        ],
+        "page_write": [
+          "nfcRead",
+          "nfcWrite"
+        ],
+        "transceive": [
+          "nfcRead",
+          "nfcWrite"
+        ],
+        "close": []
+      },
+      "screen": false
+    },
+    {
+      "action": "nfc_emulation",
+      "name": "android_nfc_emulation",
+      "description": "保存和启用本地 HCE 应答配置，查询交互记录。仅支持明确的 APDU 与状态规则；保存卡片内容不等于模拟原卡。",
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "status",
+            "list",
+            "get",
+            "save",
+            "delete",
+            "enable",
+            "disable",
+            "events"
+          ]
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "aids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "initialState": {
+          "type": "string"
+        },
+        "rules": {
+          "type": "json",
+          "description": "本地规则数组：state、requestHex、responseHex、nextState；不执行脚本"
+        }
+      },
+      "permissions": [],
+      "operationPermissions": {
+        "status": [],
+        "list": [
+          "nfcEmulation"
+        ],
+        "get": [
+          "nfcEmulation"
+        ],
+        "save": [
+          "nfcEmulation"
+        ],
+        "delete": [
+          "nfcEmulation"
+        ],
+        "enable": [
+          "nfcEmulation"
+        ],
+        "disable": [],
+        "events": [
+          "nfcEmulation"
+        ]
+      },
+      "screen": false
+    },
+    {
+      "action": "device_shortcut",
+      "name": "android_device_shortcut",
+      "description": "管理设备数据、红外指令或 HCE 配置的桌面快捷方式。创建时由系统桌面确认；点击时重新检查授权。",
+      "parameters": {
+        "operation": {
+          "type": "string",
+          "required": true,
+          "enum": [
+            "list",
+            "create",
+            "delete"
+          ]
+        },
+        "shortcutId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "enum": [
+            "infrared",
+            "nfc_emulation",
+            "device_data"
+          ]
+        },
+        "command": {
+          "type": "json",
+          "description": "目标工具的固定参数：红外波形、profileId或持久dataRef；不接受任意Intent"
+        }
+      },
+      "permissions": [],
+      "operationPermissions": {
+        "list": [
+          "deviceDataRead"
+        ],
+        "create": [
+          "deviceDataWrite"
+        ],
+        "delete": [
+          "deviceDataWrite"
+        ]
+      },
       "screen": false
     }
   ]

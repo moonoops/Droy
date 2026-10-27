@@ -1,0 +1,15 @@
+<resources>
+    <string name="hardware_bt_unavailable">手机没有可用的蓝牙硬件。</string>
+    <string name="hardware_bt_off">蓝牙已关闭，请在系统设置中开启。</string>
+    <string name="hardware_bt_permission">尚未获得本次操作所需的系统蓝牙权限。</string>
+    <string name="hardware_bt_argument">蓝牙操作或参数无效。</string>
+    <string name="hardware_bt_reference">蓝牙引用已失效或属于其他任务。</string>
+    <string name="hardware_bt_disconnected">蓝牙连接已关闭。</string>
+    <string name="hardware_bt_busy">另一个蓝牙操作尚未完成。</string>
+    <string name="hardware_bt_rejected">Android 未接受此次蓝牙操作。</string>
+    <string name="hardware_bt_timeout">蓝牙操作超时，请核实设备状态后再决定是否重发。</string>
+    <string name="hardware_bt_failed">蓝牙操作失败，请查看返回的系统状态。</string>
+    <string name="hardware_bt_size">数据超过本次连接限制，工具不会自行拆分协议消息。</string>
+    <string name="hardware_bt_attribute">选定的蓝牙属性不支持此操作。</string>
+    <string name="hardware_bt_limit">请先关闭已有蓝牙连接再建立新连接。</string>
+</resources>

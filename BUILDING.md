@@ -42,8 +42,31 @@ app/build/outputs/apk/debug/app-debug.apk
 app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 ```
 
-The command does not install an APK. `--skip-deps` reuses installed npm
-dependencies for local iteration; release validation uses the full checks.
+The command does not install an APK. It runs the full host/unit suite and is
+the build entry point for explicitly requested integration or release validation.
+Additional checks and device coverage are listed in [TESTING.md](TESTING.md).
+
+For everyday development, run tests for the changed behavior, its direct callers,
+and relevant failure paths first. Build only when compilation or device validation
+requires it. After those targeted checks pass, avoid repeating the full suite:
+
+```sh
+./tools/build.sh --skip-tests --skip-deps
+```
+
+`--skip-tests` skips the script's host/unit tests while still preparing runtime
+assets and building both development APKs. It does not replace targeted checks.
+`--skip-deps` reuses installed npm dependencies; omit it if dependencies changed
+or have not been installed. Before testing generated mobile resources, refresh
+them with `node tools/prepare_dsh.mjs --refresh-mobile` when dependencies and DSH
+staging already exist; dependency changes require full preparation.
+
+Finishing a chat or making an ordinary commit does not trigger full regression
+or validation on both emulator and phone. Run integration validation when the
+user explicitly requests it, and release validation for an explicitly requested
+release. Use the full build checks at those checkpoints; reuse matching successful
+results rather than running the same suite twice. See [TESTING.md](TESTING.md)
+for cumulative validation records and checks that must stay in daily development.
 
 The debug app uses package `io.droyagent.app.dev`, the launcher label **Droy Dev**
 (**Droy 开发版** in Chinese), and the Android toolchain's local debug signing key.

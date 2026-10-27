@@ -76,7 +76,7 @@ public final class CoordinateRegionDeviceTest {
         long full = generation("generation"), content = generation("contentGeneration");
         replay(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, barWindowId);
         assertTrue("Full screenshot generation must still change", generation("generation") > full);
-        assertEquals("Bar-only content must preserve the interior epoch", content, generation("contentGeneration"));
+        assertEquals("Bar-only content must preserve the interior epoch; " + barReceiptState(), content, generation("contentGeneration"));
         executor.execute("tap", tap, false, () -> {});
         DeviceUi.await("Coordinate action failed to reach the real fixture", 3000, () -> activity.confirmationCount() == 1);
     }
@@ -86,6 +86,8 @@ public final class CoordinateRegionDeviceTest {
         replay(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, barWindowId);
         reject("tap", new JSONObject().put("snapshotId", observation.getString("snapshotId"))
             .put("x", barBounds.centerX()).put("y", barBounds.centerY()));
+        observation = observe();
+        replay(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, barWindowId);
         JSONObject swipe = target(observation);
         reject("swipe", new JSONObject().put("snapshotId", observation.getString("snapshotId"))
             .put("startX", swipe.getInt("x")).put("startY", swipe.getInt("y"))
@@ -104,6 +106,51 @@ public final class CoordinateRegionDeviceTest {
         DeviceUi.await("Revalidated coordinate did not activate the original button", 3000, () -> activity.confirmationCount() == 1);
     }
 
+    @Test public void unchangedWindowGeometryKeepsTheBarException() throws Exception {
+        observe();
+        Method update = DroyAccessibilityService.class.getDeclaredMethod("updateWindowLayers", AccessibilityEvent.class);
+        update.setAccessible(true);
+        Method record = DroyAccessibilityService.class.getDeclaredMethod("recordUiChange", int.class, int.class);
+        record.setAccessible(true);
+        Method geometry = DroyAccessibilityService.class.getDeclaredMethod("coordinateContentBounds");
+        geometry.setAccessible(true);
+        instrumentation.runOnMainSync(() -> {
+            AccessibilityEvent change = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOWS_CHANGED);
+            try {
+                update.invoke(service, change);
+                geometry.invoke(service);
+                service.onAccessibilityEvent(change);
+                long content = generation("contentGeneration");
+                record.invoke(service, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, barWindowId);
+                assertEquals("Unchanged geometry must preserve the known bar exception; " + barReceiptState(),
+                        content, generation("contentGeneration"));
+            } catch (Exception error) { throw new AssertionError(error); }
+            finally { change.recycle(); }
+        });
+    }
+
+    @Test public void changedWindowListRevokesOldGeometryBeforeTheEventCanBeIgnored() throws Exception {
+        observe();
+        java.lang.reflect.Field windows = DroyAccessibilityService.class.getDeclaredField("contentWindows");
+        windows.setAccessible(true);
+        Method update = DroyAccessibilityService.class.getDeclaredMethod("updateWindowLayers", AccessibilityEvent.class);
+        update.setAccessible(true);
+        Method record = DroyAccessibilityService.class.getDeclaredMethod("recordUiChange", int.class, int.class);
+        record.setAccessible(true);
+        instrumentation.runOnMainSync(() -> {
+            AccessibilityEvent change = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOWS_CHANGED);
+            try {
+                // Exercise the update before onAccessibilityEvent's owned-overlay early return.
+                windows.set(service, List.of());
+                update.invoke(service, change);
+                long content = generation("contentGeneration");
+                record.invoke(service, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, barWindowId);
+                assertEquals("A replaced window list must revoke its previous region", content + 1, generation("contentGeneration"));
+            } catch (Exception error) { throw new AssertionError(error); }
+            finally { change.recycle(); }
+        });
+    }
+
     @Test public void windowPropertyEventWithoutAnIdentityChangeKeepsTheOriginalButton() throws Exception {
         JSONObject observation = observe();
         replay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, barWindowId);
@@ -116,6 +163,8 @@ public final class CoordinateRegionDeviceTest {
         replay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, barWindowId);
         reject("tap", new JSONObject().put("snapshotId", observation.getString("snapshotId"))
             .put("x", contentBounds.left + 1).put("y", contentBounds.bottom - 1));
+        observation = observe();
+        replay(AccessibilityEvent.TYPE_WINDOWS_CHANGED, barWindowId);
         JSONObject tap = target(observation);
         reject("swipe", new JSONObject().put("snapshotId", observation.getString("snapshotId"))
             .put("startX", tap.getInt("x")).put("startY", tap.getInt("y"))
@@ -161,6 +210,14 @@ public final class CoordinateRegionDeviceTest {
     }
     private long generation(String method) throws Exception {
         return (Long) invoke(method, new Class<?>[0], new Object[0]);
+    }
+    private String barReceiptState() throws Exception {
+        StringBuilder result = new StringBuilder("barWindow=").append(barWindowId);
+        for (String name : new String[]{"windowGeometryGeneration", "eventContentRegion"}) {
+            java.lang.reflect.Field field = DroyAccessibilityService.class.getDeclaredField(name);
+            field.setAccessible(true); result.append(", ").append(name).append('=').append(field.get(service));
+        }
+        return result.toString();
     }
     private Object invokeOnService(String name) throws Exception {
         Method method = DroyAccessibilityService.class.getDeclaredMethod(name); method.setAccessible(true);

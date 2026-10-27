@@ -1,0 +1,3 @@
+<resources>
+    <string name="nfc_hce_service_description">Droy local NFC card emulation</string>
+</resources>

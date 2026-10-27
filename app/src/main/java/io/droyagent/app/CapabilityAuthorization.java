@@ -17,7 +17,7 @@ final class CapabilityAuthorization {
         if (tool.optString("action").equals("process_memory")
                 && !java.util.Set.of("query", "open", "regions", "status", "close").contains(operation))
             throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("不支持的操作", "Unsupported operation"));
-        if (operation.equals("open")) {
+        if (tool.optString("action").equals("process_memory") && operation.equals("open")) {
             Object mode = args.has("mode") ? args.opt("mode") : "read_only";
             if (!(mode instanceof String) || (!mode.equals("read_only") && !mode.equals("read_write")))
                 throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("mode 必须为 read_only 或 read_write", "mode must be read_only or read_write"));

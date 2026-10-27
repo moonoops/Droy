@@ -38,8 +38,8 @@ public final class VoiceUiDeviceTest {
     private static final String DICTATION = "button[aria-label='开始录音'],button[aria-label='打开语音输入引导'],button[aria-label='Start recording'],button[aria-label='Open voice input setup']";
     private Instrumentation instrumentation;
     private Context context;
-    private SharedPreferences preferences, wakePreferences;
-    private Map<String, ?> originalPreferences, originalWakePreferences;
+    private SharedPreferences preferences, wakePreferences, installationPreferences;
+    private Map<String, ?> originalPreferences, originalWakePreferences, originalInstallationPreferences;
     private MainActivity activity;
     private DeviceUi ui;
     private File home, preserved;
@@ -58,8 +58,10 @@ public final class VoiceUiDeviceTest {
         UiAutomation automation = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
         preferences = ProductPermissions.preferences(context);
         wakePreferences = context.getSharedPreferences("droy-voice-wake", Context.MODE_PRIVATE);
+        installationPreferences = context.getSharedPreferences("installation", Context.MODE_PRIVATE);
         originalPreferences = new HashMap<>(preferences.getAll());
         originalWakePreferences = new HashMap<>(wakePreferences.getAll());
+        originalInstallationPreferences = new HashMap<>(installationPreferences.getAll());
         home = new File(context.getFilesDir(), "dsh-home");
         preserved = new File(context.getFilesDir(), "droy-voice-ui-home-backup-" + UUID.randomUUID());
         originalFiles = snapshot(home.toPath());
@@ -67,6 +69,9 @@ public final class VoiceUiDeviceTest {
         if (hadHome) assertTrue("Could not preserve the original DSH home", home.renameTo(preserved));
         owned = true;
         assertTrue(home.mkdirs());
+        assertTrue(installationPreferences.edit().putInt("schemaVersion", 1).putBoolean("completed", true).commit());
+        String waveLanguage = InstrumentationRegistry.getArguments().getString("voiceWaveLanguage");
+        if (waveLanguage != null) assertTrue(preferences.edit().putString("languagePreference", waveLanguage).commit());
         if ("true".equals(InstrumentationRegistry.getArguments().getString("voiceLegacySelection"))) {
             File profile = new File(home, "profiles/mobile"); assertTrue(profile.mkdirs());
             legacySelectionPatch = new File(profile, "cordis.patch.yml");
@@ -126,8 +131,85 @@ public final class VoiceUiDeviceTest {
             assertEquals("Voice UI test changed original DSH data", originalFiles, snapshot(home.toPath()));
             restore(preferences, originalPreferences);
             restore(wakePreferences, originalWakePreferences);
+            restore(installationPreferences, originalInstallationPreferences);
             owned = false;
         }
+    }
+
+    @Test public void waveformMovesThroughSilenceInBothVoiceEntries() throws Exception {
+        assertTrue(preferences.edit().putBoolean("allowAudioMicrophone", true).putBoolean("allowAudioTranscription", true).commit());
+        instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+            .grantRuntimePermission(context.getPackageName(), android.Manifest.permission.RECORD_AUDIO);
+        ui.evaluate("(()=>{const original=window.fetch,devices=navigator.mediaDevices,media=devices.getUserMedia;"
+            + "const f=window.__waveFixture={level:0,muted:false};window.fetch=async function(url,options){"
+            + "if(url==='/droy/voice'&&options?.body){const q=JSON.parse(options.body);let result;"
+            + "if(q.operation==='start')result={state:'recording',captureId:'wave-fixture'};"
+            + "if(q.operation==='poll')result={state:'recording',captureId:'wave-fixture',segments:[],level:f.muted?0:f.level};"
+            + "if(q.operation==='mute'){f.muted=q.muted;result={muted:q.muted}}if(q.operation==='stop')result={state:'ended'};"
+            + "if(result)return new Response(JSON.stringify({ok:true,result}),{headers:{'Content-Type':'application/json'}})}return original.apply(this,arguments)};"
+            + "devices.getUserMedia=async()=>{f.audio=new AudioContext();f.destination=f.audio.createMediaStreamDestination();"
+            + "f.source=f.audio.createConstantSource();f.source.offset.value=0;f.source.connect(f.destination);f.source.start();await f.audio.resume();return f.destination.stream};"
+            + "f.cleanup=()=>{window.fetch=original;devices.getUserMedia=media;f.source?.stop();f.destination?.stream.getTracks().forEach(t=>t.stop());f.audio?.close()};})()");
+        Thread finger = null;
+        final Throwable[] failure = {null};
+        try {
+            ui.tap("[data-droy-voice-start=standard]");
+            DeviceUi.await("Voice dock did not open", 10000,
+                () -> ui.truth("window.DroyVoice.getSnapshot().status==='active'&&!!document.querySelector('[data-droy-voice-inline]')"));
+            exerciseWavePulse("[data-droy-voice-inline]", false);
+            ui.evaluate("window.__waveFixture.level=.04");
+            awaitWaveBar("[data-droy-voice-inline]", "lastElementChild");
+            ui.tap("[data-droy-voice-mute]");
+            awaitFlatWave("[data-droy-voice-inline]");
+            capture("wave-muted");
+            ui.tap("[data-droy-voice-end]");
+            DeviceUi.await("Voice dock did not close", 5000, () -> ui.truth("!window.DroyVoice.getSnapshot().mode"));
+            finger = new Thread(() -> {
+                try { ui.longPress("[data-droy-voice-hold]", 10000); }
+                catch (Throwable error) { failure[0] = error; }
+            });
+            finger.start();
+            DeviceUi.await("Hold recorder did not open", 10000,
+                () -> ui.truth("!!document.querySelector('[data-droy-voice-hold-state=recording]')&&!!window.__waveFixture.source"));
+            exerciseWavePulse("[data-droy-voice-hold-state=recording]", true);
+            ui.evaluate("window.DroyVoice.moveHold(true)");
+            finger.join(15000);
+            assertFalse("Hold pointer did not release", finger.isAlive());
+            if (failure[0] != null) throw new AssertionError("Hold pointer failed", failure[0]);
+            DeviceUi.await("Cancelled hold did not close", 10000, () -> ui.truth("!window.DroyVoice.getSnapshot().mode"));
+            assertNoInference();
+            passed = true;
+        } finally {
+            ui.evaluate("window.DroyVoice.moveHold(true);window.DroyVoice.cancelHold()");
+            if (finger != null) finger.join(15000);
+            ui.evaluate("window.DroyVoice.end()");
+            DeviceUi.await("Wave fixture did not stop", 10000, () -> ui.truth("!window.DroyVoice.getSnapshot().mode"));
+            ui.evaluate("window.__waveFixture.cleanup()");
+        }
+    }
+
+    private void exerciseWavePulse(String root, boolean hold) throws Exception {
+        String prefix = hold ? "hold-wave" : "conversation-wave";
+        ui.evaluate(hold ? "window.__waveFixture.source.offset.value=.04" : "window.__waveFixture.level=.04");
+        awaitWaveBar(root, "lastElementChild");
+        ui.evaluate(hold ? "window.__waveFixture.source.offset.value=0" : "window.__waveFixture.level=0");
+        awaitWaveBar(root, "firstElementChild");
+        assertLayout(root);
+        capture(prefix + "-left-edge");
+        awaitFlatWave(root);
+        capture(prefix + "-silence");
+    }
+
+    private void awaitWaveBar(String root, String edge) throws Exception {
+        DeviceUi.await("Sound did not reach " + edge + " of " + root, 8000, () -> ui.truth(
+            "(()=>{const w=document.querySelector(" + JSONObject.quote(root + " .droy-voice-wave")
+            + ");return !!w&&w." + edge + ".style.transform!=='scaleY(0.06)'})()"));
+    }
+
+    private void awaitFlatWave(String root) throws Exception {
+        DeviceUi.await("Silence did not clear the trace in " + root, 8000, () -> ui.truth(
+            "(()=>{const bars=[...document.querySelectorAll(" + JSONObject.quote(root + " .droy-voice-wave i")
+            + ")];return bars.length===24&&bars.every(e=>e.style.transform==='scaleY(0.06)')})()"));
     }
 
     @Test public void allSettingsTabsRemainDiscoverableAndReachable() throws Exception {

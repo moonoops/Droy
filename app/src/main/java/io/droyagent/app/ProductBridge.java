@@ -32,6 +32,7 @@ final class ProductBridge extends NanoHTTPD {
     private final ProcessMemoryTools memory;
     private final BrowserSession browser;
     private final ComputeTools compute;
+    private final HardwareRuntime hardware;
     private final ToolProgress progress;
     private final VerificationFlow verification = new VerificationFlow(SystemClock::elapsedRealtime);
     final ControlPolicy policy = new ControlPolicy(SystemClock::elapsedRealtime);
@@ -57,6 +58,7 @@ final class ProductBridge extends NanoHTTPD {
         memory = ProcessMemoryTools.get(app);
         browser = new BrowserSession(app);
         compute = new ComputeTools(app);
+        hardware = HardwareRuntime.get(app);
         progress = new ToolProgress(app);
         progress.recoverInterrupted();
     }
@@ -126,6 +128,7 @@ final class ProductBridge extends NanoHTTPD {
             String task = request.optString("taskId"), call = request.optString("callId");
             if (session.getUri().equals("/cancel")) {
                 policy.cancel(task, call);
+                hardware.closeOwner(task);
                 memory.cancel(task);
                 AudioCapture.get(context).cancelStart(task, call);
                 AudioTranscription.get(context).cancelStart(task, call);
@@ -135,6 +138,7 @@ final class ProductBridge extends NanoHTTPD {
             if (session.getUri().equals("/task/end")) {
                 policy.end(task); verification.end(task); ProactiveNotifications.get(context).end(task);
                 memory.end(task);
+                hardware.closeOwner(task);
                 ToolProgress.endScreenOperation(task); RuntimeService.refreshExecutionProgress();
                 return ok(new JSONObject());
             }
@@ -216,6 +220,8 @@ final class ProductBridge extends NanoHTTPD {
         if (Set.of("audio_start", "audio_status", "audio_stop").contains(action))
             return executeAudio(action, args, task, call, budgetMs);
         JSONObject selectedTool = CapabilityAuthorization.forArguments(catalog.tool(action), args);
+        if (HardwareRuntime.cleanup(action, args))
+            return hardware.execute(action, args, task, () -> {});
         if (ProcessMemoryTools.isLocal(action, args)) {
             requireMemoryIdentity(task, call);
             // Local cleanup and existing receipts remain accessible after stop or
@@ -236,6 +242,7 @@ final class ProductBridge extends NanoHTTPD {
                 "app_info", "app_exit_info", "network_usage", "privacy_usage", "battery_usage",
                 "browser_status", "browser_observe", "browser_wait", "compute_jobs", "compute_artifact", "verification",
                 "process_memory", "memory_scan", "memory_read").contains(action);
+            if (HardwareRuntime.ACTIONS.contains(action)) trace.readOnly = HardwareRuntime.readOnly(action, args);
             if (verificationReturn) trace.readOnly = false;
             boolean started = false;
             boolean verificationActionStarted = false;
@@ -544,6 +551,7 @@ final class ProductBridge extends NanoHTTPD {
 
     private JSONObject dispatch(String action, JSONObject args, String owner, String call,
                                 boolean root, Cancellation cancellation) throws Exception {
+        if (HardwareRuntime.ACTIONS.contains(action)) return hardware.execute(action, args, owner, cancellation);
         if (isMemoryAction(action)) {
             cancellation.usingRoot(true);
             return memory.execute(action, args, owner, call, cancellation);
@@ -592,6 +600,7 @@ final class ProductBridge extends NanoHTTPD {
             diagnostics.put(key, enhanced.get(key));
         }
         JSONObject systemPermissions = personal.permissionStatus();
+        JSONObject hardwareStatus = hardware.capabilities();
         diagnostics.put("usage_query", new JSONObject().put("available", systemPermissions.optBoolean("usage"))
             .put("reason", systemPermissions.optBoolean("usage") ? JSONObject.NULL : "usage_permission_required"));
         for (java.util.Iterator<String> keys = diagnostics.keys(); keys.hasNext();) {
@@ -602,6 +611,13 @@ final class ProductBridge extends NanoHTTPD {
         org.json.JSONArray toolStates = new org.json.JSONArray();
         for (int i = 0; i < catalog.tools().length(); i++) {
             JSONObject tool = catalog.tools().getJSONObject(i);
+            if (HardwareRuntime.ACTIONS.contains(tool.getString("action"))) {
+                JSONObject state = HardwareToolState.describe(tool, grants, policy.isStopped() || ProductPermissions.stopped(context), hardwareStatus);
+                toolStates.put(state);
+                nativeStatus.getJSONArray("nativeActions").put(tool.getString("action"));
+                if (state.optBoolean("available")) nativeStatus.getJSONArray("availableActions").put(tool.getString("action"));
+                continue;
+            }
             String action = tool.getString("action");
             if (isMemoryAction(action)) {
                 JSONObject state = memoryAvailability(tool, grants, policy.isStopped(), memoryStatus);
@@ -628,6 +644,7 @@ final class ProductBridge extends NanoHTTPD {
                 .put("productAllowed", productAllowed).put("available", reasons.length() == 0).put("reasons", reasons));
         }
         return nativeStatus
+            .put("hardware", hardwareStatus)
             .put("processMemory", memoryStatus)
             .put("audioCapture", audioCapture)
             .put("audioTranscription", audioTranscription)
@@ -719,6 +736,8 @@ final class ProductBridge extends NanoHTTPD {
     }
 
     private static long defaultBudget(String action, JSONObject args) {
+        if (HardwareRuntime.ACTIONS.contains(action)) return Math.max(15000, Math.min(60000,
+            Math.max(args.optLong("durationMs", 0), args.optLong("timeoutMs", 0))) + 5000);
         if (action.equals("sequence")) return Math.min(60000, args.optLong("timeoutMs", 30000));
         if (args.has("afterCondition")) return Math.max(15000, Math.min(60000, args.optLong("afterTimeoutMs", 2000)) + 5000);
         if (action.startsWith("browser_")) return Math.max(15000, Math.min(60000, args.optLong("timeoutMs", 15000)) + 10000);

@@ -86,7 +86,7 @@ final class CapabilityCatalog {
                 case "audioTranscription" -> new String[]{"Local transcription", "Audio", "Transcribe recordings or live audio on the phone."};
                 case "memoryRead" -> new String[]{"Read app process data", "App process data", "Query only the task’s specified app and send relevant results to the model; requires Root."};
                 case "memoryWrite" -> new String[]{"Change one process value", "App process data", "Change one located value and verify readback; requires process reading and Root. Values are not frozen."};
-                default -> throw new IllegalStateException("Missing capability translation: " + source.getString("id"));
+                default -> new String[]{source.getString("labelEn"), source.getString("sectionEn"), source.getString("descriptionEn")};
             };
             String[] fields = {"label", "section", "description"};
             for (int index = 0; index < fields.length; index++)

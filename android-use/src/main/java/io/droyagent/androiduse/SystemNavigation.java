@@ -11,7 +11,7 @@ import java.util.List;
 
 final class SystemNavigation {
     static final List<String> GLOBAL_OPERATIONS = List.of("home", "recents", "notifications", "quick_settings");
-    static final List<String> SETTINGS_PAGES = List.of("app_details", "privacy", "battery_saver", "usage_access", "wifi");
+    static final List<String> SETTINGS_PAGES = List.of("app_details", "privacy", "battery_saver", "usage_access", "wifi", "bluetooth", "location", "nfc");
 
     private SystemNavigation() {}
 
@@ -28,7 +28,7 @@ final class SystemNavigation {
 
     static String page(Object value) throws ActionException {
         if (!(value instanceof String) || !SETTINGS_PAGES.contains(value))
-            throw new ActionException("invalid_argument", "page must be app_details, privacy, battery_saver, usage_access or wifi");
+            throw new ActionException("invalid_argument", "page");
         return (String) value;
     }
 
@@ -39,6 +39,9 @@ final class SystemNavigation {
             case "battery_saver" -> Settings.ACTION_BATTERY_SAVER_SETTINGS;
             case "usage_access" -> Settings.ACTION_USAGE_ACCESS_SETTINGS;
             case "wifi" -> Settings.ACTION_WIFI_SETTINGS;
+            case "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS;
+            case "location" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS;
+            case "nfc" -> Settings.ACTION_NFC_SETTINGS;
             default -> throw new ActionException("invalid_argument", "Unsupported settings page");
         };
     }

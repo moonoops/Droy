@@ -1,0 +1,5 @@
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/nfc_hce_service_description"
+    android:requireDeviceUnlock="true">
+    <aid-group android:category="other" android:description="@string/nfc_hce_service_description" />
+</host-apdu-service>

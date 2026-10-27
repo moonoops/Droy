@@ -1,0 +1,11 @@
+<resources>
+    <string name="network_hardware_unavailable">此手机未开放这项网络能力。</string>
+    <string name="network_permission_required">请在 Droy 设置中授予所需的 Android 网络、电话或精确位置权限。</string>
+    <string name="network_invalid_operation">不支持的网络操作。</string>
+    <string name="network_invalid_argument">网络参数无效。</string>
+    <string name="network_session_unavailable">本任务没有对应的 Wi-Fi 连接请求。</string>
+    <string name="network_not_available">Droy 当前无法使用指定网络。</string>
+    <string name="network_probe_failed">网络探测失败，请查看返回的阶段与错误类型。</string>
+    <string name="network_location_off">扫描 Wi-Fi 或查询小区前，请开启系统定位服务。</string>
+    <string name="network_wifi_request_limit">请先断开本任务已有的 Wi-Fi 请求，再创建新请求。</string>
+</resources>

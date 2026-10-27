@@ -66,6 +66,8 @@ try {
  for(const preset of presets)assert.equal(preset.broken,undefined,`${preset.id}: ${preset.broken}`);
  assert.equal(ctx.agentPresets.defaultId,'standard');
  for(const service of ['pluginManager','ptcRuntime','schedule','skills','permissionPresets','sessionController','terminalController','speechToText'])assert.ok(ctx.get(service),`${service} must be active`);
+ assert.equal(ctx.get('productAnalytics'),undefined,'upstream desktop analytics must stay inactive in the mobile profile');
+ assert.equal(ctx.get('productTelemetry'),undefined,'the desktop analytics sender must stay inactive in the mobile profile');
  assert.ok(ctx.speechToText.listProviders().some(provider=>provider.id==='droy-sensevoice-local'),'Android native speech provider must be registered in the actual profile');
  assert.ok([...ctx.registry.values()].some(runtime=>[...runtime.fibers].some(fiber=>fiber.entry?.options?.name==='@deepseek-ai/dsh-experimental-client-ui-voice-input'&&!fiber.entry.disabled)),'DSH voice plugin must be enabled in the actual profile');
  assert.ok(ctx.get('sessionController'),'chat controller must be active');

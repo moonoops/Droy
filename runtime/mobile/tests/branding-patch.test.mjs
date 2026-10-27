@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { patchConversationBranding, patchSidebarBranding, patchModelsBranding, patchAccountBranding, patchProductCopy, patchPresetCopy, patchShortcutBranding, patchFrontendBranding, patchWebManifestBranding } from '../../../tools/mobile_brand_patch.mjs';
+import { patchConversationBranding, patchSidebarBranding, patchModelsBranding, patchAccountBranding, patchProductCopy, patchEntryCustomizationCopy, patchPresetCopy, patchShortcutBranding, patchFrontendBranding, patchWebManifestBranding } from '../../../tools/mobile_brand_patch.mjs';
 import { patchConversation, patchSidebar, patchLayout } from '../../../tools/mobile_ui_patch.mjs';
 import { readUpstreamProfile, mobileProfilePatches, applyEntryPatches } from '../../../tools/mobile_profile.mjs';
 
@@ -20,6 +20,7 @@ const files = [
   ['@deepseek-ai/dsh-web-frontend/dist/index.html', patchFrontendBranding],
   ['@deepseek-ai/dsh-web-frontend/dist/manifest.webmanifest', patchWebManifestBranding],
   ['@deepseek-ai/dsh-client-ui-agent-preset/lib/client.js', patchPresetCopy],
+  ['@deepseek-ai/dsh-client-ui-entry-customization/lib/client.js', patchEntryCustomizationCopy],
 ];
 
 test('brand patches accept only reviewed upstream inputs and produce valid JavaScript', async () => {

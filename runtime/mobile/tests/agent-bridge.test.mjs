@@ -88,6 +88,7 @@ async function harness(script,implementation,options={}){
   ctx.provide('attachments',{async saveImage(){throw new Error('Text-only fixture must never save screenshots');}});
   await ctx.plugin(UserQuestions);await ctx.plugin(UserApproval,{policy:options.approvalPolicy??'ask'});
   await ctx.plugin(pluginPolicy);
+  if (options.privacy) ctx.provide('droyPrivacy', options.privacy);
   await ctx.plugin(mobile);
   const adapter=new ScriptedMockModel(script);ctx.llm.registerAdapter(['mock-android-contract'],adapter);
   const errors=[];ctx.on('agent/error',event=>errors.push(event.error));
@@ -103,6 +104,22 @@ async function harness(script,implementation,options={}){
   };
 }
 function toolResults(request){return request.messages.filter(message=>message.role==='tool');}
+
+test('denied device processing authorization prevents a physical command from reaching the native bridge', async t => {
+  let checked = false;
+  const fixture = await harness([
+    tool('denied-infrared', 'android_infrared', {operation: 'transmit', carrierHz: 38000, patternMicros: [100, 100]}),
+    options => { assert.match(JSON.stringify(toolResults(options)), /PRIVACY_ENDPOINT_NOT_AUTHORIZED/); return text('处理授权不足，未发射。'); },
+  ], async call => {
+    assert.notEqual(call.path, '/tool', 'A denied processing route must prevent the physical operation');
+    return {ok: true, result: {}};
+  }, {privacy: {status: async () => ({active: true}), routeForAgent: async () => ({}),
+    beforeDisclosure: async () => { checked = true; throw new Error('PRIVACY_ENDPOINT_NOT_AUTHORIZED'); }}});
+  t.after(() => fixture.close());
+  await fixture.run('只验证拒绝授权路径，不发射信号');
+  assert.equal(checked, true);
+  assert.equal(fixture.requests.filter(call => call.path === '/tool').length, 0);
+});
 
 test('production mobile plugin keeps full Android results without custom history replacements', async t => {
   let observation = 0;

@@ -12,6 +12,8 @@ export class BridgeError extends Error {
 
 function actionBudget(action, args) {
   const requested = Number.isFinite(args.timeoutMs) && args.timeoutMs >= 0 ? Math.min(args.timeoutMs, 60000) : undefined;
+  if (['sensor', 'location', 'infrared', 'bluetooth', 'nfc', 'nfc_emulation', 'wifi', 'cellular', 'network_probe', 'device_data', 'device_shortcut'].includes(action))
+    return Math.max(15000, Math.max(requested ?? 0, Number.isFinite(args.durationMs) ? Math.min(args.durationMs, 60000) : 0) + 5000);
   if (action.startsWith('browser_')) return Math.max(15000, (requested ?? 15000) + 10000);
   if (action === 'sequence') return requested ?? 30000;
   if (action === 'wait_for') return Math.max(1000, (requested ?? 10000) + 1500);

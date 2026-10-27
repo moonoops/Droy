@@ -1,0 +1,23 @@
+<resources>
+    <string name="hardware_sensor_unavailable">Android 传感器服务不可用。</string>
+    <string name="hardware_sensor_operation">传感器操作须为 list、read 或 sample。</string>
+    <string name="hardware_sensor_missing">手机没有提供指定的传感器。</string>
+    <string name="hardware_sensor_type">请提供传感器列表返回的 sensorType。</string>
+    <string name="hardware_sensor_register_failed">Android 未能启动此传感器采样。</string>
+    <string name="hardware_sensor_permission">请在 Android 设置中授予所需的运动或身体传感器权限。</string>
+    <string name="hardware_location_unavailable">Android 定位服务不可用。</string>
+    <string name="hardware_location_operation">定位操作须为 status、current 或 sample。</string>
+    <string name="hardware_location_provider">定位来源须为 auto、gps、network 或 passive。</string>
+    <string name="hardware_location_permission">请在 Android 设置中授予位置访问权限。</string>
+    <string name="hardware_location_precise">GPS 请求需要精确位置权限。</string>
+    <string name="hardware_location_disabled">请开启系统定位及请求的定位来源。</string>
+    <string name="hardware_infrared_unavailable">手机未提供红外发射器。</string>
+    <string name="hardware_infrared_operation">红外操作须为 status 或 transmit。</string>
+    <string name="hardware_infrared_permission">Android 未授予红外发射权限。</string>
+    <string name="hardware_infrared_waveform">请提供 1–4096 个正整数微秒脉冲时长，总时长须小于两秒。</string>
+    <string name="hardware_infrared_carrier">载波频率超出红外发射器报告的范围。</string>
+    <string name="hardware_infrared_carrier_required">请提供以 Hz 为单位的红外载波频率。</string>
+    <string name="hardware_infrared_sequence">请求的红外序列超过十秒。</string>
+    <string name="hardware_infrared_stopped">红外发射已停止，已发出的信号无法撤回。</string>
+    <string name="hardware_infrared_failed">Android 未确认此次红外发射，请先检查返回的发射次数再继续。</string>
+</resources>

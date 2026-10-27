@@ -1,0 +1,13 @@
+<resources>
+    <string name="hardware_data_invalid">设备数据请求无效。</string>
+    <string name="hardware_data_payload">请提供大小限制内的十六进制数据或设备数据引用，二者只能选择一个。</string>
+    <string name="hardware_data_limit">设备数据超过大小或存储限制，请删除不再需要的已保存记录。</string>
+    <string name="hardware_data_reference">请使用 Droy 返回的设备数据引用。</string>
+    <string name="hardware_data_missing">设备数据引用不存在、已过期或属于其他任务。</string>
+    <string name="hardware_data_corrupt">保存的设备数据未通过完整性检查。</string>
+    <string name="hardware_data_owner">访问设备数据需要当前任务。</string>
+    <string name="hardware_data_provider">所选文档提供程序未完成操作。</string>
+    <string name="hardware_data_directory">请先在 Droy 中选择可写入的导出目录。</string>
+    <string name="hardware_data_conflict">同名文件已存在，请选择其他导出名称。</string>
+    <string name="hardware_data_export_unconfirmed">导出结果未确认。再次导出前，请检查所选目录中是否存在新文件或部分文件。</string>
+</resources>

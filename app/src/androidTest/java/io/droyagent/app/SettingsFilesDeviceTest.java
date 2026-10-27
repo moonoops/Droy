@@ -182,6 +182,9 @@ public class SettingsFilesDeviceTest {
         String previousGrants = filePreferences.getString("grants", "[]");
         String previousReferences = filePreferences.getString("references", "[]");
         FileGrantStore grants = new FileGrantStore(context);
+        io.droyagent.androiduse.DeviceDataStore deviceData = new io.droyagent.androiduse.DeviceDataStore(context);
+        String binaryOwner = "binary-file-fixture:" + folder;
+        String importedReference = null;
         String grantId = null;
         try {
             shell("mkdir -p " + path);
@@ -242,14 +245,31 @@ public class SettingsFilesDeviceTest {
             assertEquals("export_verified", export.getString("status"));
             assertTrue(export.getBoolean("createdNewDocument"));
             assertEquals(fixture, files.execute("file_read", new JSONObject().put("fileId", export.getString("fileId")), ACTIVE).getString("text"));
+            byte[] binary = new byte[512];
+            for (int index = 0; index < binary.length; index++) binary[index] = (byte) index;
+            JSONObject source = deviceData.put(binaryOwner, binary, new JSONObject().put("source", "synthetic_fixture"), false, "Binary fixture");
+            JSONObject binaryExport = deviceData.execute(new JSONObject().put("operation", "export").put("dataRef", source.getString("dataRef"))
+                .put("grantId", grantId).put("name", "binary.bin"), binaryOwner, ACTIVE);
+            assertEquals("export_verified", binaryExport.getString("status"));
+            assertTrue(binaryExport.getBoolean("verified"));
+            JSONObject imported = deviceData.execute(new JSONObject().put("operation", "import").put("fileId", binaryExport.getString("fileId"))
+                .put("name", "Synthetic imported binary"), binaryOwner, ACTIVE);
+            importedReference = imported.getString("dataRef");
+            assertArrayEquals(binary, deviceData.readPayload(new JSONObject().put("dataRef", importedReference), binaryOwner, binary.length));
             String selected = grantId;
             expectAction("file_name_conflict", () -> files.execute("file_export", new JSONObject().put("grantId", selected)
                     .put("name", "export.txt").put("text", "must not overwrite"), ACTIVE));
             assertEquals(fixture, files.execute("file_read", new JSONObject().put("fileId", export.getString("fileId")), ACTIVE).getString("text"));
+            expectAction("file_name_conflict", () -> deviceData.execute(new JSONObject().put("operation", "export")
+                .put("dataRef", source.getString("dataRef")).put("grantId", selected).put("name", "binary.bin"), binaryOwner, ACTIVE));
             grants.revokeGrant(grantId);
             grantId = null;
             expectAction("file_reference_missing", () -> files.execute("file_read", new JSONObject().put("fileId", export.getString("fileId")), ACTIVE));
+            expectAction("file_reference_missing", () -> deviceData.execute(new JSONObject().put("operation", "import")
+                .put("fileId", binaryExport.getString("fileId")), binaryOwner, ACTIVE));
         } finally {
+            if (importedReference != null) deviceData.execute(new JSONObject().put("operation", "delete").put("dataRef", importedReference), binaryOwner, ACTIVE);
+            deviceData.closeOwner(binaryOwner);
             JSONArray remaining = grants.listGrants();
             for (int i = 0; i < remaining.length(); i++) {
                 JSONObject item = remaining.getJSONObject(i);

@@ -20,7 +20,7 @@ public final class ForegroundStatusNotifications {
     public static final int ID = 1;
     public static final String CHANNEL = "runtime";
     private record Owner(boolean runtime, StatusNotificationPolicy.Audio audio, String captureId,
-                         boolean camera, boolean location, PendingIntent stop) { }
+                         boolean camera, boolean location, boolean hardware, PendingIntent stop) { }
     private static final Map<Service, Owner> owners = new LinkedHashMap<>();
     private static final Handler main = new Handler(Looper.getMainLooper());
     private static String event = "";
@@ -28,7 +28,7 @@ public final class ForegroundStatusNotifications {
     private ForegroundStatusNotifications() { }
 
     public static void startRuntime(Service service) {
-        attach(service, new Owner(true, StatusNotificationPolicy.Audio.NONE, "", false, false, null),
+        attach(service, new Owner(true, StatusNotificationPolicy.Audio.NONE, "", false, false, false, null),
                 android.os.Build.VERSION.SDK_INT >= 34 ? ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE : 0);
     }
 
@@ -40,12 +40,16 @@ public final class ForegroundStatusNotifications {
             case "droy-voice-enrollment" -> StatusNotificationPolicy.Audio.ENROLLMENT;
             default -> microphone ? StatusNotificationPolicy.Audio.RECORDING : StatusNotificationPolicy.Audio.PLAYBACK;
         };
-        attach(service, new Owner(false, audio, captureId, camera, false, stop), types);
+        attach(service, new Owner(false, audio, captureId, camera, false, false, stop), types);
     }
 
     public static void startLocation(Service service, PendingIntent stop) {
-        attach(service, new Owner(false, StatusNotificationPolicy.Audio.NONE, "", false, true, stop),
+        attach(service, new Owner(false, StatusNotificationPolicy.Audio.NONE, "", false, true, false, stop),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+    }
+
+    public static void startHardware(Service service, int types, PendingIntent stop, boolean location) {
+        attach(service, new Owner(false, StatusNotificationPolicy.Audio.NONE, "", false, location, true, stop), types);
     }
 
     private static synchronized void attach(Service service, Owner owner, int types) {
@@ -86,11 +90,12 @@ public final class ForegroundStatusNotifications {
         } else channel.setName(NativeLocale.text("Droy 运行状态", "Droy status"));
         manager.createNotificationChannel(channel);
         boolean runtime = false, camera = false, location = false;
-        Owner audio = null, position = null;
+        Owner audio = null, position = null, hardware = null;
         for (Owner owner : owners.values()) {
             runtime |= owner.runtime(); camera |= owner.camera(); location |= owner.location();
             if (owner.audio() != StatusNotificationPolicy.Audio.NONE) audio = owner;
-            if (owner.location()) position = owner;
+            if (owner.location() && !owner.hardware()) position = owner;
+            if (owner.hardware()) hardware = owner;
         }
         JSONObject progress = ToolProgress.current(context);
         boolean ready = !runtime || RuntimeService.ready;
@@ -102,8 +107,12 @@ public final class ForegroundStatusNotifications {
         if (!event.equals(next)) { event = next; seed = ThreadLocalRandom.current().nextInt(); }
         boolean attention = NotificationManagement.attentionRequired(context);
         String title = StatusNotificationPolicy.title(ready, active, phase, audioKind, location, seed);
+        if (!active && audio == null && position == null && hardware != null) title = hardware.location()
+            ? NativeLocale.text("正在获取当前位置", "Getting current location") : NativeLocale.text("设备连接进行中", "Device connection active");
         String detail = StatusNotificationPolicy.detail(active, phase, progress.optString("summary"), progress.optString("summaryKind"),
                 audioKind, camera, location, attention, ProductPermissions.stopped(context));
+        if (!active && audio == null && position == null && hardware != null && hardware.location())
+            detail = NativeLocale.text("为当前任务读取位置，完成后停止。", "Reading location for the current task; stops when complete.");
         Intent target = new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         if (active && !task.isEmpty()) target.putExtra("petTaskId", task);
         JSONObject question = progress.optJSONObject("pending");
@@ -126,7 +135,11 @@ public final class ForegroundStatusNotifications {
             notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("停止任务", "Stop task"), cancel).build()); actions++;
         }
         if (audio != null && audio.stop() != null) { notification.addAction(new Notification.Action.Builder(null, StatusNotificationPolicy.stopLabel(audioKind), audio.stop()).build()); actions++; }
-        if (position != null && position.stop() != null) { notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("停止位置记录", "Stop location recording"), position.stop()).build()); actions++; }
+        if (position != null && position.stop() != null) { notification.addAction(new Notification.Action.Builder(null, position.hardware()
+            ? NativeLocale.text("停止定位任务", "Stop location task") : NativeLocale.text("停止位置记录", "Stop location recording"), position.stop()).build()); actions++; }
+        if (hardware != null && hardware != position && hardware.stop() != null && actions < 3) {
+            notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("暂停手机操作", "Pause phone operations"), hardware.stop()).build()); actions++;
+        }
         if (active && actions < 3 && !ProductPermissions.stopped(context)) {
             PendingIntent pause = PendingIntent.getService(context, 1, new Intent(context, RuntimeService.class).setAction(RuntimeService.PAUSE),
                     PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);

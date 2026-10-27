@@ -205,6 +205,22 @@ test('permission status comes from actual grants even when product capability is
   assert.equal(load().permissionRows({...state(),systemPermissions:{microphone:true}}).find(row=>row[0] === 'microphone')[2], '已授权');
 });
 
+test('hardware permissions distinguish approximate location, scan prerequisites and unsupported hardware', () => {
+  const saved = {...state(), systemPermissions: {
+    hardware: {wifi:true,bluetooth:true,nfc:false,telephony:true,stepCounter:false},
+    locationApproximate:true,locationPrecise:false,locationEnabled:true,
+    bluetoothScan:true,bluetoothConnect:false,nearbyWifi:true,wifiScan:false,phoneState:false,
+  }};
+  const rows = load().permissionRows(saved);
+  assert.equal(rows.find(row => row[0] === 'location')[2], '大致位置已授权');
+  assert.equal(rows.find(row => row[0] === 'wifiScan')[2], '需要精确位置权限');
+  assert.equal(rows.find(row => row[0] === 'nearbyWifi')[2], '已授权');
+  assert.equal(rows.find(row => row[0] === 'bluetooth')[2], '待授权');
+  assert.equal(rows.find(row => row[0] === 'nfcSettings')[2], '设备不支持');
+  assert.equal(rows.find(row => row[0] === 'nfcSettings')[3], null);
+  assert.equal(rows.find(row => row[0] === 'activityRecognition')[3], null);
+});
+
 test('dictation claims native input before capture and releases on normal track stop', async () => {
   const calls = [], listeners = new Map();
   const track = {readyState:'live',stop(){ this.readyState='ended'; },addEventListener(name,listener){listeners.set(name,listener);} };

@@ -2,14 +2,58 @@
 
 从仓库根目录执行，构建依赖见 [README](README.md)。测试使用虚构数据；设备测试请使用专用设备或隔离的测试环境，先停止正在进行的任务。
 
-## 主机检查
+## 验证档位
+
+| 档位 | 触发时机 | 范围与环境 |
+| --- | --- | --- |
+| 日常验证（默认） | 单个功能、修复或普通提交 | 本次功能、直接关联调用方和关键失败路径；选相关主机测试，按需在一种设备环境验证，不默认同时跑模拟器与真机 |
+| 阶段集成验证 | 用户明确要求阶段验收、提交前阶段回归等 | 上次阶段基线以来的累计改动；完整主机自动化、构建检查、核心流程冒烟与受影响功能集成；模拟器集中验证，真机检查设备依赖能力与关键路径 |
+| 发布验收 | 用户明确要求发布版本 | 阶段检查，加安装升级、配置保留、权限与恢复及完整适用界面矩阵；模拟器与目标真机按职责覆盖 |
+
+“提交当前改动到分支”默认执行日常验证和提交前差异检查；“提交前做阶段回归”才切换到阶段档。测试档位不授权推送、合并、正式签名或发布，相关操作仍遵守项目授权要求。
+
+日常选择范围以行为影响为准，不仅按修改文件名选择：
+
+- 设置项：检查设置、保存、重新进入，以及中英文显示，不重测无关模块。
+- 界面：实际运行受影响入口和共用容器，审查截图并操作；通常用模拟器，按影响选择显示条件。
+- 纯逻辑：相关单元或集成测试，无设备行为变化时不安装 APK；低影响文档修改只检查内容、引用和差异。
+- 产品文本或 prompt：运行受影响的中英文资源、占位符、语言切换及回答语言约束回归，不因此遍历全部页面。
+- 相机、麦克风、Root、系统权限等：当次完成必要的专项设备验证；授权、数据隔离、删除、迁移的关键安全与数据完整性检查不得后移。前置条件不满足时记录验证缺口，不称该项验证通过。
+
+DSH 升级、批量开放功能和共用导航/布局调整记录为独立集成批次；阶段验收扩大到关联入口。新增失败或具体风险可扩大相关检查，但不自动启动全产品回归。
+
+## 日常主机检查与构建
+
+根据改动选择测试文件或用例，不默认执行下文全部模块。示例（按实际影响替换或增补）：
+
+```sh
+node --expose-internals --test runtime/mobile/tests/composer-stats.test.mjs
+node --test runtime/media-input/tests/menu.test.mjs
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/tests -p 'test_install.py'
+```
+
+依赖或生成资源变化时先准备对应资源；测试不得使用过期资源得出通过结论。已有依赖与 DSH staging 时，移动端源文件变化可用 `node tools/prepare_dsh.mjs --refresh-mobile` 刷新；依赖变化须按构建流程重新准备。
+
+针对性检查通过且本次需要构建 APK 时：
+
+```sh
+./tools/build.sh --skip-tests --skip-deps
+```
+
+`--skip-tests` 仅跳过构建脚本内的整套主机/单元测试，不替代本次针对性检查；仍准备资源并生成开发版 App 和 instrumentation APK。`--skip-deps` 只适用于依赖未变且已安装的情况，否则省略。无需设备验证或编译验证的改动不为结束对话而构建、安装。构建、安装说明见 [BUILDING.md](BUILDING.md) 和 [INSTALLATION.md](INSTALLATION.md)。
+
+## 阶段与发布主机检查
+
+阶段、发布节点执行以下完整主机检查。`build.sh` 已包含下方模块测试、两个 profile 冒烟和 Gradle 单元测试，同一代码状态成功执行后不再逐条重复；lint 和两个构建契约检查需另外执行。
 
 ```sh
 ./tools/build.sh
 ./gradlew --no-daemon :app:lintDebug
+./gradlew --no-daemon -I tools/tests/runtime_release_binding.gradle :app:testRuntimeReleaseBinding
+./gradlew --no-daemon -I tools/tests/build_variants.gradle :app:testBuildVariants
 ```
 
-已有构建依赖时可运行相关模块检查：
+以下为可单独定位失败或按日常影响选择的模块检查清单，不是每个对话的必跑列表：
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/tests -p 'test_*.py'
@@ -18,16 +62,16 @@ node --test runtime/media-input/tests/*.test.mjs runtime/voice/tests/*.test.mjs
 node --test runtime/memory/tests/*.test.mjs runtime/privacy/tests/*.test.mjs runtime/execution/tests/*.test.mjs
 node --expose-internals runtime/mobile/tests/profile-smoke.mjs
 node --expose-internals runtime/mobile/tests/profile-memory-active-smoke.mjs
-./gradlew --no-daemon :app:testDebugUnitTest
-./gradlew --no-daemon -I tools/tests/runtime_release_binding.gradle :app:testRuntimeReleaseBinding
-./gradlew --no-daemon -I tools/tests/build_variants.gradle :app:testBuildVariants
+./gradlew --no-daemon testDebugUnitTest
 ```
 
-主机回归使用本地模型与执行器夹具，不需要模型 API Key。源码变化后重新运行 `node tools/prepare_dsh.mjs --refresh-mobile`，再构建并安装对应 APK。
+主机回归使用本地模型与执行器夹具，不需要模型 API Key。构建通过不代表设备或界面验收通过。
 
 ## 设备检查
 
-构建脚本生成 App 和 instrumentation APK。设备连接与安装见 [INSTALLATION.md](INSTALLATION.md)。检查首次配置、模型连接、所选权限、手机动作、停止、撤权、重启与升级后配置保留。
+构建脚本生成 App 和 instrumentation APK。设备连接与安装见 [INSTALLATION.md](INSTALLATION.md)。日常只运行受影响用例，按能力选择模拟器或真机；不默认运行整个 instrumentation 套件。
+
+阶段验收对累计改动做集成验证，并冒烟检查启动、配置读取、会话输入与回复、手机动作和停止等核心路径。真机补足模拟器无法证明的设备能力与关键路径，避免在两个环境机械重复全部用例。发布验收进一步覆盖首次配置、模型连接、所选权限、撤权、重启、安装升级及配置保留。使用夹具得出的模型连接结论仅适用于夹具，真实模型服务结论须有对应验证。
 
 日常设备验收只安装 `io.droyagent.app.dev` 与 `io.droyagent.app.dev.test`，使用默认调试签名，不重新签为正式证书。显式选择设备，保留已安装的 `io.droyagent.app` 及数据；测试组件使用开发包名加原有 Java 类全名（如 `io.droyagent.app.dev/io.droyagent.app.MainActivity`），不能用开发包名拼出不存在的 Java 类。设备测试不得借用正式版配置或修改其权限。开发版与正式版的发布策略见 [AGENTS.md](AGENTS.md#开发版与正式发布)。
 
@@ -42,7 +86,7 @@ node --expose-internals runtime/mobile/tests/profile-memory-active-smoke.mjs
 
 ## 界面变更验收
 
-实际运行受影响入口及其共用容器，检查中文和英文，并按影响覆盖以下条件：
+日常实际运行受影响入口及其共用容器，检查中文和英文、截图与操作，按本次影响选择下表条件；不默认把完整矩阵和双设备验证放到每个对话。阶段验收对累计受影响入口补齐适用条件；发布验收执行完整适用矩阵。与本次改动直接相关的显示或交互问题应当次验证，不以阶段验收为由推迟。
 
 | 条件 | 检查内容 |
 | --- | --- |
@@ -52,4 +96,21 @@ node --expose-internals runtime/mobile/tests/profile-memory-active-smoke.mjs
 | 键盘、弹层与系统返回 | 安全区正确，返回逐层关闭，草稿与当前会话按约定保留 |
 | 加载、空内容、错误与权限状态 | 提示和恢复入口可用，实际触摸有效 |
 
-审查实际截图并操作边缘按钮、最后一个 tab 与末项控件；DOM 存在或点击回执不能替代界面检查。DSH 升级后逐项到达所有可见入口和设置 tab。验收记录保存在源码仓库之外。
+在所选范围内审查实际截图并操作边缘按钮、最后一个 tab 与末项控件；DOM 存在或点击回执不能替代界面检查。DSH 升级或批量开放功能的阶段验收须逐项到达所有可见入口和设置 tab。缺少条件时记录未验事项，不通过隐藏功能或缩短必要文案掩盖排版缺陷，不宣称完整界面验收通过。
+
+## 累计验收记录
+
+同一仓库的多个对话共用一份仓库外的记录，默认放在 `../artifacts/testing/validation-log.md`；已有同用途记录时沿用并在后续交接中给出路径，不每个对话另建账本。截图、日志等证据也放在仓库外。记录使用简短条目或表格：
+
+| 项目 | 记录内容 |
+| --- | --- |
+| 改动范围 | 功能、受影响模块或入口、所属集成批次（如适用） |
+| 代码与产物 | 提交标识；未提交时补充相关差异/新增文件快照或指纹；设备验证补充 APK 标识或哈希 |
+| 已通过检查 | 测试命令/用例、结果；设备检查的设备、系统版本、权限和证据位置 |
+| 待验项目 | 待阶段补齐的条件、必要验证缺口或失败原因；无则注明无 |
+
+开始后续任务时查阅与改动有关的条目；结束时追加或更新本次记录，不覆盖其他对话的结果。阶段验收从上次通过的阶段基线汇总累计改动；没有基线时以本次待交付范围建立首个基线，不假定旧功能已通过。
+
+只有代码、产物和相关环境仍匹配时才可沿用结果；同一版本号不足以复用验证。测试后发生修改，重新验证受影响部分，关联模块或运行环境变化也须重新评估；无关结果无需重复执行。待验事项仅在实际完成并记录证据后关闭；有必需项未验或失败时，不更新为“阶段/发布验收通过”的基线。
+
+完成报告分别说明本次验证结果和实质待验项；日常通过不等于版本验收通过。相关检查满足后停止，仅因新改动、失败或具体未解决风险继续扩大验证。

@@ -3,6 +3,10 @@ function setupPermissionFor(preference) {
     allowCalendar: 'calendar', allowContacts: 'contacts', allowNotifications: 'notificationAccess',
     allowUsage: 'usage', allowPrivacyUsage: 'usage', allowDiagnostics: 'usage',
     allowAudioMicrophone: 'microphone', allowSettingsWrite: 'brightness',
+    allowLocationRead: 'location', allowBluetoothRead: 'bluetooth', allowBluetoothControl: 'bluetooth',
+    allowWifiRead: 'wifiScan', allowWifiControl: 'nearbyWifi', allowCellularRead: 'phoneState',
+    allowNfcRead: 'nfcSettings', allowNfcWrite: 'nfcSettings', allowNfcEmulation: 'nfcSettings',
+    allowActivitySensors: 'activityRecognition', allowBodySensors: 'bodySensors',
     allowFiles: 'file', allowFileExport: 'directory' })[preference] || null;
 }
 

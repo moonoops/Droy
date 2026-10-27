@@ -1,0 +1,11 @@
+<resources>
+    <string name="network_hardware_unavailable">This phone does not expose this network capability.</string>
+    <string name="network_permission_required">Grant the required Android network, phone or precise location permission in Droy settings.</string>
+    <string name="network_invalid_operation">Unsupported network operation.</string>
+    <string name="network_invalid_argument">Invalid network argument.</string>
+    <string name="network_session_unavailable">This task has no matching Wi-Fi connection request.</string>
+    <string name="network_not_available">The requested network is not available to Droy.</string>
+    <string name="network_probe_failed">The network probe failed; see the reported stage and error type.</string>
+    <string name="network_location_off">Enable system location services to scan Wi-Fi networks or query cells.</string>
+    <string name="network_wifi_request_limit">Disconnect an existing Wi-Fi request before creating another one for this task.</string>
+</resources>

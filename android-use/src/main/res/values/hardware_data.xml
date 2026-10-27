@@ -1,0 +1,13 @@
+<resources>
+    <string name="hardware_data_invalid">Invalid device data request.</string>
+    <string name="hardware_data_payload">Provide exactly one hexadecimal payload or device data reference within the size limit.</string>
+    <string name="hardware_data_limit">Device data exceeds the size or storage limit. Delete saved records you no longer need.</string>
+    <string name="hardware_data_reference">Use a device data reference returned by Droy.</string>
+    <string name="hardware_data_missing">The device data reference is missing, expired, or belongs to another task.</string>
+    <string name="hardware_data_corrupt">The saved device data failed its integrity check.</string>
+    <string name="hardware_data_owner">A current task is required to access device data.</string>
+    <string name="hardware_data_provider">The selected document provider did not complete the operation.</string>
+    <string name="hardware_data_directory">Select a writable output directory in Droy first.</string>
+    <string name="hardware_data_conflict">A file with this name already exists. Choose a different export name.</string>
+    <string name="hardware_data_export_unconfirmed">Export was not confirmed. Check the selected directory for a new or partial file before exporting again.</string>
+</resources>

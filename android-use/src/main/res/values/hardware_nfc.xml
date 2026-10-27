@@ -1,0 +1,33 @@
+<resources>
+    <string name="nfc_title">NFC card reader</string>
+    <string name="nfc_waiting">Hold the card against the phone. Keep this page open while Droy communicates with it.</string>
+    <string name="nfc_detected">Card detected. Keep it against the phone until the operation finishes.</string>
+    <string name="nfc_cancel">Close NFC reader</string>
+    <string name="nfc_unavailable">NFC is unavailable or switched off. Check system NFC settings.</string>
+    <string name="nfc_denied">NFC access is paused or has not been allowed in Droy permissions.</string>
+    <string name="nfc_invalid_request">Invalid NFC operation or parameters.</string>
+    <string name="nfc_session_lost">The card session expired. Open the reader and tap the card again.</string>
+    <string name="nfc_reader_busy">Another NFC operation is in progress.</string>
+    <string name="nfc_timeout">No card was detected before the deadline.</string>
+    <string name="nfc_unsupported_tech">This card technology is not supported by the phone.</string>
+    <string name="nfc_write_rejected">The target is not writable, has insufficient capacity, or includes protected configuration bytes.</string>
+    <string name="nfc_auth_required">This operation requires a stored NFC credential reference.</string>
+    <string name="nfc_credential_missing">The NFC credential reference was not found.</string>
+    <string name="nfc_save_failed">NFC data could not be saved.</string>
+    <string name="nfc_hce_active">Stop card emulation before starting the NFC reader.</string>
+    <string name="nfc_credential_title">Add NFC credential</string>
+    <string name="nfc_credential_help">Enter a MIFARE Classic key you already have. It stays encrypted on this phone and is referenced by ID in tools.</string>
+    <string name="nfc_credential_name">Credential name</string>
+    <string name="nfc_credential_key">Key: 12 hexadecimal characters</string>
+    <string name="nfc_credential_save">Save credential</string>
+    <string name="nfc_credential_saved">Credential saved. Return to Droy and list NFC credentials to use its reference.</string>
+    <string name="nfc_back">Return to Droy</string>
+    <string name="nfc_hce_unavailable">Host card emulation is unavailable, the reader is active, or the device is locked.</string>
+    <string name="nfc_hce_invalid">The HCE configuration is invalid or missing.</string>
+    <string name="nfc_hce_route_failed">Android did not register the requested AID route.</string>
+    <string name="nfc_io_failed">NFC communication failed. Keep the card in place and inspect the last operation before continuing.</string>
+    <string name="nfc_data_ndef">NFC NDEF message</string>
+    <string name="nfc_data_block">NFC block</string>
+    <string name="nfc_data_pages">NFC pages</string>
+    <string name="nfc_data_response">NFC response</string>
+</resources>

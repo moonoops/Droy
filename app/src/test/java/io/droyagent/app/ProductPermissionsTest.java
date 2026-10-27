@@ -54,6 +54,23 @@ public final class ProductPermissionsTest {
         assertEquals(3, saved.size());
     }
 
+    @Test public void hardwareAdditionsNeedConsentEvenBeforeLegacyDefaultsAreMigrated() {
+        Map<String, Boolean> saved = new HashMap<>();
+        SharedPreferences preferences = preferences(saved);
+        for (String key : new String[]{"allowSensorsRead", "allowLocationRead", "allowInfrared", "allowBluetoothRead",
+                "allowBluetoothControl", "allowNfcRead", "allowNfcWrite", "allowNfcEmulation", "allowWifiRead",
+                "allowWifiControl", "allowCellularRead", "allowNetworkProbe", "allowDeviceDataRead", "allowDeviceDataWrite",
+                "allowActivitySensors", "allowBodySensors"}) {
+            assertTrue(ProductPermissions.isHardwareCapability(key));
+            assertFalse(key, ProductPermissions.allowed(preferences, key));
+            saved.put(key, true);
+            assertTrue(key, ProductPermissions.allowed(preferences, key));
+            saved.put(key, false);
+            assertFalse(key, ProductPermissions.allowed(preferences, key));
+        }
+        assertTrue(ProductPermissions.allowed(preferences, "allowContacts"));
+    }
+
     private static SharedPreferences preferences(Map<String, Boolean> saved) {
         return (SharedPreferences) Proxy.newProxyInstance(SharedPreferences.class.getClassLoader(),
                 new Class<?>[]{SharedPreferences.class}, (proxy, method, args) -> {

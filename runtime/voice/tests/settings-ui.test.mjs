@@ -75,6 +75,7 @@ async function fixture({ rejectWake = false, onRequest, models: initialModels, f
   await client.apply({ locale, slots: { inject: (_name, setup) => setup(), register: (options, component) => registrations.push({ options, component }) }, effect() {} });
   const settings = registrations.find(row => row.options.name === 'settings.section').component;
   const dock = registrations.find(row => row.options.name === 'conversation.input.dock').component;
+  const hold = registrations.find(row => row.options.name === 'shell.overlay').component;
   function render(component = settings) {
     let tree;
     for (let n = 0; n < 3; n++) {
@@ -84,7 +85,7 @@ async function fixture({ rejectWake = false, onRequest, models: initialModels, f
     }
     return tree;
   }
-  return { render, dock, snapshot, config, requests, setLocale, dictionaries, modelRequests, errors, voiceLoads: () => voiceLoads, timers, async tick() { const [id, callback] = timers.entries().next().value; timers.delete(id); await callback(); }, dispose: () => cleanups.forEach(cleanup => cleanup?.()) };
+  return { render, dock, hold, snapshot, config, requests, setLocale, dictionaries, modelRequests, errors, voiceLoads: () => voiceLoads, timers, async tick() { const [id, callback] = timers.entries().next().value; timers.delete(id); await callback(); }, dispose: () => cleanups.forEach(cleanup => cleanup?.()) };
 }
 
 function nodes(tree) {
@@ -116,6 +117,41 @@ test('voice dock keeps the listening status accessible without stacking a visibl
   assert.equal(signal.children[0].type.name, 'Wave');
   assert.equal(tree.filter(node => node.type === 'button').length, 3);
 });
+
+for (const mode of ['standard', 'hold']) {
+  test(`${mode} waveform carries sound across the entire trace through silent samples`, async () => {
+    const f = await fixture();
+    Object.assign(f.snapshot, { mode, status: mode === 'hold' ? 'recording' : 'active', level: .04, levelSequence: 1 });
+    const sample = () => {
+      const wave = nodes(f.render(mode === 'hold' ? f.hold : f.dock)).find(node => node.type?.name === 'Wave');
+      return f.render(() => wave.type(wave.props)).children.map(bar => bar.props.style.transform);
+    };
+    const first = sample(), baseline = 'scaleY(0.06)', peak = first.at(-1);
+    assert.notEqual(peak, baseline);
+    assert.deepEqual(sample(), first, 'A rerender without a new sample must not advance time');
+    // One pulse followed by silence must visit every bar, including the left edge.
+    for (let step = 1; step < first.length; step++) {
+      f.snapshot.level = 0; f.snapshot.levelSequence++;
+      const trace = sample();
+      assert.equal(trace[first.length - 1 - step], peak, `Pulse disappeared at step ${step}`);
+      assert.equal(trace.filter(value => value !== baseline).length, 1);
+    }
+    f.snapshot.levelSequence++;
+    assert.ok(sample().every(value => value === baseline), 'Pulse must leave the left edge');
+    for (let step = 0; step < first.length; step++) {
+      f.snapshot.level = .04; f.snapshot.levelSequence++;
+      sample();
+    }
+    assert.ok(sample().every(value => value === peak), 'Equal measured samples must fill the trace');
+    if (mode === 'standard') {
+      f.snapshot.muted = true;
+      assert.ok(sample().every(value => value === baseline), 'Mute must clear immediately');
+      f.snapshot.level = 0; f.snapshot.muted = false;
+      assert.ok(sample().every(value => value === baseline), 'Unmute must not revive old sound');
+    }
+    f.dispose();
+  });
+}
 
 test('switching speech engines clears the engine-specific voice selection while keeping other draft settings', async () => {
   const f = await fixture();

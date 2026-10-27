@@ -15,6 +15,28 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.BODY_SENSORS" android:maxSdkVersion="35" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="android.permission.TRANSMIT_IR" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
+    <uses-feature android:name="android.hardware.consumerir" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- User grants usage access through Settings/AppOps; this is not a runtime permission. -->
@@ -49,6 +71,18 @@
         <activity android:name=".TestPageActivity" android:exported="false" />
         <activity android:name=".AudioPermissionActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
         <activity android:name=".MemoryPermissionActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".NfcReaderActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".NfcCredentialActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".WifiCredentialActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".HardwareShortcutActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".HealthPermissionRationaleActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity-alias android:name=".HealthPermissionUsageActivity" android:exported="true"
+            android:targetActivity=".HealthPermissionRationaleActivity" android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
         <activity android:name=".media.ShareReceiveActivity" android:exported="true" android:theme="@style/DroyChatTheme"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
@@ -74,6 +108,11 @@
         <provider android:name=".PermissionSetupProvider" android:authorities="${applicationId}.permissions"
             android:exported="true" android:permission="android.permission.DUMP" />
         <service android:name=".BrowserService" android:exported="false" android:process=":browser" />
+        <service android:name=".HardwareSessionService" android:exported="false" android:foregroundServiceType="connectedDevice|location" />
+        <service android:name=".DroyHostApduService" android:exported="true" android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter><action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" /></intent-filter>
+            <meta-data android:name="android.nfc.cardemulation.host_apdu_service" android:resource="@xml/droy_hce" />
+        </service>
         <service android:name=".AudioCaptureService" android:exported="false" android:stopWithTask="false"
             android:foregroundServiceType="microphone|mediaProjection|camera" />
         <service android:name=".history.HistoryLocationService" android:exported="false" android:stopWithTask="false"

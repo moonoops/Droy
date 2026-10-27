@@ -67,7 +67,7 @@ final class SetupManager {
         if (product.getBoolean(ProductPermissions.DEFAULT_DENY, false)) return;
         SharedPreferences.Editor migration = product.edit();
         for (String key : capabilityKeys(context)) {
-            if (!product.contains(key)) migration.putBoolean(key, legacy);
+            if (!product.contains(key)) migration.putBoolean(key, legacy && !ProductPermissions.isHardwareCapability(key));
         }
         // Snapshot old defaults once; future catalogue additions require consent.
         commit(migration.putBoolean(ProductPermissions.DEFAULT_DENY, true));
@@ -169,6 +169,7 @@ final class SetupManager {
         commit(settings);
         commit(installation);
         if (choicesChanged) {
+            HardwareRuntime.onPermissionsChanged(context);
             RuntimeService.memoryPermissionsChanged(context);
             RuntimeService.applySavedOperationState();
         }
@@ -392,6 +393,46 @@ final class SetupManager {
         permission(checks, context, capabilities, "allowCalendar", "calendar", io.droyagent.app.NativeLocale.text("日历授权", "Calendar permission"), Manifest.permission.READ_CALENDAR);
         permission(checks, context, capabilities, "allowContacts", "contacts", io.droyagent.app.NativeLocale.text("联系人授权", "Contacts permission"), Manifest.permission.READ_CONTACTS);
         permission(checks, context, capabilities, "allowAudioMicrophone", "microphone", io.droyagent.app.NativeLocale.text("麦克风授权", "Microphone permission"), Manifest.permission.RECORD_AUDIO);
+        JSONObject hardwarePermissions = HardwarePermissionState.status(context);
+        JSONObject hardware = hardwarePermissions.getJSONObject("hardware");
+        if (capabilities.optBoolean("allowLocationRead")) {
+            add(checks, "location", NativeLocale.text("位置访问", "Location access"), true,
+                hardwarePermissions.optBoolean("locationApproximate") || hardwarePermissions.optBoolean("locationPrecise"),
+                NativeLocale.text("大致位置可用于普通定位；需要精确定位时再授予精确位置。", "Approximate location supports general requests. Allow precise location when needed."), "location");
+            add(checks, "locationSettings", NativeLocale.text("系统定位", "System location"), true,
+                hardwarePermissions.optBoolean("locationEnabled"),
+                NativeLocale.text("在系统设置中开启定位。", "Turn on location in system settings."), "locationSettings");
+        }
+        if ((capabilities.optBoolean("allowBluetoothRead") || capabilities.optBoolean("allowBluetoothControl")) && hardware.optBoolean("bluetooth"))
+            add(checks, "bluetooth", NativeLocale.text("蓝牙权限", "Bluetooth permissions"), true,
+                hardwarePermissions.optBoolean("bluetoothScan") && hardwarePermissions.optBoolean("bluetoothConnect"),
+                NativeLocale.text("扫描和连接需要附近设备权限；Android 11 扫描还需要精确位置和系统定位。", "Scanning and connecting need nearby device permissions. On Android 11, scanning also needs precise location and system location."), "bluetooth");
+        if (capabilities.optBoolean("allowWifiRead") && hardware.optBoolean("wifi"))
+            add(checks, "wifiScan", NativeLocale.text("Wi-Fi 扫描权限", "Wi-Fi scanning permission"), false,
+                hardwarePermissions.optBoolean("wifiScan"),
+                NativeLocale.text("查询周边网络还需要精确位置权限和系统定位；基本连接状态可单独使用。", "Nearby network scans also need precise location and system location. Basic connection status is available separately."), "wifiScan");
+        if (capabilities.optBoolean("allowWifiControl") && hardware.optBoolean("wifi"))
+            add(checks, "nearbyWifi", NativeLocale.text("附近 Wi-Fi 权限", "Nearby Wi-Fi permission"), true,
+                hardwarePermissions.optBoolean("nearbyWifi"),
+                NativeLocale.text("按系统版本授予附近 Wi-Fi 或位置权限；连接时可能需要系统确认。", "Allow nearby Wi-Fi or location permission for this Android version. Connecting may require system confirmation."), "nearbyWifi");
+        if (capabilities.optBoolean("allowCellularRead") && hardware.optBoolean("telephony")) {
+            permission(checks, context, capabilities, "allowCellularRead", "phoneState", NativeLocale.text("电话状态授权", "Phone state permission"), Manifest.permission.READ_PHONE_STATE);
+            add(checks, "cellLocation", NativeLocale.text("小区位置权限", "Cell location permission"), false,
+                hardwarePermissions.optBoolean("locationPrecise"),
+                NativeLocale.text("服务小区和邻区信息需要精确位置；其他网络指标按实际系统授权返回。", "Serving and neighboring cell details need precise location. Other network metrics follow actual system permissions."), "locationPrecise");
+        }
+        if (capabilities.optBoolean("allowActivitySensors") && hardware.optBoolean("stepCounter"))
+            add(checks, "activityRecognition", NativeLocale.text("计步授权", "Step recognition permission"), true,
+                hardwarePermissions.optBoolean("activityRecognition"),
+                NativeLocale.text("计步需要活动识别权限；其他传感器单独检查。", "Step data needs activity recognition permission. Other sensors are checked separately."), "activityRecognition");
+        if (capabilities.optBoolean("allowBodySensors") && hardware.optBoolean("heartRate"))
+            add(checks, "bodySensors", NativeLocale.text("心率传感器授权", "Heart rate sensor permission"), true,
+                hardwarePermissions.optBoolean("bodySensors"),
+                NativeLocale.text("仅在你开启身体传感器能力后按任务读取；不会因此开启持续记录。", "Read for a task only after you enable body sensor access. This does not start continuous recording."), "bodySensors");
+        if ((capabilities.optBoolean("allowNfcRead") || capabilities.optBoolean("allowNfcWrite") || capabilities.optBoolean("allowNfcEmulation")) && hardware.optBoolean("nfc"))
+            add(checks, "nfcSettings", NativeLocale.text("NFC 开关", "NFC"), false,
+                hardwarePermissions.optBoolean("nfcEnabled"),
+                NativeLocale.text("使用读卡或卡模拟时需开启 NFC；读卡需要前台贴卡界面。", "Enable NFC for reading or emulation. Reading requires the foreground card screen."), "nfcSettings");
         if (capabilities.optBoolean("allowNotifications")) add(checks, "notificationAccess", io.droyagent.app.NativeLocale.text("通知服务连接", "Notification service connection"), true,
             DroyNotificationService.status(context).optBoolean("available"), io.droyagent.app.NativeLocale.text("请允许通知访问并等待服务连接", "Allow notification access and wait for the service to connect"), "notificationAccess");
         if (capabilities.optBoolean("allowUsage") || capabilities.optBoolean("allowPrivacyUsage") || capabilities.optBoolean("allowDiagnostics")) {

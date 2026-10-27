@@ -71,7 +71,11 @@ if remote[:2] == ["pm", "grant"]:
     respond()
 if remote[:2] == ["dumpsys", "package"]:
     current = config.get("user", "0")
-    permissions = ["android.permission.READ_CALENDAR", "android.permission.READ_CONTACTS", "android.permission.RECORD_AUDIO", "android.permission.POST_NOTIFICATIONS"]
+    permissions = ["android.permission.READ_CALENDAR", "android.permission.READ_CONTACTS", "android.permission.RECORD_AUDIO", "android.permission.POST_NOTIFICATIONS",
+                   "android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION",
+                   "android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_CONNECT",
+                   "android.permission.NEARBY_WIFI_DEVICES", "android.permission.READ_PHONE_STATE",
+                   "android.permission.ACTIVITY_RECOGNITION", "android.permission.BODY_SENSORS", "android.permission.health.READ_HEART_RATE"]
     development = ["android.permission.WRITE_SECURE_SETTINGS", "android.permission.DUMP", "android.permission.PACKAGE_USAGE_STATS"]
     lines = ["Packages:", "  Package [" + package + "] (mock):", "    requested permissions:"]
     lines.extend("      " + p for p in development)
@@ -175,10 +179,51 @@ class PermissionSetupTests(unittest.TestCase):
     def assert_no_mutation(self):
         self.assertEqual(json.loads(self.state_path.read_text()), self.initial_state)
 
-    def run_selected(self, permissions):
-        with patch.dict(os.environ, self.environment()):
+    def run_selected(self, permissions, api=36, config=None):
+        with patch.dict(os.environ, self.environment(config)):
             adb = MODULE.Adb(str(self.adb), "phone-1")
-            return MODULE.PermissionSetup(adb, "0", 36).apply_selected(permissions)
+            return MODULE.PermissionSetup(adb, "0", api).apply_selected(permissions)
+
+    def test_selected_hardware_permissions_use_android16_granular_grants_without_radio_changes(self):
+        results = self.run_selected(["location", "bluetooth", "nearbyWifi", "phoneState", "activityRecognition", "bodySensors"])
+        self.assertTrue(all(item.status == "verified" for item in results), results)
+        expected = ["android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION",
+                    "android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_CONNECT",
+                    "android.permission.NEARBY_WIFI_DEVICES", "android.permission.READ_PHONE_STATE",
+                    "android.permission.ACTIVITY_RECOGNITION", "android.permission.health.READ_HEART_RATE"]
+        saved = json.loads(self.state_path.read_text())
+        self.assertEqual(saved["permissions"], expected)
+        self.assertEqual(saved["settings"], self.initial_state["settings"])
+        self.assertEqual(saved["appops"], {})
+        self.assertFalse(saved["product"])
+        self.assertFalse(any("enable-all" in command or command[:1] == ["svc"] for command in self.remote_calls()))
+
+    def test_android11_bluetooth_and_wifi_reuse_foreground_location_without_duplicate_grants(self):
+        results = self.run_selected(["bluetooth", "location", "nearbyWifi", "bodySensors"], api=30)
+        self.assertTrue(all(item.status == "verified" for item in results), results)
+        self.assertEqual(json.loads(self.state_path.read_text())["permissions"], [
+            "android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION", "android.permission.BODY_SENSORS"])
+
+    def test_android12_wifi_uses_location_while_bluetooth_uses_nearby_permissions(self):
+        results = self.run_selected(["bluetooth", "nearbyWifi"], api=31)
+        self.assertTrue(all(item.status == "verified" for item in results), results)
+        self.assertEqual(json.loads(self.state_path.read_text())["permissions"], [
+            "android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_CONNECT",
+            "android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION"])
+
+    def test_unconfirmed_health_grant_is_reported_as_failed(self):
+        results = self.run_selected(["bodySensors"], config={"unconfirmed_permissions": ["android.permission.health.READ_HEART_RATE"]})
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].status, "failed")
+        self.assertFalse(json.loads(self.state_path.read_text())["product"])
+
+    def test_legacy_all_setup_does_not_add_new_hardware_runtime_permissions(self):
+        result = self.run_setup()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(set(json.loads(self.state_path.read_text())["permissions"]), {
+            "android.permission.READ_CALENDAR", "android.permission.READ_CONTACTS", "android.permission.RECORD_AUDIO",
+            "android.permission.POST_NOTIFICATIONS", "android.permission.WRITE_SECURE_SETTINGS",
+            "android.permission.DUMP", "android.permission.PACKAGE_USAGE_STATS"})
 
     def test_selected_contacts_does_not_enable_other_permissions_or_products(self):
         results = self.run_selected(["contacts"])

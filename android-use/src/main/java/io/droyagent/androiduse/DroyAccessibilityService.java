@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Rect;
 import android.graphics.Insets;
 import android.view.WindowInsets;
@@ -43,12 +44,15 @@ public final class DroyAccessibilityService extends AccessibilityService {
     private int activeWindowId = -1;
     private final Rect keyboardBounds = new Rect();
     private List<WindowIdentity> contentWindows = List.of();
+    private final AtomicLong windowGeometryGeneration = new AtomicLong();
+    private volatile ContentRegion eventContentRegion;
     private Map<Integer, Integer> windowLayers = Map.of();
     private Set<Integer> overlayWindows = Set.of();
     private final Map<Integer, Integer> overlayLayerShifts = new HashMap<>();
 
     @Override protected void onServiceConnected() {
         connected = this;
+        windowGeometryGeneration.incrementAndGet();
         OverlayInteraction.accessibilityConnectionChanged();
         identityInitialized = false;
         invalidateSnapshots();
@@ -98,27 +102,33 @@ public final class DroyAccessibilityService extends AccessibilityService {
 
     private boolean isSystemBarContentChange(int type, int windowId) {
         if (type != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) return false;
-        WindowManager manager = getSystemService(WindowManager.class);
-        Rect display = manager.getMaximumWindowMetrics().getBounds();
-        Rect content = coordinateContentBounds();
-        List<AccessibilityWindowInfo> available = getWindows();
-        try {
-            for (AccessibilityWindowInfo window : available) {
-                if (window.getId() != windowId || window.getType() != AccessibilityWindowInfo.TYPE_SYSTEM) continue;
-                Rect bounds = new Rect(); window.getBoundsInScreen(bounds);
-                return !bounds.isEmpty() && !content.isEmpty() && display.contains(bounds) && !Rect.intersects(content, bounds);
-            }
-            return false;
-        } finally { for (AccessibilityWindowInfo window : available) window.recycle(); }
+        // Content events are frequent and share the service lifecycle's main thread.
+        // Only reuse a proven bar region; never wait on display/window Binder calls here.
+        ContentRegion region = eventContentRegion;
+        if (region == null || region.generation() != windowGeometryGeneration.get()) return false;
+        for (WindowIdentity window : contentWindows) {
+            if (window.id() != windowId || window.type() != AccessibilityWindowInfo.TYPE_SYSTEM) continue;
+            Rect bounds = window.bounds();
+            return !bounds.isEmpty() && !region.content().isEmpty() && region.display().contains(bounds)
+                    && !Rect.intersects(region.content(), bounds);
+        }
+        return false;
     }
 
     Rect coordinateContentBounds() {
+        long geometryGeneration = windowGeometryGeneration.get();
         var metrics = getSystemService(WindowManager.class).getMaximumWindowMetrics();
         Rect display = metrics.getBounds();
         Insets insets = metrics.getWindowInsets().getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
-        return new Rect(display.left + insets.left, display.top + insets.top,
+        Rect content = new Rect(display.left + insets.left, display.top + insets.top,
             display.right - insets.right, display.bottom - insets.bottom);
+        // Actions still query live geometry. This receipt is only for later bar-event filtering;
+        // a window/configuration change during the query makes the receipt unusable.
+        eventContentRegion = new ContentRegion(geometryGeneration, new Rect(display), new Rect(content));
+        return content;
     }
+
+    private record ContentRegion(long generation, Rect display, Rect content) {}
 
     private record WindowIdentity(int id, int type, Rect bounds, boolean focused, boolean active,
                                   boolean accessibilityFocused, String title) {}
@@ -138,6 +148,7 @@ public final class DroyAccessibilityService extends AccessibilityService {
                     window.isAccessibilityFocused(), window.getTitle() == null ? null : window.getTitle().toString()));
             }
         } finally { for (AccessibilityWindowInfo window : available) window.recycle(); }
+        if (!sameWindowGeometry(contentWindows, content)) windowGeometryGeneration.incrementAndGet();
         if (!content.equals(contentWindows)) {
             overlayLayerShifts.clear();
         } else if (!own.equals(overlayWindows)) {
@@ -163,8 +174,23 @@ public final class DroyAccessibilityService extends AccessibilityService {
         return shifted != null && shifted.equals(layers.get(event.getWindowId()));
     }
 
+    private static boolean sameWindowGeometry(List<WindowIdentity> before, List<WindowIdentity> after) {
+        if (before.size() != after.size()) return false;
+        for (int i = 0; i < before.size(); i++) {
+            WindowIdentity old = before.get(i), current = after.get(i);
+            if (old.id() != current.id() || old.type() != current.type() || !old.bounds().equals(current.bounds())) return false;
+        }
+        return true;
+    }
+
     @Override public void onInterrupt() {
         invalidateSnapshots();
+    }
+
+    @Override public void onConfigurationChanged(Configuration configuration) {
+        windowGeometryGeneration.incrementAndGet();
+        invalidateSnapshots();
+        super.onConfigurationChanged(configuration);
     }
 
     @Override public boolean onUnbind(Intent intent) {
@@ -178,6 +204,7 @@ public final class DroyAccessibilityService extends AccessibilityService {
     }
 
     private void disconnect() {
+        windowGeometryGeneration.incrementAndGet();
         if (connected == this) {
             connected = null;
             OverlayInteraction.accessibilityConnectionChanged();

@@ -71,6 +71,15 @@ public class CapabilityAuthorizationTest {
             key -> !key.equals("allow_memoryWrite"), false);
     }
 
+    @Test public void otherToolsCanUseOpenWithoutInheritingProcessMemoryModes() throws Exception {
+        JSONObject generic = tool(false, "bluetoothRead").put("action", "bluetooth")
+            .put("operationPermissions", new JSONObject().put("open", new JSONArray(new String[]{"bluetoothControl"})));
+        JSONObject invocation = CapabilityAuthorization.forArguments(generic,
+            new JSONObject().put("operation", "open").put("mode", "rfcomm"));
+        assertEquals("[\"bluetoothRead\",\"bluetoothControl\"]", invocation.getJSONArray("permissions").toString());
+        assertEquals("open", CapabilityAuthorization.operationKey(generic, new JSONObject().put("operation", "open")));
+    }
+
     @Test public void invalidOperationAndModeCannotSelectAnEmptyPermissionSet() throws Exception {
         for (JSONObject args : new JSONObject[]{new JSONObject(), new JSONObject().put("operation", "execute"),
                 new JSONObject().put("operation", "open_read_only"),

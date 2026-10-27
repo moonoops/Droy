@@ -1,0 +1,23 @@
+<resources>
+    <string name="hardware_sensor_unavailable">Android sensor service is unavailable.</string>
+    <string name="hardware_sensor_operation">Sensor operation must be list, read or sample.</string>
+    <string name="hardware_sensor_missing">The requested sensor is not available on this phone.</string>
+    <string name="hardware_sensor_type">Provide the sensorType returned by the sensor list.</string>
+    <string name="hardware_sensor_register_failed">Android could not start this sensor subscription.</string>
+    <string name="hardware_sensor_permission">Grant the required activity or body-sensor permission in Android settings.</string>
+    <string name="hardware_location_unavailable">Android location service is unavailable.</string>
+    <string name="hardware_location_operation">Location operation must be status, current or sample.</string>
+    <string name="hardware_location_provider">Location provider must be auto, gps, network or passive.</string>
+    <string name="hardware_location_permission">Grant location access in Android settings.</string>
+    <string name="hardware_location_precise">GPS requests require precise location access.</string>
+    <string name="hardware_location_disabled">Enable system location and the requested location provider.</string>
+    <string name="hardware_infrared_unavailable">This phone does not expose an infrared transmitter.</string>
+    <string name="hardware_infrared_operation">Infrared operation must be status or transmit.</string>
+    <string name="hardware_infrared_permission">Android did not grant infrared transmission permission.</string>
+    <string name="hardware_infrared_waveform">Use 1–4096 positive pulse durations in microseconds, totalling less than two seconds.</string>
+    <string name="hardware_infrared_carrier">The carrier frequency is outside the transmitter’s reported ranges.</string>
+    <string name="hardware_infrared_carrier_required">Provide the infrared carrier frequency in Hz.</string>
+    <string name="hardware_infrared_sequence">The requested infrared sequence exceeds ten seconds.</string>
+    <string name="hardware_infrared_stopped">Infrared transmission stopped. Already emitted signals cannot be recalled.</string>
+    <string name="hardware_infrared_failed">Android did not confirm the infrared transmission. Check the returned emission counts before continuing.</string>
+</resources>

@@ -21,6 +21,9 @@ public class SystemNavigationTest {
         assertEquals(Settings.ACTION_BATTERY_SAVER_SETTINGS, SystemNavigation.settingsAction("battery_saver"));
         assertEquals(Settings.ACTION_USAGE_ACCESS_SETTINGS, SystemNavigation.settingsAction("usage_access"));
         assertEquals(Settings.ACTION_WIFI_SETTINGS, SystemNavigation.settingsAction("wifi"));
+        assertEquals(Settings.ACTION_BLUETOOTH_SETTINGS, SystemNavigation.settingsAction(SystemNavigation.page("bluetooth")));
+        assertEquals(Settings.ACTION_LOCATION_SOURCE_SETTINGS, SystemNavigation.settingsAction(SystemNavigation.page("location")));
+        assertEquals(Settings.ACTION_NFC_SETTINGS, SystemNavigation.settingsAction(SystemNavigation.page("nfc")));
         assertThrows(ActionException.class, () -> SystemNavigation.page("component:vendor.Settings"));
         assertThrows(ActionException.class, () -> SystemNavigation.page(null));
     }

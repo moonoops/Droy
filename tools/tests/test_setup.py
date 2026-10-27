@@ -25,6 +25,7 @@ class FakeAdb:
         self.installed = installed
         self.version = version
         self.user = user
+        self.api = '36'
         self.calls = []
         self.install_output = 'Success'
         self.install_failure = False
@@ -57,7 +58,7 @@ class FakeAdb:
     def shell(self, *args, **kwargs):
         self.calls.append(('shell',) + args)
         if args[:1] == ('getprop',):
-            return {'ro.build.version.sdk': '36', 'ro.product.cpu.abilist': 'arm64-v8a,armeabi-v7a',
+            return {'ro.build.version.sdk': self.api, 'ro.product.cpu.abilist': 'arm64-v8a,armeabi-v7a',
                     'ro.product.model': 'Synthetic emulator', 'ro.product.manufacturer': 'Fixture'}.get(args[1], '')
         if args == ('am', 'get-current-user'):
             return self.user
@@ -170,6 +171,36 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(plan['configuration']['mode'], 'custom')
         self.assertEqual({name for name, value in plan['configuration']['capabilities'].items() if value}, {'allowContacts'})
         self.assertEqual(plan['permissions'], ['contacts'])
+
+    def test_hardware_capabilities_map_only_selected_approved_system_permissions(self):
+        capabilities = {'allowLocationRead': True, 'allowWifiRead': True, 'allowWifiControl': True,
+                        'allowBluetoothRead': True, 'allowBluetoothControl': True, 'allowCellularRead': True,
+                        'allowActivitySensors': True, 'allowBodySensors': True}
+        plan = self.plan(capabilities=capabilities, automatic_permissions=True)
+        self.assertEqual(plan['permissions'], ['activityRecognition', 'bluetooth', 'bodySensors', 'location', 'nearbyWifi', 'phoneState'])
+        self.assertTrue(set(plan['permissions']).issubset(MODULE.SYSTEM_PERMISSIONS))
+        MODULE.validate_plan(plan)
+        MODULE.apply_plan(self.adb, plan, plan['approvalDigest'])
+        self.assertEqual(FakePermissionSetup.instances[-1].permissions, plan['permissions'])
+
+    def test_hardware_capability_selection_without_automatic_permission_approval_does_not_grant(self):
+        plan = self.plan(capabilities={'allowBluetoothRead': True, 'allowBodySensors': True}, automatic_permissions=False)
+        self.assertEqual(plan['permissions'], [])
+        MODULE.apply_plan(self.adb, plan, plan['approvalDigest'])
+        self.assertEqual(FakePermissionSetup.instances[-1].permissions, [])
+
+    def test_permission_installer_uses_the_sdk_read_from_the_selected_device(self):
+        self.adb.api = '30'
+        plan = self.plan(capabilities={'allowBluetoothRead': True}, automatic_permissions=True)
+        MODULE.apply_plan(self.adb, plan, plan['approvalDigest'])
+        self.assertEqual(FakePermissionSetup.instances[-1].api, 30)
+        self.assertEqual(FakePermissionSetup.instances[-1].permissions, ['bluetooth'])
+
+    def test_environment_sensors_and_nfc_do_not_request_unrelated_system_data_permissions(self):
+        capabilities = {'allowSensorsRead': True, 'allowInfrared': True, 'allowNfcRead': True,
+                        'allowNfcWrite': True, 'allowNfcEmulation': True, 'allowDeviceDataRead': True}
+        self.assertEqual(MODULE.permissions_for(capabilities), [])
+        self.assertEqual(MODULE.permissions_for({'allowCellularRead': True}), ['phoneState'])
 
     def test_upgrade_without_new_choice_preserves_capabilities_and_permissions(self):
         self.adb.installed = True

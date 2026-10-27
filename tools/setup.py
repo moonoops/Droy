@@ -28,7 +28,8 @@ SCHEMA = 1
 ASSISTANT_CAPABILITIES = {'allowObserve', 'allowControl', 'allowApps'}
 SYSTEM_PERMISSIONS = {'accessibility', 'calendar', 'contacts', 'microphone',
                       'notifications', 'notificationAccess', 'usage', 'diagnostics',
-                      'brightness', 'overlay'}
+                      'brightness', 'overlay', 'location', 'bluetooth', 'nearbyWifi',
+                      'phoneState', 'activityRecognition', 'bodySensors'}
 CONFIG_FIELDS = {'source', 'mode', 'capabilities', 'shizukuChoice'}
 IDENTITY_FIELDS = {'companionName': 40, 'userAddress': 40, 'personality': 1000}
 
@@ -254,6 +255,12 @@ def permissions_for(capabilities):
             result.add(permission)
     if capabilities.get('allowDiagnostics') or capabilities.get('allowPrivacyUsage'):
         result.add('diagnostics')
+    for key, permission in {'allowLocationRead': 'location', 'allowWifiRead': 'location',
+                            'allowBluetoothRead': 'bluetooth', 'allowBluetoothControl': 'bluetooth',
+                            'allowWifiControl': 'nearbyWifi', 'allowCellularRead': 'phoneState',
+                            'allowActivitySensors': 'activityRecognition', 'allowBodySensors': 'bodySensors'}.items():
+        if capabilities.get(key):
+            result.add(permission)
     return sorted(result)
 
 

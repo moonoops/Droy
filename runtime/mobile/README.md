@@ -14,6 +14,28 @@ node --expose-internals runtime/mobile/tests/profile-smoke.mjs
 
 Preparation produces `runtime/generated/assets/dsh-runtime.zip` and its manifest. `upstream-patches.lock.json` pins patch inputs. Full preparation uses the unmodified installed dependencies; `--refresh-mobile` is for local iteration. Versions are bound by [release.json](../release.json).
 
+### DSH 0.2.1-rc.4 integration
+
+Droy pins `0.2.1-rc.4`, published on npm's `next` channel on 2026-10-26.
+At upgrade time, npm's `latest` tag still pointed to `0.2.1-rc.2`; this is a
+release candidate, not a stable release. The upgrade includes restored unsent
+drafts when returning through New session, More menus for plugin discovery and
+creation, width-aware conversation tabs, the official DeepSeek API-key model
+catalogue update, and resource-list compatibility for MCP servers without a
+resources capability. Creator prompts append to existing compatible drafts and
+remain unsent until the user submits them.
+
+Android assembly retains its authorization, privacy, language and draft adapters.
+The reviewed frontend asset and MCP patch hashes are pinned; image-preview
+adaptation follows the new frontend symbols. The new menu prompts use paired
+English/Chinese Droy copy. The mobile profile keeps upstream desktop analytics
+inactive. The session persistence implementation is unchanged from rc.2.
+
+Sources: [npm package metadata](https://registry.npmjs.org/@deepseek-ai/dsh/0.2.1-rc.4),
+[rc.3 release notes](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.3).
+The rc.4 additions above were checked against its published packages because
+there was no corresponding GitHub release note at upgrade time.
+
 ## Host contract
 
 Keep the installed runtime separate from persistent `DSH_HOME`. The native host supplies loopback ports, independent random `DROY_WEB_TOKEN` and `DROY_BRIDGE_TOKEN`, native-library paths and bundled shell environment. Tokens and launch URLs must stay out of logs.

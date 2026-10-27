@@ -14,7 +14,7 @@ import { patchLocalePersistence } from './mobile_locale_patch.mjs';
 import { patchMediaCommandMenu } from '../runtime/media-input/upstream-patch.mjs';
 import { patchVoiceInput } from '../runtime/voice/upstream-patch.mjs';
 import { patchPrivacyLlm, patchPrivacyPiAi, patchExecutionMcp, patchExecutionFileMode, patchRequiredLoader, patchRequiredPluginManager, patchRequiredPluginManagerPatch } from '../runtime/privacy/upstream-patch.mjs';
-import { patchConversationBranding, patchSidebarBranding, patchModelsBranding, patchAccountBranding, patchProductCopy, patchSpaceCopy, patchPresetCopy, patchShortcutBranding, patchFrontendBranding, patchWebManifestBranding } from './mobile_brand_patch.mjs';
+import { patchConversationBranding, patchSidebarBranding, patchModelsBranding, patchAccountBranding, patchProductCopy, patchEntryCustomizationCopy, patchSpaceCopy, patchPresetCopy, patchShortcutBranding, patchFrontendBranding, patchWebManifestBranding } from './mobile_brand_patch.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const generated = join(root, 'runtime/generated');
 const staging = join(generated, 'dsh');
@@ -155,6 +155,7 @@ await patch('@deepseek-ai/dsh-client-ui-input-trigger/lib/client.js', patchInput
 await patch('@deepseek-ai/dsh-client-ui-commands/lib/client.js', patchMediaCommandMenu);
 await patch('@deepseek-ai/dsh-client-ui-sidebar/lib/client.js', text => patchSidebarBranding(patchSidebar(text)));
 await patch('@deepseek-ai/dsh-client-ui-settings-account/lib/client.js', patchAccountBranding);
+await patch('@deepseek-ai/dsh-client-ui-entry-customization/lib/client.js', patchEntryCustomizationCopy);
 await patch('@deepseek-ai/dsh-client-ui-plugin-manager/lib/client.js', text => patchProductCopy(text, 2));
 await patch('@deepseek-ai/dsh-client-ui-sidebar-documentpreview/lib/client.js', text => patchProductCopy(text, 2));
 await patch('@deepseek-ai/dsh-client-ui-shortcuts/lib/client.js', patchShortcutBranding);
@@ -163,7 +164,7 @@ await patch('@deepseek-ai/dsh-web-frontend/dist/manifest.webmanifest', patchWebM
 await patch('@deepseek-ai/dsh-client-ui-sidebar-right/lib/client.js', patchSidebarRight);
 await patch('@deepseek-ai/dsh-client-ui-sidebar-browser/lib/client.js', patchSidebarBrowser);
 await patch('@deepseek-ai/dsh-client-ui-model-selection/lib/client.js', patchModelSelection);
-await patch('@deepseek-ai/dsh-web-frontend/dist/assets/index-CN7NIWNw.js', patchImageLightbox);
+await patch('@deepseek-ai/dsh-web-frontend/dist/assets/index-BXV-oxvX.js', patchImageLightbox);
 await patch('@deepseek-ai/dsh-client-ui-theme/lib/client.js', patchThemeSettings);
 const overlay = serializeMobileProfile(await readUpstreamProfile(source));
 await writeFile(join(nodeModules, '@droyagent/mobile/cordis.patch.yml'), overlay);

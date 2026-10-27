@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-subprocess-local": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-fs-sandbox": "0.2.1-rc.2"
+    "@deepseek-ai/dsh-subprocess-local": "0.2.1-rc.4",
+    "@deepseek-ai/dsh-fs-sandbox": "0.2.1-rc.4"
   }
 }
