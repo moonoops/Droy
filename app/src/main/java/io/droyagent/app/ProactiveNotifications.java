@@ -20,6 +20,7 @@ import org.json.JSONObject;
 final class ProactiveNotifications {
     private static final String DATA = "proactiveNotificationRecords", ALLOWED = "notifyAllowedApps";
     private static final String TAG = "droy-task-notice";
+    static final String COMPANION_TAG = "droy-companion-notice";
     private static ProactiveNotifications instance;
     private final Context context;
     private final SharedPreferences preferences;
@@ -61,22 +62,64 @@ final class ProactiveNotifications {
         manager.createNotificationChannel(channel);
     }
 
-    JSONObject request(JSONObject args) throws Exception {
+    JSONObject request(JSONObject args) throws Exception { return request(args, true); }
+
+    JSONObject request(JSONObject args, boolean includeApps) throws Exception {
         return switch (args.getString("operation")) {
-            case "activate" -> { active = bool(args, "enabled"); if (!active) endAll(); yield status(); }
-            case "get" -> status();
-            case "configure" -> { configure(args); yield status(); }
+            case "activate" -> { active = bool(args, "enabled"); if (!active) endAll(); yield status(includeApps); }
+            case "get" -> status(includeApps);
+            case "configure" -> { configure(args); yield status(includeApps); }
             case "send" -> send(args);
+            case "companion" -> companion(args);
             case "complete" -> complete(args);
             case "end" -> { end(string(args, "taskId", 256)); yield new JSONObject().put("ok", true); }
             default -> throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("未知的主动通知操作", "Unknown proactive notification operation"));
         };
     }
 
-    JSONObject status() throws Exception {
+    static boolean isCompanionId(String id) { return "kaka".equals(id) || "maimai".equals(id); }
+
+    /** IM delivery is local only and never enters the task/app action channel. */
+    private synchronized JSONObject companion(JSONObject args) throws Exception {
+        for (java.util.Iterator<String> keys = args.keys(); keys.hasNext();) {
+            if (!java.util.Set.of("operation", "companionId", "name", "text", "messageId").contains(keys.next()))
+                throw new IllegalArgumentException(NativeLocale.text("伙伴通知参数无效", "Invalid companion notification arguments"));
+        }
+        String companion = string(args, "companionId", 40);
+        if (!isCompanionId(companion)) throw new IllegalArgumentException(NativeLocale.text("伙伴不存在", "Companion not found"));
+        String name = string(args, "name", 160), text = string(args, "text", 2000), message = string(args, "messageId", 160);
+        JSONObject result = new JSONObject().put("companionId", companion).put("messageId", message).put("published", false);
+        if (!active) return result.put("status", "disabled").put("reason", "plugin_disabled");
+        if (!preferences.getBoolean("notifyLocalEnabled", true)) return result.put("status", "disabled").put("reason", "local_disabled");
+        if (!notifications.areNotificationsEnabled() || !enabledChannel("task_attention"))
+            return result.put("status", "disabled").put("reason", "system_disabled");
+        if (BackgroundRuntime.visible()) return result.put("status", "suppressed").put("reason", "foreground");
+        int id = companion.hashCode() & 0x7fffffff;
+        PendingIntent open = PendingIntent.getActivity(context, id,
+            new Intent(context, MainActivity.class).putExtra("companionId", companion)
+                .setData(new android.net.Uri.Builder().scheme("droy").authority("companion").appendPath(companion).build())
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        try {
+            // Keep one current notification per companion; publication itself
+            // never foregrounds Droy or changes the currently selected chat.
+            notifications.notify(COMPANION_TAG, id, new Notification.Builder(context, "task_attention")
+                .setSmallIcon(R.drawable.ic_notification_droy).setContentTitle(name).setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text)).setCategory(Notification.CATEGORY_MESSAGE)
+                .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true)
+                .setVisibility(Notification.VISIBILITY_PRIVATE).build());
+        } catch (SecurityException revoked) {
+            return result.put("status", "disabled").put("reason", "system_disabled");
+        }
+        return result.put("status", "published").put("published", true);
+    }
+
+    JSONObject status() throws Exception { return status(true); }
+
+    JSONObject status(boolean includeApps) throws Exception {
         JSONObject pet = PetOverlay.notificationState(context, "");
         boolean local = preferences.getBoolean("notifyLocalEnabled", true), apps = preferences.getBoolean("notifyAppsEnabled", false);
-        JSONArray allowed = allowedApps(), installed = installedApps();
+        JSONArray allowed = allowedApps(), installed = includeApps ? installedApps() : null;
         boolean system = active && local && notifications.areNotificationsEnabled() && enabledChannel("task_updates");
         boolean petAvailable = active && local && pet.optBoolean("petAvailable");
         boolean appAvailable = active && apps && allowed.length() > 0 && !ProductPermissions.stopped(context)
@@ -270,9 +313,11 @@ final class ProactiveNotifications {
     private JSONArray installedApps() throws Exception {
         java.util.List<ApplicationInfo> apps = new ArrayList<>(context.getPackageManager().getInstalledApplications(0));
         apps.removeIf(app -> app.packageName.equals(context.getPackageName()) || context.getPackageManager().getLaunchIntentForPackage(app.packageName) == null);
-        apps.sort(Comparator.comparing(app -> context.getPackageManager().getApplicationLabel(app).toString()));
+        java.util.Map<String, String> labels = new java.util.HashMap<>();
+        for (ApplicationInfo app : apps) labels.put(app.packageName, context.getPackageManager().getApplicationLabel(app).toString());
+        apps.sort(Comparator.comparing(app -> labels.get(app.packageName), String.CASE_INSENSITIVE_ORDER));
         JSONArray result = new JSONArray();
-        for (ApplicationInfo app : apps) result.put(new JSONObject().put("packageName", app.packageName).put("label", context.getPackageManager().getApplicationLabel(app)));
+        for (ApplicationInfo app : apps) result.put(new JSONObject().put("packageName", app.packageName).put("label", labels.get(app.packageName)));
         return result;
     }
     private JSONObject publicRecord(JSONObject record) throws Exception {

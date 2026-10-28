@@ -1,0 +1,11 @@
+**Term content**
+{content}
+
+Please infer its meaning based only on this term itself.
+- If this is jargon, slang, or internet language, please infer its meaning
+- If the meaning is clear (ordinary vocabulary), please also explain it
+
+Output in JSON format:
+{{
+  "meaning": "Detailed explanation of the meaning (including usage scenarios, source, specific explanation, etc.)"
+}}

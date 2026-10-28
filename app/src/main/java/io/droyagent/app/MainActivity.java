@@ -30,6 +30,7 @@ public final class MainActivity extends Activity {
     private io.droyagent.app.media.MediaInputController mediaInput;
     private ChatMicrophonePermission chatMicrophone;
     private ChatCameraPermission chatCamera;
+    private PermissionSetup permissionSetup;
     private VoiceAuthentication voiceAuthentication;
     private android.media.MediaPlayer audioPlayer;
     private AlertDialog audioPlaybackDialog;
@@ -49,9 +50,15 @@ public final class MainActivity extends Activity {
     private String pendingBrowserSession;
     private String revealingBrowserSession;
     private String pendingPetTask, revealingPetTask, pendingPetRequest, revealingPetRequest;
+    private String pendingCompanion, revealingCompanion;
     private boolean pendingNotificationManagement;
     private long pendingVoiceWake;
     private String mobileCss;
+    private static final Object UI_STATE_RESULT = new Object();
+    private final java.util.concurrent.ExecutorService uiStateExecutor = java.util.concurrent.Executors.newSingleThreadExecutor(
+        task -> new Thread(task, "droy-ui-state"));
+    private CapabilityCatalog capabilityCatalog;
+    private String pushedInsets = "";
     private String activeThemeScheme;
     private int foreground = Color.rgb(25, 31, 39), background = Color.WHITE;
     private String loaded = "";
@@ -88,12 +95,12 @@ public final class MainActivity extends Activity {
             if (runtimeMessage != null) setTextIfChanged(runtimeMessage, NativeLocale.generatedStatus(RuntimeService.status));
             if (setupPreparationStatus != null) setTextIfChanged(setupPreparationStatus, NativeLocale.generatedStatus(RuntimeService.status));
             if (diagnosticDetails != null) setTextIfChanged(diagnosticDetails, diagnosticText());
-            if (runtimeStart != null) runtimeStart.setVisibility(!RuntimeService.hasActiveSession() && !historyChanging ? View.VISIBLE : View.GONE);
+            if (runtimeStart != null) runtimeStart.setVisibility(RuntimeService.canStart() && !historyChanging ? View.VISIBLE : View.GONE);
             if (chatVisible) {
                 if (RuntimeService.ready) showReadyChat();
                 else {
-                    if (startingRequested && !RuntimeService.hasActiveSession() && SystemClock.elapsedRealtime() - startRequestedAt >= 2000) startingRequested = false;
-                    if (displayedRuntimeActive != (startingRequested || RuntimeService.hasActiveSession())) showChat();
+                    if (startingRequested && !RuntimeService.isStartingOrRunning() && SystemClock.elapsedRealtime() - startRequestedAt >= 2000) startingRequested = false;
+                    if (displayedRuntimeActive != (startingRequested || RuntimeService.isStartingOrRunning())) showChat();
                 }
             }
             handler.postDelayed(this, 700);
@@ -112,6 +119,7 @@ public final class MainActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0);
         preferences = getSharedPreferences("product", MODE_PRIVATE);
         SetupManager.initialize(this);
+        permissionSetup = new PermissionSetup(this, this::refreshWebState, saved);
         mediaInput = new io.droyagent.app.media.MediaInputController(this, this::notifyMediaInputChanged);
         mediaInput.restore(saved);
         preferences.registerOnSharedPreferenceChangeListener(microphonePolicyChanged);
@@ -121,6 +129,7 @@ public final class MainActivity extends Activity {
         pendingBrowserSession = getIntent().getStringExtra("browserSessionId");
         pendingPetTask = getIntent().getStringExtra("petTaskId");
         pendingPetRequest = getIntent().getStringExtra("petRequestId");
+        pendingCompanion = companionTarget(getIntent());
         withdrawResolvedQuestion();
         pendingNotificationManagement = getIntent().getBooleanExtra("notificationManagement", false);
         pendingVoiceWake = getIntent().getLongExtra("voiceWakeEventId", 0);
@@ -164,8 +173,8 @@ public final class MainActivity extends Activity {
         selectedPage = saved == null ? 0 : saved.getInt("selectedPage", 0);
         // Only opening a fresh app session starts the runtime. Polling, returning
         // from settings and Activity restoration must never undo an explicit stop.
-        if (saved == null && !RuntimeService.hasActiveSession()) startRuntime();
-        if (selectedPage == 2) showDiagnostics(); else showChat();
+        if (saved == null) startRuntime();
+        if (selectedPage == 2 && pendingCompanion == null) showDiagnostics(); else showChat();
         handler.post(refresh);
         if (getIntent().hasExtra("audioCaptureId")) openAudioAuthorization(getIntent().getStringExtra("audioCaptureId"));
     }
@@ -193,6 +202,10 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent); setIntent(intent);
+        String companion = companionTarget(intent);
+        if (companion != null) {
+            pendingCompanion = companion; showChat(); revealPendingCompanion();
+        }
         if (intent.hasExtra("voiceWakeEventId")) {
             pendingVoiceWake = intent.getLongExtra("voiceWakeEventId", 0);
             showChat(); revealPendingVoice();
@@ -211,6 +224,18 @@ public final class MainActivity extends Activity {
         if (intent.getBooleanExtra("notificationManagement", false)) {
             pendingNotificationManagement = true; showChat(); revealNotificationManagement();
         }
+    }
+    private static String companionTarget(Intent intent) {
+        String id = intent.getStringExtra("companionId");
+        return ProactiveNotifications.isCompanionId(id) ? id : null;
+    }
+    private void revealPendingCompanion() {
+        if (pendingCompanion == null || web == null || !uiReady || pendingCompanion.equals(revealingCompanion)) return;
+        String id = pendingCompanion; revealingCompanion = id;
+        web.evaluateJavascript("(()=>{const companionId=" + JSONObject.quote(id) + ";"
+            + "const done=ok=>window.DroyNative.postMessage(JSON.stringify({id:" + JSONObject.quote(java.util.UUID.randomUUID().toString())
+            + ",action:'companionRevealResult',args:{companionId,ok}}));"
+            + "Promise.resolve().then(()=>window.DroyMobile.openCompanion(companionId)).then(()=>done(true),()=>done(false))})()", null);
     }
     private void revealNotificationManagement() {
         if (!pendingNotificationManagement || web == null || !uiReady) return;
@@ -251,7 +276,7 @@ public final class MainActivity extends Activity {
     }
 
     private void startRuntime() {
-        if (historyChanging || RuntimeService.hasActiveSession()) return;
+        if (historyChanging || !RuntimeService.canStart()) return;
         startingRequested = true; startRequestedAt = SystemClock.elapsedRealtime();
         try { startForegroundService(new Intent(this, RuntimeService.class)); }
         catch (RuntimeException failure) {
@@ -270,7 +295,7 @@ public final class MainActivity extends Activity {
             showReadyChat();
             return;
         }
-        boolean active = startingRequested || RuntimeService.hasActiveSession();
+        boolean active = startingRequested || RuntimeService.isStartingOrRunning();
         displayedRuntimeActive = active;
         if (active) {
             chatState = "loading";
@@ -283,7 +308,7 @@ public final class MainActivity extends Activity {
         page.addView(text(NativeLocale.text("引擎已停止", "Engine stopped"), 24));
         runtimeMessage = text(NativeLocale.generatedStatus(RuntimeService.status), 15); page.addView(runtimeMessage);
         runtimeStart = button(NativeLocale.text("启动并进入对话", "Start and open conversation"), view -> { startRuntime(); showChat(); });
-        runtimeStart.setVisibility(active || historyChanging ? View.GONE : View.VISIBLE); page.addView(runtimeStart);
+        runtimeStart.setVisibility(!RuntimeService.canStart() || historyChanging ? View.GONE : View.VISIBLE); page.addView(runtimeStart);
         page.addView(button(NativeLocale.text("关于与诊断", "About and diagnostics"), view -> showDiagnostics()));
         replace(scroll(page));
     }
@@ -478,8 +503,42 @@ public final class MainActivity extends Activity {
                         });
                         return;
                     }
-                    response.put("result", performUiAction(request.getString("action"), request.optJSONObject("args") == null ? new JSONObject() : request.getJSONObject("args")));
-                    response.put("ok", true);
+                    String action = request.getString("action");
+                    JSONObject args = request.optJSONObject("args") == null ? new JSONObject() : request.getJSONObject("args");
+                    if (action.equals("setPreference") && isDisplayPreference(args.getString("key"))) {
+                        uiStateExecutor.execute(() -> {
+                            try {
+                                saveDisplayPreference(args);
+                                runOnUiThread(() -> {
+                                    if (isDestroyed()) return;
+                                    try {
+                                        applyDisplayPreference(args.optString("key"));
+                                        enqueueUiState(view, session, sessionPort, response, reply, null);
+                                    } catch (Exception failure) { replyUiFailure(view, session, sessionPort, response, reply, failure); }
+                                });
+                            } catch (Exception failure) {
+                                replyUiFailure(view, session, sessionPort, response, reply, failure);
+                            }
+                        });
+                        return;
+                    }
+                    if (action.equals("notificationManagement") || action.equals("proactiveNotifications") || action.equals("setBrandLogoBackgrounds")
+                            || action.equals("setPreference") && java.util.Set.of("backgroundRuntimeEnabled", "notificationManagementEnabled").contains(args.optString("key"))) {
+                        uiStateExecutor.execute(() -> {
+                            try {
+                                performUiAction(action, args);
+                                runOnUiThread(() -> enqueueUiState(view, session, sessionPort, response, reply, null));
+                            } catch (Exception failure) { replyUiFailure(view, session, sessionPort, response, reply, failure); }
+                        });
+                        return;
+                    }
+                    Object result = action.equals("getStateSection") ? UI_STATE_RESULT : performUiAction(action, args);
+                    if (result == UI_STATE_RESULT) {
+                        enqueueUiState(view, session, sessionPort, response, reply,
+                            action.equals("getStateSection") ? args.getString("section") : null);
+                        return;
+                    }
+                    response.put("result", result).put("ok", true);
                 } catch (Exception failure) {
                     try { response.put("ok", false).put("error", failure.getMessage() == null ? NativeLocale.text("操作未完成", "Operation did not finish") : failure.getMessage()); }
                     catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }
@@ -583,6 +642,7 @@ public final class MainActivity extends Activity {
         uiNavigationId++;
         uiReady = false;
         revealingBrowserSession = null;
+        revealingCompanion = null;
         cancelUiLoadTimeout();
         if (chatVisible) showLoading();
         uiLoadTimeout = () -> {
@@ -616,6 +676,7 @@ public final class MainActivity extends Activity {
                     revealPendingPetTask();
                     revealNotificationManagement();
                     revealPendingVoice();
+                    revealPendingCompanion();
                     notifyMediaInputChanged();
                 }
             });
@@ -656,10 +717,24 @@ public final class MainActivity extends Activity {
 
     private Object performUiAction(String action, JSONObject args) throws Exception {
         switch (action) {
-            case "getState": return uiState();
-            case "setupUpdate": SetupManager.update(this, args); PetOverlay.refresh(this); updateDocumentTitle(); return uiState();
+            case "getState": return UI_STATE_RESULT;
+            case "hideKeyboard": {
+                NativeUiProtocol.noArguments(args);
+                View focused = getCurrentFocus();
+                View owner = focused != null ? focused : web;
+                if (owner != null) {
+                    android.view.inputmethod.InputMethodManager input = getSystemService(android.view.inputmethod.InputMethodManager.class);
+                    if (input != null) input.hideSoftInputFromWindow(owner.getWindowToken(), 0);
+                }
+                return JSONObject.NULL;
+            }
+            case "configurePermissions": permissionSetup.configure(args.getString("mode")); return UI_STATE_RESULT;
+            case "cancelPermissionSetup": permissionSetup.cancel(); return UI_STATE_RESULT;
+            case "setupUpdate": SetupManager.update(this, args); PetOverlay.refresh(this); updateDocumentTitle(); return UI_STATE_RESULT;
             case "setupDeviceTest": return SetupVerification.start(this);
-            case "setupRootTest": return SetupRootVerification.start(this);
+            case "setupRootTest":
+                if (permissionSetup.active()) throw new IllegalStateException(NativeLocale.text("请先完成或停止当前授权", "Finish or stop the current authorization first"));
+                return SetupRootVerification.start(this);
             case "setupComponent": {
                 switch (args.getString("operation")) {
                     case "download": SetupComponents.begin(this); break;
@@ -668,62 +743,49 @@ public final class MainActivity extends Activity {
                     case "cancel": SetupComponents.cancel(this); break;
                     default: throw new IllegalArgumentException(NativeLocale.text("不支持的组件安装操作", "Unsupported component installation operation"));
                 }
-                return uiState();
+                return UI_STATE_RESULT;
             }
             case "setBrandLogoBackgrounds": {
                 String palettes = AppBranding.updateLogoBackgrounds(preferences.getString("brandLogoBackgrounds", "{}"),
-                    preferences.getString("petId", "default"), args);
+                    args);
                 if (!preferences.edit().putString("brandLogoBackgrounds", palettes).commit())
                     throw new IllegalStateException(NativeLocale.text("底色未保存，请重试", "Background color was not saved. Please try again"));
-                return uiState();
+                return UI_STATE_RESULT;
             }
             case "setPreference": {
                 String key = args.getString("key");
                 if (key.equals("backgroundRuntimeEnabled")) {
                     BackgroundRuntime.setEnabled(this, NativeUiProtocol.booleanArgument(args, "value"));
-                    return uiState();
+                    return UI_STATE_RESULT;
                 }
                 if (key.equals("notificationManagementEnabled")) {
                     boolean enabled = NativeUiProtocol.booleanArgument(args, "value");
-                    NotificationManagement.get(this).request(new JSONObject().put("operation", "configure").put("enabled", enabled));
-                    return uiState();
+                    NotificationManagement.get(this).request(new JSONObject().put("operation", "configure").put("enabled", enabled), false);
+                    return UI_STATE_RESULT;
                 }
                 if (isCapabilityPreference(key)) {
+                    boolean enabled = NativeUiProtocol.booleanArgument(args, "value");
+                    if (permissionSetup.active() && enabled) throw new IllegalStateException(NativeLocale.text("请先完成或停止当前授权", "Finish or stop the current authorization first"));
+                    if (!enabled && permissionSetup.active()) permissionSetup.cancel();
                     SetupManager.update(this, new JSONObject().put("capabilities", new JSONObject()
-                        .put(key, NativeUiProtocol.booleanArgument(args, "value"))));
+                        .put(key, enabled)));
                     RuntimeService.memoryPermissionsChanged(this);
                     NotificationManagement.get(this).rescan();
-                    return uiState();
+                    if (enabled) permissionSetup.forPreference(key);
+                    return UI_STATE_RESULT;
                 }
-                android.content.SharedPreferences.Editor editor = preferences.edit();
-                if (key.equals("assistantName") || key.equals("petName")) {
-                    Object raw = args.get("value");
-                    if (!(raw instanceof String)) throw new IllegalArgumentException(NativeLocale.text("助理名称无效", "Invalid assistant name"));
-                    String name = ((String) raw).trim();
-                    if (name.isEmpty() || name.codePointCount(0, name.length()) > 40) throw new IllegalArgumentException(NativeLocale.text("请输入 1–40 个字符", "Enter 1–40 characters"));
-                    editor.putString(key, name);
-                } else if (AppBranding.isPreference(key)) {
-                    editor.putString(key, AppBranding.preference(key, args.get("value")));
-                } else if (key.equals("petExternalDisplay") || key.equals("petInternalDisplay")) {
-                    editor.putString(key, NativeUiProtocol.petDisplayArgument(args));
-                } else if (key.equals("browserEncryptedDns") || key.equals("petEnabled") || key.equals("returnToDroyOnCompletion")
-                        || key.equals("automationScreenDisplay")) {
-                    editor.putBoolean(key, NativeUiProtocol.booleanArgument(args, "value"));
-                } else throw new IllegalArgumentException(NativeLocale.text("此设置不能从界面修改", "This setting cannot be changed from this interface"));
-                if (!editor.commit()) throw new IllegalStateException(NativeLocale.text("设置未保存，请重试", "Settings were not saved. Please try again"));
-                updateDocumentTitle();
-                if (key.equals("petEnabled") || key.equals("petName") || key.equals("petExternalDisplay") || key.equals("petInternalDisplay")) PetOverlay.refresh(this);
-                if (key.equals("automationScreenDisplay")) AutomationScreenOverlay.refresh(this);
-                return uiState();
+                saveDisplayPreference(args);
+                applyDisplayPreference(key);
+                return UI_STATE_RESULT;
             }
             case "notificationManagement": {
-                NotificationManagement.get(this).request(args);
-                return uiState();
+                NotificationManagement.get(this).request(args, false);
+                return UI_STATE_RESULT;
             }
             case "proactiveNotifications": {
                 JSONObject configuration = new JSONObject(args.toString()).put("operation", "configure");
-                ProactiveNotifications.get(this).request(configuration);
-                return uiState();
+                ProactiveNotifications.get(this).request(configuration, false);
+                return UI_STATE_RESULT;
             }
             case "notificationAppSettings": {
                 String packageName = args.getString("packageName");
@@ -732,7 +794,10 @@ public final class MainActivity extends Activity {
                     .putExtra(Settings.EXTRA_APP_PACKAGE, packageName));
                 return JSONObject.NULL;
             }
-            case "requestPermission": requestSystemPermission(args.getString("name")); return JSONObject.NULL;
+            case "requestPermission":
+                if (permissionSetup.active()) throw new IllegalStateException(NativeLocale.text("请先完成或停止当前授权", "Finish or stop the current authorization first"));
+                if (!permissionSetup.requestIfNeeded(args.getString("name"))) requestSystemPermission(args.getString("name"));
+                return JSONObject.NULL;
             case "audioAuthorize": openAudioAuthorization(args.getString("captureId")); return JSONObject.NULL;
             case "voiceAuthorize": openAudioAuthorization(args.getString("captureId")); return JSONObject.NULL;
             case "voiceCameraState":
@@ -754,7 +819,7 @@ public final class MainActivity extends Activity {
                 return JSONObject.NULL;
             }
             case "previewPet": PetOverlay.get(this).preview(); return JSONObject.NULL;
-            case "selectPet": PetOverlay.select(this, args.getString("id")); return uiState();
+            case "selectPet": PetOverlay.select(this, args.getString("id")); return UI_STATE_RESULT;
             case "petContext": PetOverlay.conversation(this, args.getString("taskId"), NativeUiProtocol.booleanArgument(args, "chatVisible")); return JSONObject.NULL;
             case "petQuestionActive": return new JSONObject().put("active",
                 ToolProgress.hasPending(args.getString("taskId"), args.getString("requestId")));
@@ -768,9 +833,9 @@ public final class MainActivity extends Activity {
                 }
                 return JSONObject.NULL;
             }
-            case "revokeFile": new io.droyagent.androiduse.FileGrantStore(this).revokeGrant(args.getString("id")); return uiState();
-            case "pauseOperations": RuntimeService.pauseOperations(this); return uiState();
-            case "resumeOperations": RuntimeService.resumeOperations(this); return uiState();
+            case "revokeFile": new io.droyagent.androiduse.FileGrantStore(this).revokeGrant(args.getString("id")); return UI_STATE_RESULT;
+            case "pauseOperations": RuntimeService.pauseOperations(this); return UI_STATE_RESULT;
+            case "resumeOperations": RuntimeService.resumeOperations(this); return UI_STATE_RESULT;
             case "openBrowser": {
                 if (web == null || !uiReady) throw new IllegalStateException(NativeLocale.text("浏览器页面尚未就绪", "The browser page is not ready yet"));
                 String argument = args.has("url") ? JSONObject.quote(args.getString("url")) : "undefined";
@@ -782,6 +847,15 @@ public final class MainActivity extends Activity {
             case "openSettingRestores": showSettingRestores(); return JSONObject.NULL;
             case "openDiagnostics": showDiagnostics(); return JSONObject.NULL;
             case "uiReady": markUiReady(); return JSONObject.NULL;
+            case "companionRevealResult": {
+                if (args.getString("companionId").equals(pendingCompanion)) {
+                    pendingCompanion = null; revealingCompanion = null;
+                    getIntent().removeExtra("companionId");
+                    if (!NativeUiProtocol.booleanArgument(args, "ok"))
+                        Toast.makeText(this, NativeLocale.text("伙伴聊天未能打开，请从消息列表重试", "The companion chat could not be opened. Try again from Messages"), Toast.LENGTH_LONG).show();
+                }
+                return JSONObject.NULL;
+            }
             case "browserRevealResult": {
                 if (args.getString("sessionId").equals(pendingBrowserSession)) {
                     pendingBrowserSession = null; revealingBrowserSession = null;
@@ -807,15 +881,82 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private synchronized CapabilityCatalog capabilityCatalog() {
+        if (capabilityCatalog == null) capabilityCatalog = new CapabilityCatalog(this);
+        return capabilityCatalog;
+    }
+
+    private static boolean isDisplayPreference(String key) {
+        return AppBranding.isPreference(key) || java.util.Set.of("assistantName", "petName", "petEnabled",
+            "petExternalDisplay", "petInternalDisplay", "browserEncryptedDns", "returnToDroyOnCompletion",
+            "automationScreenDisplay").contains(key);
+    }
+
+    private void saveDisplayPreference(JSONObject args) throws Exception {
+        String key = args.getString("key");
+        android.content.SharedPreferences.Editor editor = preferences.edit();
+        if (key.equals("assistantName") || key.equals("petName")) {
+            Object raw = args.get("value");
+            if (!(raw instanceof String)) throw new IllegalArgumentException(NativeLocale.text("助理名称无效", "Invalid assistant name"));
+            String name = ((String) raw).trim();
+            if (name.isEmpty() || name.codePointCount(0, name.length()) > 40) throw new IllegalArgumentException(NativeLocale.text("请输入 1–40 个字符", "Enter 1–40 characters"));
+            editor.putString(key, name);
+        } else if (AppBranding.isPreference(key)) {
+            editor.putString(key, AppBranding.preference(key, args.get("value")));
+        } else if (key.equals("petExternalDisplay") || key.equals("petInternalDisplay")) {
+            editor.putString(key, NativeUiProtocol.petDisplayArgument(args));
+        } else if (key.equals("browserEncryptedDns") || key.equals("petEnabled") || key.equals("returnToDroyOnCompletion")
+                || key.equals("automationScreenDisplay")) {
+            editor.putBoolean(key, NativeUiProtocol.booleanArgument(args, "value"));
+        } else throw new IllegalArgumentException(NativeLocale.text("此设置不能从界面修改", "This setting cannot be changed from this interface"));
+        if (!editor.commit()) throw new IllegalStateException(NativeLocale.text("设置未保存，请重试", "Settings were not saved. Please try again"));
+    }
+
+    private void applyDisplayPreference(String key) {
+        updateDocumentTitle();
+        if (java.util.Set.of("petEnabled", "petName", "petExternalDisplay", "petInternalDisplay").contains(key)) PetOverlay.refresh(this);
+        if (key.equals("automationScreenDisplay")) AutomationScreenOverlay.refresh(this);
+    }
+
+    private void enqueueUiState(WebView view, String session, int port, JSONObject response,
+            androidx.webkit.JavaScriptReplyProxy reply, String section) {
+        // PermissionSetup owns an Activity queue; snapshot it on the main thread.
+        if (isDestroyed()) return;
+        final JSONObject permissionState;
+        try { permissionState = permissionSetup.state(); }
+        catch (Exception failure) { replyUiFailure(view, session, port, response, reply, failure); return; }
+        uiStateExecutor.execute(() -> {
+            try {
+                JSONObject result = section == null ? uiState(permissionState) : switch (section) {
+                    case "notificationManagement" -> new JSONObject().put("notificationManagement", NotificationManagement.get(this).state());
+                    case "proactiveNotifications" -> new JSONObject().put("proactiveNotifications", ProactiveNotifications.get(this).status());
+                    case "audio" -> new JSONObject().put("audioCapture", AudioCapture.get(this).uiStatus())
+                        .put("audioTranscription", AudioTranscription.get(this).uiStatus());
+                    default -> throw new IllegalArgumentException(NativeLocale.text("不支持的设置分类", "Unsupported settings section"));
+                };
+                response.put("result", result).put("ok", true);
+                runOnUiThread(() -> { if (isCurrentWebSession(view, session, port)) reply.postMessage(response.toString()); });
+            } catch (Exception failure) { replyUiFailure(view, session, port, response, reply, failure); }
+        });
+    }
+
+    private void replyUiFailure(WebView view, String session, int port, JSONObject response,
+            androidx.webkit.JavaScriptReplyProxy reply, Exception failure) {
+        try { response.put("ok", false).put("error", failure.getMessage() == null
+            ? NativeLocale.text("操作未完成", "Operation did not finish") : failure.getMessage()); }
+        catch (org.json.JSONException impossible) { throw new AssertionError(impossible); }
+        runOnUiThread(() -> { if (isCurrentWebSession(view, session, port)) reply.postMessage(response.toString()); });
+    }
+
     private boolean isCapabilityPreference(String key) {
-        JSONArray groups = new CapabilityCatalog(this).groups();
+        JSONArray groups = capabilityCatalog().groups();
         for (int i = 0; i < groups.length(); i++) if (key.equals(groups.optJSONObject(i).optString("preference"))) return true;
         return false;
     }
 
-    private JSONObject uiState() throws Exception {
+    private JSONObject uiState(JSONObject permissionState) throws Exception {
         JSONArray groups = new JSONArray();
-        JSONArray source = new CapabilityCatalog(this).groups();
+        JSONArray source = capabilityCatalog().groups();
         for (int i = 0; i < source.length(); i++) {
             JSONObject group = new JSONObject(source.getJSONObject(i).toString());
             group.put("enabled", ProductPermissions.allowed(preferences, group.getString("preference")));
@@ -827,6 +968,8 @@ public final class MainActivity extends Activity {
         boolean notifications = Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
         system.put("brightness", Settings.System.canWrite(this)); system.put("runtimeNotifications", notifications);
         system.put("microphone", checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED);
+        system.put("camera", checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED);
+        system.put("overlay", Settings.canDrawOverlays(this));
         JSONObject hardwarePermissions = HardwarePermissionState.status(this);
         for (java.util.Iterator<String> keys = hardwarePermissions.keys(); keys.hasNext();) {
             String key = keys.next(); system.put(key, hardwarePermissions.get(key));
@@ -848,14 +991,16 @@ public final class MainActivity extends Activity {
             .put("runtimeReady", RuntimeService.ready).put("runtimeStatus", NativeLocale.generatedStatus(RuntimeService.status))
             .put("toolsPaused", ProductPermissions.stopped(this)).put("runtimeNotifications", notifications)
             .put("notificationPermissionGranted", notifications);
-        result.put("setup", SetupManager.status(this)).put("setupComponents", SetupComponents.status(this))
+        result.put("setup", SetupManager.uiStatus(this)).put("setupComponents", SetupComponents.status(this))
             .put("setupDeviceTest", SetupVerification.status()).put("setupRootTest", SetupRootVerification.status());
+        result.put("permissionSetup", permissionState);
         JSONObject backgroundState = BackgroundRuntime.state(this);
         for (String key : new String[]{"backgroundRuntimeEnabled", "backgroundRuntimeRunning"})
             result.put(key, backgroundState.get(key));
         result.put("notificationManagementEnabled", NotificationManagement.enabled(this))
-            .put("notificationManagement", NotificationManagement.get(this).state());
-        result.put("proactiveNotifications", ProactiveNotifications.get(this).status());
+            .put("notificationManagement", NotificationManagement.get(this).state(false));
+        result.put("proactiveNotifications", ProactiveNotifications.get(this).status(false));
+        result.put("timeZone", ProductBridge.deviceTimeZone());
         result.put("audioCapture", AudioCapture.get(this).uiStatus());
         result.put("audioTranscription", AudioTranscription.get(this).uiStatus());
         if (preferences.contains("resetTheme")) result.put("themeReset", "system");
@@ -902,6 +1047,7 @@ public final class MainActivity extends Activity {
             case "calendar": requestPermissions(new String[]{Manifest.permission.READ_CALENDAR}, 21); break;
             case "contacts": requestPermissions(new String[]{Manifest.permission.READ_CONTACTS}, 22); break;
             case "microphone": requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 72); break;
+            case "camera": requestPermissions(new String[]{Manifest.permission.CAMERA}, 74); break;
             case "locationSettings": startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)); break;
             case "bluetoothSettings": startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); break;
             case "wifiSettings": startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS)); break;
@@ -1033,6 +1179,8 @@ public final class MainActivity extends Activity {
                     systemGestureLeftCssPx: p.systemGestureLeft * scale,
                     systemGestureRightCssPx: p.systemGestureRight * scale };
                   root.style.setProperty('--droy-touch-target', (48 * p.density * scale) + 'px');
+                  root.style.setProperty('--droy-header-height', (56 * p.density * scale) + 'px');
+                  root.style.setProperty('--droy-header-font-size', (18 * p.density * scale) + 'px');
                   for (const side of ['top', 'right', 'bottom', 'left'])
                     root.style.setProperty('--droy-safe-' + side, (p[side] * scale) + 'px');
                   root.style.setProperty('--droy-ime-bottom', (p.ime * scale) + 'px');
@@ -1095,7 +1243,11 @@ public final class MainActivity extends Activity {
     }
 
     private void pushWindowInsets() {
-        if (web != null) web.evaluateJavascript("window.__droyApplyWindowInsets?.(" + windowInsetsValues() + ")", null);
+        if (web == null) return;
+        String values = windowInsetsValues();
+        if (values.equals(pushedInsets)) return;
+        pushedInsets = values;
+        web.evaluateJavascript("window.__droyApplyWindowInsets?.(" + values + ")", null);
     }
 
     private void applyNativePageInsets() {
@@ -1103,6 +1255,7 @@ public final class MainActivity extends Activity {
     }
 
     private void applyMobileLayout(WebView view) {
+        pushedInsets = "";
         view.evaluateJavascript(mobileLayoutScript(), null);
     }
 
@@ -1122,6 +1275,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (permissionSetup != null && permissionSetup.onActivityResult(request)) return;
         if (voiceAuthentication != null && voiceAuthentication.onActivityResult(request, result, data)) return;
         if (mediaInput != null && mediaInput.onActivityResult(request, result, data)) return;
         if (request == 504) {
@@ -1185,6 +1339,7 @@ public final class MainActivity extends Activity {
         if (chatMicrophone != null) chatMicrophone.result(request);
         if (chatCamera != null) chatCamera.result(request);
         NotificationManagement.refreshAccess(this);
+        if (permissionSetup != null) permissionSetup.onRuntimeResult(request, permissions);
         refreshWebState();
     }
 
@@ -1304,7 +1459,7 @@ public final class MainActivity extends Activity {
         }));
         page.addView(diagnosticSection(NativeLocale.text("引擎", "Engine")));
         runtimeStart = diagnosticButton(NativeLocale.text("启动并进入对话", "Start and open conversation"), view -> { startRuntime(); showChat(); });
-        runtimeStart.setVisibility(RuntimeService.hasActiveSession() || historyChanging ? View.GONE : View.VISIBLE); page.addView(runtimeStart);
+        runtimeStart.setVisibility(!RuntimeService.canStart() || historyChanging ? View.GONE : View.VISIBLE); page.addView(runtimeStart);
         page.addView(diagnosticButton(NativeLocale.text("停止任务和引擎", "Stop task and engine"), view -> { startingRequested = false; RuntimeService.requestStop(this); }));
         page.addView(diagnosticSection(NativeLocale.text("数据与个性化", "Data and personalization")));
         page.addView(diagnosticButton(NativeLocale.text("恢复个性化设置", "Reset personalization"), view -> confirmResetPersonalization()));
@@ -1457,15 +1612,17 @@ public final class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        if (permissionSetup != null) permissionSetup.resume();
         HardwareRuntime.onPermissionsChanged(this);
-        io.droyagent.androiduse.AccessibilityRecovery.get(this).onAppOpened(ProductPermissions.allowed(preferences, "allowRoot"));
+        io.droyagent.androiduse.AccessibilityRecovery.get(this).onAppOpened(
+            (permissionSetup == null || !permissionSetup.active()) && ProductPermissions.allowed(preferences, "allowRoot"));
         NotificationManagement.get(this).rescan();
         applyNativeTheme(); pushWindowInsets(); refreshWebState();
         if (browserSurface != null) browserSurface.resume();
         notifyMediaInputChanged();
         new Thread(() -> VoiceRuntime.resume(this), "droy-wake-resume").start();
     }
-    @Override protected void onPause() { if (browserSurface != null) browserSurface.pause(); super.onPause(); }
+    @Override protected void onPause() { if (permissionSetup != null) permissionSetup.pause(); if (browserSurface != null) browserSurface.pause(); super.onPause(); }
     @Override protected void onStop() {
         stopChatMicrophone();
         if (visible) { visible = false; visibleActivities.decrementAndGet(); } super.onStop();
@@ -1473,16 +1630,19 @@ public final class MainActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle out) {
         out.putInt("selectedPage", selectedPage);
         if (mediaInput != null) mediaInput.onSaveInstanceState(out);
+        if (permissionSetup != null) permissionSetup.save(out);
         super.onSaveInstanceState(out);
     }
     @Override protected void onDestroy() {
         stopAudioPlayback();
+        if (permissionSetup != null) permissionSetup.close();
         if (voiceAuthentication != null) voiceAuthentication.cancel();
         if (preferences != null) preferences.unregisterOnSharedPreferenceChangeListener(microphonePolicyChanged);
         if (visible) { visible = false; visibleActivities.decrementAndGet(); }
         if (unregisterBack != null) unregisterBack.run();
         if (browserSurface != null) browserSurface.close();
         if (mediaInput != null) mediaInput.close();
+        uiStateExecutor.shutdown();
         handler.removeCallbacksAndMessages(null); discardWebView(); super.onDestroy();
     }
 }

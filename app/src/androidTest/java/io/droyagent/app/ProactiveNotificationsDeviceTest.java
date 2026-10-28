@@ -23,7 +23,7 @@ import static org.junit.Assert.*;
 /** Native publication and permissions with fictional recipients; no messages leave the device. */
 @RunWith(AndroidJUnit4.class)
 public class ProactiveNotificationsDeviceTest {
-    private static final String[] KEYS = {"notifyLocalEnabled", "notifyAppsEnabled", "notifyAllowedApps", "proactiveNotificationRecords", "toolsStopped"};
+    private static final String[] KEYS = {"notifyLocalEnabled", "notifyAppsEnabled", "notifyAllowedApps", "proactiveNotificationRecords", "toolsStopped", "allowRoot"};
     private Context context;
     private SharedPreferences preferences;
     private ProactiveNotifications notices;
@@ -48,7 +48,7 @@ public class ProactiveNotificationsDeviceTest {
     @After public void restore() throws Exception {
         if (notices != null) notices.request(new JSONObject().put("operation", "activate").put("enabled", false));
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        for (StatusBarNotification item : manager.getActiveNotifications()) if ("droy-task-notice".equals(item.getTag())) manager.cancel(item.getTag(), item.getId());
+        for (StatusBarNotification item : manager.getActiveNotifications()) if ("droy-task-notice".equals(item.getTag()) || ProactiveNotifications.COMPANION_TAG.equals(item.getTag())) manager.cancel(item.getTag(), item.getId());
         SharedPreferences.Editor editor = preferences.edit();
         for (String key : KEYS) {
             Object value = saved.get(key);
@@ -123,6 +123,48 @@ public class ProactiveNotificationsDeviceTest {
         notices.request(new JSONObject().put("operation", "activate").put("enabled", false));
         try { notices.request(send("1", "another", "system", "虚构本机结果")); fail("Disabled plugin sent a notification"); }
         catch (IllegalStateException expected) { assertTrue(expected.getMessage().contains("关闭")); }
+    }
+
+    @Test public void companionPublicationNeedsNoRootAndKeepsOneLocalNoticePerCompanion() throws Exception {
+        assertFalse("Run this native fixture with Droy in the background", BackgroundRuntime.visible());
+        preferences.edit().putBoolean("allowRoot", false).putBoolean("toolsStopped", true).commit();
+        JSONObject first = notices.request(companion("kaka", "first", "First fictional IM message"));
+        assertEquals("published", first.getString("status")); assertTrue(first.getBoolean("published"));
+        assertEquals("task_attention", findCompanion("kaka").getNotification().getChannelId());
+        assertEquals("First fictional IM message", findCompanion("kaka").getNotification().extras.getCharSequence("android.text").toString());
+        notices.request(companion("kaka", "second", "Updated fictional IM message"));
+        assertEquals("Updated fictional IM message", findCompanion("kaka").getNotification().extras.getCharSequence("android.text").toString());
+        notices.request(companion("maimai", "third", "Separate fictional IM message"));
+        assertNotNull(findCompanion("kaka")); assertNotNull(findCompanion("maimai"));
+        assertEquals("Separate fictional IM message", findCompanion("maimai").getNotification().extras.getCharSequence("android.text").toString());
+        assertFalse("Publishing must not bring Droy to the foreground", BackgroundRuntime.visible());
+        assertFalse(preferences.getBoolean("notifyAppsEnabled", false));
+    }
+
+    @Test public void companionDisabledNotificationsAreNormalResultsAndNeverAppActions() throws Exception {
+        notices.request(new JSONObject().put("operation", "configure").put("localEnabled", false));
+        JSONObject disabled = notices.request(companion("kaka", "local-disabled", "Fictional message"));
+        assertEquals("disabled", disabled.getString("status")); assertFalse(disabled.getBoolean("published"));
+        assertEquals("local_disabled", disabled.getString("reason"));
+        notices.request(new JSONObject().put("operation", "activate").put("enabled", false));
+        assertEquals("plugin_disabled", notices.request(companion("maimai", "plugin-disabled", "Fictional message")).getString("reason"));
+        assertNull(findCompanion("kaka")); assertNull(findCompanion("maimai"));
+        JSONObject app = companion("kaka", "invalid-channel", "Fictional message").put("destinations",
+            new JSONArray().put(new JSONObject().put("channel", "app")));
+        try { notices.request(app); fail("Companion publication accepted an app destination"); }
+        catch (IllegalArgumentException expected) { /* Fixed local-only contract. */ }
+        try { notices.request(companion("other", "invalid-owner", "Fictional message")); fail("Unknown companion accepted"); }
+        catch (IllegalArgumentException expected) { /* Stable product identity, not display name. */ }
+    }
+
+    private JSONObject companion(String id, String messageId, String text) throws Exception {
+        return new JSONObject().put("operation", "companion").put("companionId", id)
+            .put("name", id).put("text", text).put("messageId", messageId);
+    }
+    private StatusBarNotification findCompanion(String id) {
+        for (StatusBarNotification item : context.getSystemService(NotificationManager.class).getActiveNotifications())
+            if (ProactiveNotifications.COMPANION_TAG.equals(item.getTag()) && item.getId() == (id.hashCode() & 0x7fffffff)) return item;
+        return null;
     }
 
     private JSONObject send(String turn, String key, String channel, String text) throws Exception {

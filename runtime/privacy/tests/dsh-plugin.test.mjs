@@ -120,6 +120,47 @@ test('missing mandatory execution protection never falls back to unguarded model
   assert.equal(f.receipts.length, 0);
 });
 
+test('only live product-restricted companions dispatch when legacy protection is active but unready', async t => {
+  const f = await fixture(t, { active: true, ready: false, unavailableStore: true });
+  const agent = { session: { id: 'companion-session' } };
+  let restricted = true;
+  f.ctx.provide('droyCompanions', {
+    ownsSession: id => id === agent.session.id,
+    isRestrictedAgent: candidate => restricted && candidate === agent,
+    isRestrictedSession: id => restricted && id === agent.session.id,
+  });
+  await f.service.onAgentCreated({ agent, source: 'startup' });
+  const chunks = await f.send(f.request(agent.session.id));
+  assert.equal(chunks.at(-1).reason.kind, 'stop');
+  assert.equal(f.receipts.length, 1);
+  await assert.rejects(f.service.onAgentCreated({ agent: { session: { id: agent.session.id } }, source: 'startup' }), /PRIVACY_NOT_INITIALIZED/);
+  failed(await f.send(f.request('legacy-work')), 'PRIVACY_NOT_INITIALIZED');
+  // Disposal/unrestricted scopes and other model-facing privacy APIs must not
+  // gain access merely because the product still owns the session identifier.
+  await assert.rejects(f.service.authorizeExecution(agent), /PRIVACY_NOT_INITIALIZED/);
+  await assert.rejects(f.service.getSourceSession(agent.session.id), /PRIVACY_EXECUTION_UNVERIFIED/);
+  restricted = false;
+  failed(await f.send(f.request(agent.session.id)), 'PRIVACY_NOT_INITIALIZED');
+  assert.equal(f.receipts.length, 1);
+});
+
+test('companion dispatch leaves existing protected and forgotten work records gated', async t => {
+  const f = await fixture(t);
+  await f.store.registerCleanSession('private-work');
+  await f.store.protectSession('private-work', { categories: ['memory'], sourceRefs: ['fixture-source'] });
+  f.ctx.provide('droyCompanions', {
+    ownsSession: id => id === 'companion-live',
+    isRestrictedSession: id => id === 'companion-live',
+  });
+  f.setReady(false);
+  assert.equal((await f.send(f.request('companion-live'))).at(-1).reason.kind, 'stop');
+  failed(await f.send(f.request('private-work')), 'PRIVACY_EXECUTION_UNVERIFIED');
+  await f.store.forgetSources(['fixture-source']);
+  failed(await f.send(f.request('private-work')), 'PRIVACY_SESSION_FORGOTTEN');
+  assert.equal(f.receipts.length, 1);
+  assert.equal((await f.store.sessionState('private-work')).state, 'forgotten');
+});
+
 test('an activated but unready host exposes its diagnostic status without opening an uninitialized store', async t => {
   const f = await fixture(t, { active: true, ready: false, unavailableStore: true });
   assert.deepEqual(await f.service.status(), { active: true, ready: false, reason: 'PRIVACY_EXECUTION_UNVERIFIED' });

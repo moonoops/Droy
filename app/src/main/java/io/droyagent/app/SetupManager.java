@@ -146,6 +146,19 @@ final class SetupManager {
         if (capabilities != null) for (String key : keys(capabilities))
             capabilitiesChanged |= ProductPermissions.allowed(product, key) != capabilities.getBoolean(key);
         boolean choicesChanged = value.has("mode") || capabilitiesChanged;
+        if (capabilities != null && !value.has("mode")) {
+            boolean any = false, enabling = false;
+            for (String key : capabilityKeys(context)) {
+                boolean enabled = capabilities.has(key) ? capabilities.getBoolean(key) : ProductPermissions.allowed(product, key);
+                any |= enabled;
+                enabling |= capabilities.has(key) && enabled;
+            }
+            if (enabling || !any) {
+                boolean stopped = !any;
+                choicesChanged |= ProductPermissions.stopped(context) != stopped;
+                settings.putBoolean(ProductPermissions.STOPPED, stopped);
+            }
+        }
         if (value.has("mode")) {
             String mode = value.getString("mode");
             installation.putString("mode", mode).putBoolean("modeSelected", true);
@@ -247,6 +260,20 @@ final class SetupManager {
             .put("channel", sameChoices ? previous.optString("channel", "none") : "none")
             .put("checkedAt", sameChoices ? previous.optLong("checkedAt", now) : now)
             .put("rootVerified", verified).put("rootCheckedAt", now).put("choicesFingerprint", fingerprint);
+    }
+
+    static synchronized JSONObject uiStatus(Context context) throws Exception {
+        initialize(context);
+        SharedPreferences setup = store(context), product = ProductPermissions.preferences(context);
+        if (!setup.getBoolean("completed", false)) return status(context);
+        // Completed onboarding only needs identity and routing. Environment checks
+        // remain in status()/verify(), rather than every ordinary settings write.
+        return new JSONObject().put("schemaVersion", SCHEMA).put("completed", true).put("required", false)
+            .put("step", setup.getInt("step", 6)).put("source", setup.getString("source", "phone"))
+            .put("mode", setup.getString("mode", "dialogue")).put("modeSelected", setup.getBoolean("modeSelected", false))
+            .put("identity", new JSONObject().put("companionName", product.getString("petName", "Droy"))
+                .put("userAddress", product.getString("userAddress", ""))
+                .put("personality", product.getString("companionPersonality", "")));
     }
 
     static synchronized JSONObject status(Context context) throws Exception {

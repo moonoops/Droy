@@ -195,6 +195,15 @@ export function createExecutionBoundary({ ctx, host, providersInstalled = () => 
     }
   }
   async function around(exec, next) {
+    const companions = ctx.get('droyCompanions');
+    if (companions?.ownsSession(exec.agent?.session?.id) === true
+      && companions.isRestrictedAgent?.(exec.agent) === true) {
+      // The product's scoped registry and monotonic guards have already run.
+      // This does not relax scope(): filesystem/process access still uses the
+      // existing execution policy, including its Root readiness requirements.
+      exec.signal?.throwIfAborted();
+      return local.run({ agent: exec.agent, signal: exec.signal, workspaceId: '' }, next);
+    }
     const privacy = ctx.get('droyPrivacy');
     const status = await privacy.status();
     if (!status.active) return local.run({ agent: exec.agent, signal: exec.signal, workspaceId: '' }, next);

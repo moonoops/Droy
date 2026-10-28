@@ -62,20 +62,23 @@
         android:allowBackup="false" android:extractNativeLibs="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:networkSecurityConfig="@xml/network_security_config">
-        <activity android:name=".MainActivity" android:theme="@style/DroyChatTheme" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden" android:enableOnBackInvokedCallback="true">
+        <!-- Keep the portrait policy when targeting Android 16, including large displays. -->
+        <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
+        <property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false" />
+        <activity android:name=".MainActivity" android:screenOrientation="portrait" android:theme="@style/DroyChatTheme" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden" android:enableOnBackInvokedCallback="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".TestPageActivity" android:exported="false" />
-        <activity android:name=".AudioPermissionActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".MemoryPermissionActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".NfcReaderActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".NfcCredentialActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".WifiCredentialActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".HardwareShortcutActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".HealthPermissionRationaleActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".TestPageActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".AudioPermissionActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".MemoryPermissionActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".NfcReaderActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".NfcCredentialActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".WifiCredentialActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".HardwareShortcutActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".HealthPermissionRationaleActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
         <activity-alias android:name=".HealthPermissionUsageActivity" android:exported="true"
             android:targetActivity=".HealthPermissionRationaleActivity" android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
             <intent-filter>
@@ -83,7 +86,7 @@
                 <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
             </intent-filter>
         </activity-alias>
-        <activity android:name=".media.ShareReceiveActivity" android:exported="true" android:theme="@style/DroyChatTheme"
+        <activity android:name=".media.ShareReceiveActivity" android:screenOrientation="portrait" android:exported="true" android:theme="@style/DroyChatTheme"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

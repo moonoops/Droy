@@ -5,6 +5,13 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class NativeUiProtocolTest {
+    @Test public void keyboardDismissalAcceptsOnlyAnEmptyArgumentObject() throws Exception {
+        JSONObject request = NativeUiProtocol.parse("{\"id\":\"keyboard\",\"action\":\"hideKeyboard\",\"args\":{}}");
+        NativeUiProtocol.noArguments(request.getJSONObject("args"));
+        assertThrows(IllegalArgumentException.class,
+            () -> NativeUiProtocol.noArguments(new JSONObject().put("target", "other-window")));
+    }
+
     @Test public void memoryArchiveSaveBuildsOnlyTheCurrentSessionDownloadUrl() throws Exception {
         String id="a".repeat(64);
         assertEquals("http://127.0.0.1:3456/droy/memory/archive/download/"+id,NativeUiProtocol.memoryArchiveDownload(new JSONObject().put("archiveId",id),3456));

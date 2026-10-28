@@ -6,7 +6,7 @@ def brandingSpec = new groovy.json.JsonSlurper().parse(file('src/main/assets/bra
 
 abstract class GenerateBrandResources extends DefaultTask {
     @Input abstract Property<String> getAppName()
-    @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getLogo()
+    @org.gradle.api.tasks.Optional @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getLogo()
     @OutputDirectory abstract DirectoryProperty getResourcesDirectory()
     @OutputDirectory abstract DirectoryProperty getAssetsDirectory()
 
@@ -16,20 +16,23 @@ abstract class GenerateBrandResources extends DefaultTask {
         if (name.isEmpty() || name.codePointCount(0, name.length()) > 40
                 || name.codePoints().anyMatch { Character.isISOControl(it) } || name.contains('<') || name.contains('>'))
             throw new GradleException('droyAppName must contain 1–40 characters of plain single-line text.')
-        File imageFile = logo.get().asFile
-        if (imageFile.length() > 24 * 1024 * 1024) throw new GradleException('droyAppIcon PNG is too large.')
-        def stream = javax.imageio.ImageIO.createImageInputStream(imageFile)
-        def readers = javax.imageio.ImageIO.getImageReaders(stream)
-        if (!readers.hasNext()) { stream.close(); throw new GradleException('droyAppIcon must be a readable PNG.') }
-        def reader = readers.next()
+        File imageFile = logo.isPresent() ? logo.get().asFile : null
         java.awt.image.BufferedImage image
-        try {
-            reader.input = stream
-            int width = reader.getWidth(0), height = reader.getHeight(0)
-            if (!reader.formatName.equalsIgnoreCase('PNG') || width < 64 || height < 64 || width > 4096 || height > 4096)
-                throw new GradleException('droyAppIcon must be a PNG between 64 and 4096 pixels per side.')
-            image = reader.read(0)
-        } finally { reader.dispose(); stream.close() }
+        if (imageFile == null) image = defaultLogo()
+        else {
+            if (imageFile.length() > 24 * 1024 * 1024) throw new GradleException('droyAppIcon PNG is too large.')
+            def stream = javax.imageio.ImageIO.createImageInputStream(imageFile)
+            def readers = javax.imageio.ImageIO.getImageReaders(stream)
+            if (!readers.hasNext()) { stream.close(); throw new GradleException('droyAppIcon must be a readable PNG.') }
+            def reader = readers.next()
+            try {
+                reader.input = stream
+                int width = reader.getWidth(0), height = reader.getHeight(0)
+                if (!reader.formatName.equalsIgnoreCase('PNG') || width < 64 || height < 64 || width > 4096 || height > 4096)
+                    throw new GradleException('droyAppIcon must be a PNG between 64 and 4096 pixels per side.')
+                image = reader.read(0)
+            } finally { reader.dispose(); stream.close() }
+        }
         File res = resourcesDirectory.get().asFile, assets = assetsDirectory.get().asFile
         project.delete(res, assets)
         new File(res, 'values').mkdirs()
@@ -38,7 +41,9 @@ abstract class GenerateBrandResources extends DefaultTask {
         assets.mkdirs()
         String quotedName = groovy.json.JsonOutput.toJson(name).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         new File(res, 'values/droy_branding.xml').setText('<resources><string name="droy_app_name" formatted="false" translatable="false">' + quotedName + '</string></resources>\n', 'UTF-8')
-        java.nio.file.Files.copy(imageFile.toPath(), new File(assets, 'app-brand-logo.png').toPath())
+        File installedLogo = new File(assets, 'app-brand-logo.png')
+        if (imageFile != null) java.nio.file.Files.copy(imageFile.toPath(), installedLogo.toPath())
+        else javax.imageio.ImageIO.write(image, 'png', installedLogo)
         for (boolean foreground : [false, true]) {
             def canvas = new java.awt.image.BufferedImage(512, 512, java.awt.image.BufferedImage.TYPE_INT_ARGB)
             def graphics = canvas.createGraphics()
@@ -57,15 +62,32 @@ abstract class GenerateBrandResources extends DefaultTask {
 </adaptive-icon>
 ''', 'UTF-8')
     }
+
+    // Product identity is independent of pet artwork and host font availability.
+    private static java.awt.image.BufferedImage defaultLogo() {
+        def image = new java.awt.image.BufferedImage(512, 512, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+        def graphics = image.createGraphics()
+        try {
+            graphics.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+            graphics.color = new java.awt.Color(0x27313D)
+            def mark = new java.awt.geom.Path2D.Double(java.awt.geom.Path2D.WIND_EVEN_ODD)
+            mark.moveTo(112, 80); mark.lineTo(242, 80)
+            mark.curveTo(352, 80, 400, 144, 400, 256)
+            mark.curveTo(400, 368, 352, 432, 242, 432)
+            mark.lineTo(112, 432); mark.closePath()
+            mark.moveTo(192, 152); mark.lineTo(242, 152)
+            mark.curveTo(300, 152, 320, 188, 320, 256)
+            mark.curveTo(320, 324, 300, 360, 242, 360)
+            mark.lineTo(192, 360); mark.closePath()
+            graphics.fill(mark)
+        } finally { graphics.dispose() }
+        return image
+    }
 }
 
 def generateBrandResources = tasks.register('generateBrandResources', GenerateBrandResources) {
     appName.set(providers.gradleProperty('droyAppName').orElse(brandingSpec.name as String))
-    logo.set(rootProject.layout.file(providers.provider {
-        providers.gradleProperty('droyAppIcon').isPresent()
-            ? rootProject.file(providers.gradleProperty('droyAppIcon').get())
-            : rootProject.file('runtime/mobile/assets/brand-logo.png')
-    }))
+    logo.set(rootProject.layout.file(providers.gradleProperty('droyAppIcon').map { rootProject.file(it) }))
     resourcesDirectory.set(layout.buildDirectory.dir('generated/droyBranding/res'))
     assetsDirectory.set(layout.buildDirectory.dir('generated/droyBranding/assets'))
 }

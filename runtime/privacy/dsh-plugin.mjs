@@ -208,6 +208,12 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     }
   }
   async function onAgentCreated({ agent, source, signal }) {
+    const companions = ctx.get('droyCompanions');
+    if (!disposed && companions?.ownsSession(agent?.session?.id) === true
+      && companions.isRestrictedAgent?.(agent) === true) {
+      signal?.throwIfAborted();
+      return;
+    }
     if (!host || !(await status()).active) return;
     const current = await (await getStore()).sessionState(sessionIdentity(agent?.session?.id));
     if (current.state !== 'unknown') return;
@@ -224,6 +230,15 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     await (await getStore()).registerCleanSession(header.id);
   }
   async function checkDispatch(options, route) {
+    const companions = ctx.get('droyCompanions');
+    if (!disposed && companions?.ownsSession(options.sessionId) === true
+      && companions.isRestrictedSession?.(options.sessionId) === true) {
+      // Ordinary companions use their own scoped conversation/memory service;
+      // they cannot read legacy protected records or inherit work tools. Only
+      // the trusted runtime can attest a live session with those restrictions.
+      options.signal?.throwIfAborted();
+      return undefined;
+    }
     const state = await status();
     if (!state.active) {
       // Inactive is allowed only before protection exists. The host persists

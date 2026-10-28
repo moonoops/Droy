@@ -27,7 +27,7 @@ public final class ShareReceiveActivity extends Activity {
         panel.addView(new ProgressBar(this));
         TextView message = new TextView(this); message.setText(io.droyagent.app.NativeLocale.text("正在导入分享内容…", "Importing shared content…")); message.setTextSize(17); message.setPadding(0, 24, 0, 0);
         panel.addView(message); setContentView(panel);
-        // Rotation does not restart a granted stream copy in this small receiving surface.
+        // Window resizing does not restart a granted stream copy in this receiving surface.
         Intent incoming = getIntent();
         new Thread(() -> receive(incoming), "droy-share-receive").start();
     }

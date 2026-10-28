@@ -151,10 +151,9 @@ public final class MemoryUiDeviceTest {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         ui = new DeviceUi(instrumentation, activity);
         ui.awaitPage();
-        boolean landscape = "true".equals(InstrumentationRegistry.getArguments().getString("layoutLandscape"));
-        assertTrue("Could not orient the ready WebView", automation.setRotation(landscape ? UiAutomation.ROTATION_FREEZE_90 : UiAutomation.ROTATION_FREEZE_0));
-        DeviceUi.await("WebView did not reach the requested orientation", 5000,
-            () -> ui.truth(landscape ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+        assertTrue("Could not orient the ready WebView", automation.setRotation(UiAutomation.ROTATION_FREEZE_0));
+        DeviceUi.await("WebView did not reach the portrait orientation", 5000,
+            () -> ui.truth("innerHeight>innerWidth"));
         applyDisplayCondition();
     }
 
@@ -438,8 +437,7 @@ public final class MemoryUiDeviceTest {
     private void capture(String stage) throws Exception {
         awaitVisiblePagePaint();
         if (ownsState) {
-            boolean landscape = "true".equals(InstrumentationRegistry.getArguments().getString("layoutLandscape"));
-            assertTrue("The screenshot no longer has the requested orientation", ui.truth(landscape ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+            assertTrue("The screenshot no longer has the portrait orientation", ui.truth("innerHeight>innerWidth"));
         }
         boolean secureWindow = (activity.getWindow().getAttributes().flags & android.view.WindowManager.LayoutParams.FLAG_SECURE) != 0;
         // Changing UiAutomation flags reconnects its session and resets frozen

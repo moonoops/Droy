@@ -242,3 +242,17 @@ test('browser patch retains DSH controls, bridges external opening, and rejects 
   for (const anchor of ['function createIframePage(options)', 'initialUrl: initialUrl.current,', 'window.open(externalUrl, "_blank", "noopener,noreferrer");'])
     assert.throws(() => patchSidebarBrowser(source.replace(anchor, 'changedAnchor')), /anchor/);
 });
+
+test('a native browser covered by settings stops state polling and resumes after settings close', async () => {
+  const page = fixture(); page.presentation.mount('viewport'); await settle();
+  page.frame.loadUrl({ url: 'https://example.test/visible' }); await settle();
+  page.setOverlays([{ hasAttribute: () => false }]);
+  await page.layout();
+  const reads = page.calls.filter(item => item.operation === 'state').length;
+  await page.poll(); await page.poll();
+  assert.equal(page.calls.filter(item => item.operation === 'state').length, reads);
+  assert.equal(page.calls.at(-1).operation, 'detach');
+  page.setOverlays([]); await page.layout(); await page.poll();
+  assert.equal(page.calls.filter(item => item.operation === 'state').length, reads + 1);
+  await page.frame.dispose();
+});

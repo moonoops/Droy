@@ -191,7 +191,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
     static void select(Context context, String id) throws Exception {
         PetPackage candidate = PetPackage.load(context, id);
         if (!context.getSharedPreferences("product", Context.MODE_PRIVATE).edit().putString("petId", id).commit())
-            throw new IllegalStateException(NativeLocale.text("伙伴形象未保存，请重试", "Companion appearance was not saved. Please try again"));
+            throw new IllegalStateException(NativeLocale.text("宠物形象未保存，请重试", "Pet appearance was not saved. Please try again"));
         PetPackage.use(candidate);
         MAIN.post(() -> { PetOverlay overlay = get(context); overlay.removeWindows(); overlay.displayedMessageKey = ""; overlay.refreshNow(); });
     }
@@ -307,7 +307,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
             internalWindow = host != null; attachedToken = hostToken; windows = internalWindow ? host.getWindowManager() : systemWindows;
             addPet(); enter(now - lastEntryAt > 3000); lastEntryAt = now;
         }
-        pet.setContentDescription(name(context) + NativeLocale.text("，Droy 伙伴，点击查看任务，拖动调整位置", ", Droy companion. Tap to view the task; drag to move"));
+        pet.setContentDescription(name(context) + NativeLocale.text("，Droy 宠物，点击查看任务，拖动调整位置", ", Droy pet. Tap to view the task; drag to move"));
         pendingMarker.setVisibility(pending() != null ? View.VISIBLE : View.GONE);
         pendingMarker.setContentDescription(NativeLocale.text("有问题等你回应", "A question needs your response"));
         if (busy || dragging || holding || clearanceDepth > 0 || petHidden || bubbleHidden) return;

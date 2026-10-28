@@ -65,6 +65,15 @@ public final class ShizukuAccess {
         if (!available()) Shizuku.requestPermission(30);
     }
 
+    /** The owner removes this observer when its authorization UI is destroyed. */
+    public Runnable observePermissionResult(Runnable result) {
+        Shizuku.OnRequestPermissionResultListener listener = (request, grant) -> {
+            if (request == 30) result.run();
+        };
+        Shizuku.addRequestPermissionResultListener(listener);
+        return () -> Shizuku.removeRequestPermissionResultListener(listener);
+    }
+
     IShizukuOperations connect(Cancellation cancellation) throws Exception {
         if (!available()) throw new ActionException("shizuku_unavailable", "Shizuku is not running or authorized");
         CompletableFuture<IShizukuOperations> pending;

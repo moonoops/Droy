@@ -93,6 +93,7 @@ export function createBridge({ port = process.env.DROY_BRIDGE_PORT, token = proc
       }
     },
     progress(payload) { return post('/progress', payload); },
+    clock(signal) { return post('/clock', {}, signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : undefined); },
     setup(payload, signal) { return post('/setup', payload, signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000)); },
     companion(signal) { return post('/companion', {}, signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : undefined); },
     notifications(payload, signal) { return post('/notifications', payload, signal); },

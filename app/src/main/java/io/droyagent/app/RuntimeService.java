@@ -54,6 +54,12 @@ public final class RuntimeService extends Service {
             BackgroundRuntime.stoppedByUser(this); stopGracefully(); return START_NOT_STICKY;
         }
         if (intent != null && CANCEL_TASK.equals(intent.getAction())) {
+            if (!isStartingOrRunning()) {
+                android.widget.Toast.makeText(this,
+                    NativeLocale.text("未能停止任务，请打开对话查看", "Unable to stop the task. Open the conversation to check"), android.widget.Toast.LENGTH_LONG).show();
+                if (!stopping) stopSelf(startId);
+                return START_NOT_STICKY;
+            }
             String task = intent.getStringExtra("taskId");
             new Thread(() -> {
                 try { PetActions.send(task, "cancel", null, null); }
@@ -179,6 +185,23 @@ public final class RuntimeService extends Service {
 
     static synchronized boolean hasActiveSession() {
         return ready || instance != null || (lastWorker != null && !lastWorker.isTerminated());
+    }
+
+    static synchronized boolean isStartingOrRunning() {
+        RuntimeService active = instance;
+        return active != null && !active.stopping
+            && (ready || active.starting || (active.process != null && active.process.isAlive()));
+    }
+
+    static synchronized boolean canStart() {
+        if (historyMaintenance) return false;
+        RuntimeService active = instance;
+        // Android can recreate a service before delivering its start command.
+        // Its unused executor must not prevent the UI from starting the engine.
+        if (active != null) return !active.stopping && !active.starting && !ready
+            && (active.process == null || !active.process.isAlive()) && !active.worker.isShutdown();
+        return (lastProcess == null || !lastProcess.isAlive())
+            && (lastWorker == null || lastWorker.isTerminated());
     }
 
     private void startEngine() {

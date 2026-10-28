@@ -5,11 +5,16 @@ import android.app.Notification;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ComponentName;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
+import android.os.IBinder;
 import android.os.SystemClock;
 import android.service.notification.StatusBarNotification;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
+import androidx.test.runner.lifecycle.Stage;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
@@ -24,6 +29,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.util.concurrent.TimeUnit;
@@ -53,7 +59,8 @@ public class RuntimeLifecycleDeviceTest {
         originalLanguage = fixturePreferences.getString("languagePreference", null);
         originalBackgroundStop = fixturePreferences.contains(BackgroundRuntime.STOPPED)
             ? fixturePreferences.getBoolean(BackgroundRuntime.STOPPED, false) : null;
-        assertTrue(fixturePreferences.edit().putString("languagePreference", "zh").commit());
+        String language = InstrumentationRegistry.getArguments().getString("runtimeLifecycleLanguage", "zh");
+        assertTrue(fixturePreferences.edit().putString("languagePreference", language).commit());
         activity = (MainActivity) instrumentation.startActivitySync(
                 new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         instrumentation.waitForIdleSync();
@@ -101,6 +108,129 @@ public class RuntimeLifecycleDeviceTest {
                 }
             }
         }
+    }
+
+    @Test public void idleCreatedServiceShowsRecoveryAndStartsFromTheVisibleButton() throws Exception {
+        ServiceConnection binding = bindIdleService();
+        try {
+            RuntimeService idle = RuntimeService.instance;
+            assertTrue("Service ownership must still protect history and cleanup", RuntimeService.hasActiveSession());
+            assertFalse("An unused service is not a starting engine", RuntimeService.isStartingOrRunning());
+            assertTrue("An unused service must accept a start request", RuntimeService.canStart());
+            assertNull(child(idle));
+            assertStoppedPageRecoverable();
+            captureStartup("idle-recovery");
+            tapStartButton();
+            DeviceUi ui = new DeviceUi(instrumentation, activity);
+            ui.awaitPage();
+            assertSame("The existing idle service should start its engine", idle, RuntimeService.instance);
+            assertTrue(child(idle).isAlive());
+            assertTrue(RuntimeService.isStartingOrRunning());
+            assertFalse(RuntimeService.canStart());
+            captureStartup("manual-recovery-ready");
+        } finally { context.unbindService(binding); }
+    }
+
+    @Test public void openingActivityStartsAnExistingIdleService() throws Exception {
+        MainActivity closing = activity;
+        instrumentation.runOnMainSync(closing::finish);
+        await("Previous Activity did not close", 10000, closing::isDestroyed);
+        ServiceConnection binding = bindIdleService();
+        try {
+            RuntimeService idle = RuntimeService.instance;
+            activity = (MainActivity) instrumentation.startActivitySync(new Intent(context, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
+            new DeviceUi(instrumentation, activity).awaitPage();
+            assertSame("Opening the app abandoned its existing idle service", idle, RuntimeService.instance);
+            assertTrue("Opening the app did not launch the real engine", child(idle).isAlive());
+            captureStartup("opening-recovery-ready");
+        } finally { context.unbindService(binding); }
+    }
+
+    @Test public void staleTaskCancellationReleasesTheIdleService() throws Exception {
+        Object previousWorker = field(null, "lastWorker");
+        instrumentation.runOnMainSync(() -> context.startService(new Intent(context, RuntimeService.class)
+            .setAction(RuntimeService.CANCEL_TASK).putExtra("taskId", "startup-recovery-synthetic-task")));
+        await("Android did not deliver the old notification", 10000,
+            () -> field(null, "lastWorker") != previousWorker);
+        await("Old notification retained an empty service", 10000, RuntimeService::canManageHistory);
+        assertFalse("An old notification must not start an engine", RuntimeService.isStartingOrRunning());
+        assertTrue(RuntimeService.canStart());
+        assertStoppedPageRecoverable();
+        startReady();
+    }
+
+    @Test public void activityRestorationAndHistoryMaintenanceRespectExplicitStop() throws Exception {
+        MainActivity previous = activity;
+        instrumentation.runOnMainSync(previous::recreate);
+        AtomicReference<MainActivity> restored = new AtomicReference<>();
+        await("The stopped Activity was not restored", 15000, () -> {
+            instrumentation.runOnMainSync(() -> {
+                for (android.app.Activity candidate : ActivityLifecycleMonitorRegistry.getInstance().getActivitiesInStage(Stage.RESUMED))
+                    if (candidate instanceof MainActivity main && main != previous) restored.set(main);
+            });
+            return restored.get() != null;
+        });
+        activity = restored.get();
+        assertStoppedPageRecoverable();
+        assertTrue(BackgroundRuntime.explicitlyStopped(context));
+        assertNull("Restoring an explicitly stopped Activity restarted the engine", RuntimeService.instance);
+        assertTrue(RuntimeService.beginHistoryChange());
+        try {
+            assertFalse("History maintenance must block startup", RuntimeService.canStart());
+            new DeviceUi(instrumentation, activity).invoke("startRuntime");
+            instrumentation.waitForIdleSync();
+            assertNull("The UI started an engine during history maintenance", RuntimeService.instance);
+        } finally { RuntimeService.endHistoryChange(); }
+        assertTrue(RuntimeService.canStart());
+        assertStoppedPageRecoverable();
+    }
+
+    private ServiceConnection bindIdleService() throws Exception {
+        CountDownLatch created = new CountDownLatch(1);
+        ServiceConnection binding = new ServiceConnection() {
+            @Override public void onServiceConnected(ComponentName name, IBinder service) { created.countDown(); }
+            @Override public void onNullBinding(ComponentName name) { created.countDown(); }
+            @Override public void onServiceDisconnected(ComponentName name) { }
+        };
+        assertTrue(context.bindService(new Intent(context, RuntimeService.class), binding, Context.BIND_AUTO_CREATE));
+        try {
+            assertTrue("Android did not create the idle service", created.await(10, TimeUnit.SECONDS));
+            assertNotNull(RuntimeService.instance);
+            return binding;
+        } catch (Exception | AssertionError failure) {
+            context.unbindService(binding);
+            throw failure;
+        }
+    }
+
+    private void tapStartButton() throws Exception {
+        float[] center = new float[2];
+        instrumentation.runOnMainSync(() -> {
+            android.widget.Button button = DeviceUi.findButton(activity.getWindow().getDecorView(),
+                NativeLocale.text("启动并进入对话", "Start and open conversation"));
+            assertNotNull(button);
+            int[] location = new int[2]; button.getLocationOnScreen(location);
+            center[0] = location[0] + button.getWidth() / 2f;
+            center[1] = location[1] + button.getHeight() / 2f;
+        });
+        try (android.os.ParcelFileDescriptor output = instrumentation.getUiAutomation(
+                android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+                .executeShellCommand("input touchscreen tap " + center[0] + " " + center[1]);
+                java.io.InputStream input = new android.os.ParcelFileDescriptor.AutoCloseInputStream(output)) {
+            while (input.read() != -1) { }
+        }
+    }
+
+    private void captureStartup(String name) throws Exception {
+        File directory = new File(context.getExternalFilesDir(null), "startup-recovery-evidence");
+        assertTrue(directory.isDirectory() || directory.mkdirs());
+        android.graphics.Bitmap screenshot = instrumentation.getUiAutomation(
+            android.app.UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES).takeScreenshot();
+        assertNotNull(screenshot);
+        try (java.io.FileOutputStream output = new java.io.FileOutputStream(new File(directory, name + "-" + NativeLocale.active() + ".png"))) {
+            assertTrue(screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output));
+        } finally { screenshot.recycle(); }
     }
 
     @Test public void notificationPausesToolsAndDiagnosticsStopsRealDsh() throws Exception {
@@ -185,8 +315,11 @@ public class RuntimeLifecycleDeviceTest {
             assertFalse("Startup finished before the cancellation window was exercised", RuntimeService.ready);
             assertTrue("Startup flag was not set", booleanField(service, "starting"));
             RuntimeService.requestStop();
+            assertFalse("Stopped startup still appears to be running", RuntimeService.isStartingOrRunning());
+            assertFalse("Startup must remain blocked during cleanup", RuntimeService.canStart());
         });
         await("Startup cancellation did not destroy the service", 15000, RuntimeService::canManageHistory);
+        assertTrue("Completed cleanup must allow a manual restart", RuntimeService.canStart());
         assertStoppedPageRecoverable();
         ExecutorService worker = worker(service);
         assertTrue("Startup worker did not terminate after cancellation", worker.awaitTermination(5, TimeUnit.SECONDS));
@@ -538,7 +671,8 @@ public class RuntimeLifecycleDeviceTest {
             if (ui.loadingOverlayShown()) return false;
             AtomicBoolean actionable = new AtomicBoolean();
             instrumentation.runOnMainSync(() -> {
-                android.widget.Button restart = DeviceUi.findButton(activity.getWindow().getDecorView(), "启动并进入对话");
+                android.widget.Button restart = DeviceUi.findButton(activity.getWindow().getDecorView(),
+                    NativeLocale.text("启动并进入对话", "Start and open conversation"));
                 actionable.set(restart != null && restart.isShown() && restart.isEnabled());
             });
             return actionable.get();

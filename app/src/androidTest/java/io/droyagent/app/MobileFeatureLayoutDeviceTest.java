@@ -43,7 +43,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
-/** Real WebView layout acceptance; run unchanged at narrow, normal, landscape and enlarged-font sizes. */
+/** Real WebView layout acceptance; run unchanged at narrow, normal and enlarged-font portrait sizes. */
 @RunWith(AndroidJUnit4.class)
 public final class MobileFeatureLayoutDeviceTest {
     private Instrumentation instrumentation;
@@ -107,16 +107,10 @@ public final class MobileFeatureLayoutDeviceTest {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         ui = new DeviceUi(instrumentation, activity);
         ui.awaitPage();
-        String landscape = InstrumentationRegistry.getArguments().getString("layoutLandscape");
-        if (landscape != null) {
-            assertTrue("Unsupported layout orientation", landscape.equals("true") || landscape.equals("false"));
-            boolean requestedLandscape = landscape.equals("true");
-            assertTrue(ui.automation().setRotation(requestedLandscape
-                ? android.app.UiAutomation.ROTATION_FREEZE_90 : android.app.UiAutomation.ROTATION_FREEZE_0));
-            rotationOwned = true;
-            DeviceUi.await("The layout did not reach the requested orientation", 5000,
-                () -> ui.truth(requestedLandscape ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
-        }
+        assertTrue(ui.automation().setRotation(android.app.UiAutomation.ROTATION_FREEZE_0));
+        rotationOwned = true;
+        DeviceUi.await("The layout did not reach portrait orientation", 5000,
+            () -> ui.truth("innerHeight>innerWidth"));
         ui.hideKeyboard();
         awaitMainMenu();
         if ("true".equals(InstrumentationRegistry.getArguments().getString("layoutMaxTextFont"))) maximizeDshTextFont();
@@ -498,7 +492,7 @@ public final class MobileFeatureLayoutDeviceTest {
             Rect bounds = ui.webBounds(viewport);
             boolean above = position.getBoolean("above");
             // Move only the remaining clipped distance, with a touch-slop allowance.
-            // A fixed long swipe can oscillate a tall row above/below a short landscape viewport.
+            // A fixed long swipe can oscillate a tall row above/below a short viewport.
             float scale = (float) (bounds.height() / position.getDouble("available"));
             float distance = Math.min(bounds.height() * 0.6f,
                 (float) Math.abs(position.getDouble("delta")) * scale + ViewConfiguration.get(context).getScaledTouchSlop() + 8);
@@ -1000,9 +994,8 @@ public final class MobileFeatureLayoutDeviceTest {
         assertTrue("The WebView did not publish its current visual state", painted.await(5, TimeUnit.SECONDS));
         instrumentation.waitForIdleSync();
         SystemClock.sleep(100);
-        String landscape = InstrumentationRegistry.getArguments().getString("layoutLandscape");
-        if (landscape != null) assertTrue("The screenshot viewport left the requested orientation: " + stage,
-            ui.truth(landscape.equals("true") ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+        assertTrue("The screenshot viewport left portrait orientation: " + stage,
+            ui.truth("innerHeight>innerWidth"));
         if (Build.VERSION.SDK_INT == 30 && preferences.getString("themeColorScheme", "light").equals("dark"))
             instrumentation.runOnMainSync(() -> assertEquals("Dark web pages must clear API 30 legacy light-system-bar flags", 0,
                 activity.getWindow().getDecorView().getSystemUiVisibility()
@@ -1010,8 +1003,8 @@ public final class MobileFeatureLayoutDeviceTest {
         Bitmap bitmap = ui.automation().takeScreenshot();
         assertNotNull("Android did not capture the synthetic fixture screen", bitmap);
         try (FileOutputStream output = new FileOutputStream(new File(directory, stage + ".png"))) {
-            if (landscape != null) assertTrue("The screenshot bitmap left the requested orientation: " + stage,
-                landscape.equals("true") ? bitmap.getWidth() > bitmap.getHeight() : bitmap.getHeight() > bitmap.getWidth());
+            assertTrue("The screenshot bitmap left portrait orientation: " + stage,
+                bitmap.getHeight() > bitmap.getWidth());
             assertTrue("Could not encode the synthetic fixture screenshot", bitmap.compress(Bitmap.CompressFormat.PNG, 100, output));
         } finally { bitmap.recycle(); }
     }

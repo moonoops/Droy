@@ -37,6 +37,11 @@ final class ProductBridge extends NanoHTTPD {
     private final VerificationFlow verification = new VerificationFlow(SystemClock::elapsedRealtime);
     final ControlPolicy policy = new ControlPolicy(SystemClock::elapsedRealtime);
 
+    static String deviceTimeZone() {
+        String zone = java.util.TimeZone.getDefault().toZoneId().normalized().getId();
+        return zone.equals("Z") ? "UTC" : zone;
+    }
+
     ProductBridge(Context context, String token) {
         super("127.0.0.1", 0);
         this.token = token;
@@ -84,6 +89,8 @@ final class ProductBridge extends NanoHTTPD {
                 .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                 .decode(java.nio.ByteBuffer.wrap(body)).toString();
             JSONObject request = new JSONObject(json);
+            if (session.getUri().equals("/clock")) return ok(new JSONObject()
+                .put("now", System.currentTimeMillis()).put("timeZone", deviceTimeZone()));
             if (session.getUri().equals("/setup")) return ok(setupRequest(request));
             if (session.getUri().equals("/memory") || session.getUri().equals("/history"))
                 return memoryRequest(session.getUri(), request);

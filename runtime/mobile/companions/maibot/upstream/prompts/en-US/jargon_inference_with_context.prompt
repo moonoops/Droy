@@ -1,0 +1,19 @@
+**Term content**
+{content}
+**The context in which the term appears. The lines spoken by {bot_name} are your own lines**
+{raw_content_list}
+{previous_meaning_section}
+
+Please infer the meaning of the term "{content}" based on the context.
+- If this is jargon, slang, or internet language, please infer its meaning
+- If the meaning is clear (ordinary vocabulary), please also explain it
+- The lines spoken by {bot_name} may contain mistakes, so do not rely on those lines
+- If the contextual information is insufficient and the meaning cannot be inferred, please set no_info to true
+{previous_meaning_instruction}
+
+Output in JSON format:
+{{
+  "meaning": "Detailed explanation of the meaning (including usage scenarios, source, specific explanation, etc.)",
+  "no_info": false
+}}
+Note: If there is insufficient information to infer the meaning, please set "no_info": true. In that case, meaning may be an empty string.

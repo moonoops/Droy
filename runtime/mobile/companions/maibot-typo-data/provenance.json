@@ -1,0 +1,29 @@
+{
+  "upstream": {
+    "repository": "https://github.com/Mai-with-u/MaiBot",
+    "commit": "fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb",
+    "path": "src/chat/utils/typo_generator.py",
+    "sourceGitBlobs": {
+      "typo_generator.py": "5158d6db4bbc76db80c28b2ac49f03abdd8430db",
+      "utils.py": "ec81624c840c20cab47bad0f26edc28e3e60d625"
+    }
+  },
+  "dependencies": {
+    "jieba": "0.42.1",
+    "pypinyin": "0.55.0"
+  },
+  "dictionarySha256": "7197c3211ddd98962b036cdf40324d1ea2bfaa12bd028e68faa70111a88e12a8",
+  "lexiconSha256": "324637454e6cc885d705a5839d32b4557df3e3cfdb6fab70beae9fc1bde64024",
+  "uncompressedBytes": 12348624,
+  "compressedBytes": 5094047,
+  "wordCount": 349045,
+  "characterCount": 20991,
+  "phraseCount": 47111,
+  "homophoneWordCount": 337394,
+  "sourceHashes": {
+    "upstream/jieba-finalseg.py": "2168475bf522c0dae9d0a5e2bcb63c11b8c15931a622035cb8905d1e77e94f84",
+    "upstream/jieba.py": "b47cefcfd0bf683b0c708c1de0328df83be2c35264637c442106e79d739fb7f3",
+    "upstream/typo_generator.py": "cbcf01aa661910d13f1128e0c8668935fa6c13859196d0e5f5de2b155d8b10cd",
+    "upstream/utils.py": "d4009753f6b389226f89d4878e66f04922986ad487e1033e724e0a75ba1d5548"
+  }
+}

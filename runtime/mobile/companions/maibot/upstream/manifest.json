@@ -1,0 +1,486 @@
+{
+  "repository": "https://github.com/Mai-with-u/MaiBot",
+  "revision": "fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb",
+  "version": "1.3.16",
+  "license": "GPL-3.0",
+  "files": [
+    {
+      "path": "prompts/en-US/a_memorix_chat_summary.prompt",
+      "gitBlobSha": "f5d911a5c072473acad18aa4c4a6f165f9ccc851",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/a_memorix_chat_summary.prompt",
+      "sha256": "fa10e8887cce3ef2bba069fdd8b54e87e05c40dc5dca8aa17d6709f07759f52d"
+    },
+    {
+      "path": "prompts/en-US/context_compaction.prompt",
+      "gitBlobSha": "b19c784f86b599f246446522a046b34fb5288d22",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/context_compaction.prompt",
+      "sha256": "024feaf0624f63952824eb46278e067007bddc2f25637369086ca8ab024446c6"
+    },
+    {
+      "path": "prompts/en-US/context_compaction_focus.prompt",
+      "gitBlobSha": "07703fffe1e8bb92c8e519722d30ae10199cb8fd",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/context_compaction_focus.prompt",
+      "sha256": "7b201d800012b5600aa2bc8d5483c69ade30d26bb4ef0e6d21ce6c6a9342397a"
+    },
+    {
+      "path": "prompts/en-US/emoji_content_analysis.prompt",
+      "gitBlobSha": "3f43068ab7d166e235ec3bc4015c59bee69aabdb",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/emoji_content_analysis.prompt",
+      "sha256": "7b203bf4eb0f89de4dd337d31a697cbc0dda6f696ae3314c4f495a127475b35e"
+    },
+    {
+      "path": "prompts/en-US/emoji_content_filtration.prompt",
+      "gitBlobSha": "9dc46784683db03a50150ab155aecf47120a4432",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/emoji_content_filtration.prompt",
+      "sha256": "81330f3c1c90fa5d17cc4c339fc1c8ea692451c715f2c7a27c4a40bca49ced9a"
+    },
+    {
+      "path": "prompts/en-US/emoji_replace.prompt",
+      "gitBlobSha": "051662097454401e272032925dbb00be3d5fa072",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/emoji_replace.prompt",
+      "sha256": "3358b1705a67c76b051b0e5eac9ab8f00d2d58441c60a314384631000745a6be"
+    },
+    {
+      "path": "prompts/en-US/emoji_selection.prompt",
+      "gitBlobSha": "4a749e4c62915938ac00d92da166442b011e0a46",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/emoji_selection.prompt",
+      "sha256": "2ce866d66eda4c3b120ad5c5804265324db336b637fb643f6db457670884b2f9"
+    },
+    {
+      "path": "prompts/en-US/expression_evaluation.prompt",
+      "gitBlobSha": "e414ff954abbc3faf627f11141a8c967605f5bc4",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/expression_evaluation.prompt",
+      "sha256": "b7dfb9490d80cd15c1eb0595cb5828950bfb7a8a4259cfcb776ce9dabe4998b4"
+    },
+    {
+      "path": "prompts/en-US/heuristic_memory_impression.prompt",
+      "gitBlobSha": "e88b6ae2501259e90cdc91f1aa97e392425416c0",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/heuristic_memory_impression.prompt",
+      "sha256": "48e28a2934e38d89f6d88323c247b7fa238cc6185eba07c30a14a87c659963bb"
+    },
+    {
+      "path": "prompts/en-US/image_description.prompt",
+      "gitBlobSha": "bc5a2188f17c84628e61cf1519f302702253c3eb",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/image_description.prompt",
+      "sha256": "b34754712078332c4523d0355ce6905dacffbe61503ab8d1d71ce1b60b668c2c"
+    },
+    {
+      "path": "prompts/en-US/jargon_compare_inference.prompt",
+      "gitBlobSha": "b133ac6b03b1d43a66381e9b3f9976ad313dbe46",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/jargon_compare_inference.prompt",
+      "sha256": "543017d1d7d056848018d40fb207be1f62b2af6ccd301068907927dfcd6dae11"
+    },
+    {
+      "path": "prompts/en-US/jargon_inference_content_only.prompt",
+      "gitBlobSha": "6dcdcedbbd44191c1a0e28d59c8bdb4d34aa6d00",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/jargon_inference_content_only.prompt",
+      "sha256": "d800b8a9dac3630a68707b51b608ed28765a630f345f6784aaabef3e05899b41"
+    },
+    {
+      "path": "prompts/en-US/jargon_inference_with_context.prompt",
+      "gitBlobSha": "92e58a44fe0b1cccf461d7c3f51a4266eaa2ecf1",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/jargon_inference_with_context.prompt",
+      "sha256": "a96e11d95c3ec5b6fe930e9beed6215e70a422da61758a14fbb35003126446f5"
+    },
+    {
+      "path": "prompts/en-US/learn_jargon.prompt",
+      "gitBlobSha": "9384a73e13e70c7fd3c7cfa86519ccb69f3b2ba3",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/learn_jargon.prompt",
+      "sha256": "65d4269180d718b61ca3602bc4f1872f809ef5fc3023a73a2c1e8ea7e1387078"
+    },
+    {
+      "path": "prompts/en-US/learn_style.prompt",
+      "gitBlobSha": "ebd3546755568900c8e415bb86734c57f929911a",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/learn_style.prompt",
+      "sha256": "6e15fe3e5c6d078210c8a329f93aa54b6270f64140684c5136990458cf7d3b9f"
+    },
+    {
+      "path": "prompts/en-US/maisaka_chat.prompt",
+      "gitBlobSha": "d39bebd35e6ed253071fad15ca6f287a589c4d54",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/maisaka_chat.prompt",
+      "sha256": "df072630690acd08a49a58f06ba82bbbfcc96ddf575d4c50e6d3ccf4b16d1053"
+    },
+    {
+      "path": "prompts/en-US/maisaka_chat_focus.prompt",
+      "gitBlobSha": "7acdf11aad55e05633b030245751c0a7f1d59531",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/maisaka_chat_focus.prompt",
+      "sha256": "bb5de659af61e9bd789716d7cd2da0c82c32e2abe11a33bc867fc903ddf24874"
+    },
+    {
+      "path": "prompts/en-US/maisaka_chat_passive.prompt",
+      "gitBlobSha": "344c6b8f27ccf44d3617dfe42dfebba1c87caab9",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/maisaka_chat_passive.prompt",
+      "sha256": "f5d847e7b350381c5c34d9b6b800daa2b73a31076f6451d0075286efa3a4092a"
+    },
+    {
+      "path": "prompts/en-US/maisaka_expression_selector.prompt",
+      "gitBlobSha": "a9980ca0faf679211c8033b29cf526dd67728303",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/maisaka_expression_selector.prompt",
+      "sha256": "6c6f0dae01d8e3b5f6044472ea6412f86581dc2ece32573b9c4d36861e9235f9"
+    },
+    {
+      "path": "prompts/en-US/maisaka_replyer.prompt",
+      "gitBlobSha": "184e73bdf1eea9f873e79c2f345a3fc793bf7700",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/maisaka_replyer.prompt",
+      "sha256": "992076673461d2e4dbc3b10b131a033c93660935d8dcad9d92e2aa52d5ba89ec"
+    },
+    {
+      "path": "prompts/en-US/maisaka_replyer_document.prompt",
+      "gitBlobSha": "1b9a4ff9ae318f3d372c43bd01f7c2ddd93e70db",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/maisaka_replyer_document.prompt",
+      "sha256": "6b99211a2b93cf645372445388c1b620573074bbb8d3923180c2a37313f0edf2"
+    },
+    {
+      "path": "prompts/en-US/maisaka_wait_reminder.prompt",
+      "gitBlobSha": "4ea0731d362b7783a63d3c7db0f859ba920f6e19",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/maisaka_wait_reminder.prompt",
+      "sha256": "7f7efa85b169d90aef4b7e63e22bc7baeda2c7d748b26ea0256dbe9d288552b2"
+    },
+    {
+      "path": "prompts/en-US/memory_fuzzy_modify_plan.prompt",
+      "gitBlobSha": "25c7661960e29cdad3a490400152d7f014bd089c",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/memory_fuzzy_modify_plan.prompt",
+      "sha256": "f1c4fe8a707b26174426912fdb5596d277c47f91b147161af4773d43a3fe835a"
+    },
+    {
+      "path": "prompts/en-US/reply_attachments.prompt",
+      "gitBlobSha": "95464edd6f98e269690b9f8ad977a860007494b2",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/reply_attachments.prompt",
+      "sha256": "f6cfca48f9030757292d1b420b4ff4b98642f040af5048ad0600c48f2a03929c"
+    },
+    {
+      "path": "prompts/en-US/reply_supplement.prompt",
+      "gitBlobSha": "ac806e4136a9edaf0a410f8cb432dc5d7cf6da0a",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/reply_supplement.prompt",
+      "sha256": "4990d7e492e45eb85045d0af019787b4ad549c677fd2e1b5a2da2d0aa4d897e7"
+    },
+    {
+      "path": "prompts/en-US/retro_private_replyer.prompt",
+      "gitBlobSha": "7830353479039206e381748808e99a4f14e4f78d",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/retro_private_replyer.prompt",
+      "sha256": "d11a7ad3ac2a5067eab7f3d7a50368d74048bbe5ee01ba301bc834671db33acb"
+    },
+    {
+      "path": "prompts/en-US/retro_private_replyer_self.prompt",
+      "gitBlobSha": "f0b2343ef87b6612ca67d0a1a76e3f615cd5147c",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/retro_private_replyer_self.prompt",
+      "sha256": "e27357b675b45e70126e5f510ff6a45045d19762a5771754cd9fa7ed9dd248c7"
+    },
+    {
+      "path": "prompts/en-US/retro_replyer.prompt",
+      "gitBlobSha": "6eeb64e82f4cd59b7c7917f1212daf2776e26e91",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/retro_replyer.prompt",
+      "sha256": "6c7f750423b94931efe309875c1a8854e75478b24399957b4cf8f024182142ef"
+    },
+    {
+      "path": "prompts/en-US/retro_replyer_light.prompt",
+      "gitBlobSha": "2a6ebb49870641651e223cfb78a30fd8654cf8a7",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/retro_replyer_light.prompt",
+      "sha256": "189f1ae0c01238e12a3c885d2929512001c0b204132b56f3bc6c1e3dddcaa3cd"
+    },
+    {
+      "path": "prompts/en-US/text_learning_expression.prompt",
+      "gitBlobSha": "7bca6e35e9b886f656c10dd198e9d9a54f0b36fd",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/text_learning_expression.prompt",
+      "sha256": "f0e19fcd0e28006169317b87641404f1fc2e4d682b76e5fea97b56fddda7b9d0"
+    },
+    {
+      "path": "prompts/en-US/text_learning_jargon.prompt",
+      "gitBlobSha": "f1870b2fb907c4f7e1aa4d05b17c1ec2560225a6",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/en-US/text_learning_jargon.prompt",
+      "sha256": "37077bbfc6e35788225caf5b4478676c0aecf3cf2da966429df0621d3e22b550"
+    },
+    {
+      "path": "prompts/zh-CN/a_memorix_chat_summary.prompt",
+      "gitBlobSha": "b140a062992013183b8606758dbf26f71169eee7",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/a_memorix_chat_summary.prompt",
+      "sha256": "09fcdcea7733a53fb0d6987ae70b4dd6246dc42c2173a2659d851e8e52814429"
+    },
+    {
+      "path": "prompts/zh-CN/context_compaction.prompt",
+      "gitBlobSha": "cf016293c73c0efe2874f2c69d8d904f1504a9dd",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/context_compaction.prompt",
+      "sha256": "ffc173144a4328c844d7a57f79fd5242ae0613db56b1e3d043cd941d9db511c2"
+    },
+    {
+      "path": "prompts/zh-CN/context_compaction_focus.prompt",
+      "gitBlobSha": "8cb260fe368e7cab82dbc94ec4b49184dbd939c4",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/context_compaction_focus.prompt",
+      "sha256": "d7d5796046276bd6051a5056341d11fdaa88b69bb49880113c7e864f0c96ee36"
+    },
+    {
+      "path": "prompts/zh-CN/emoji_content_analysis.prompt",
+      "gitBlobSha": "839598569ba386742103a24f701a6e6240b37bf8",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/emoji_content_analysis.prompt",
+      "sha256": "4d0d91dc76d337aa59b7cb409a0b9cbbe531bb5ff94a6d02e63ac89c5e352630"
+    },
+    {
+      "path": "prompts/zh-CN/emoji_content_filtration.prompt",
+      "gitBlobSha": "4d32d3addcecaade7f86fbd25fa306bbb08e4e25",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/emoji_content_filtration.prompt",
+      "sha256": "e7b9910530c00a6a7dfc049dcc37929ffdb9a011392e2571229736ea6b174eab"
+    },
+    {
+      "path": "prompts/zh-CN/emoji_replace.prompt",
+      "gitBlobSha": "d538e629c64165e88151828479a44bc10efa48b5",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/emoji_replace.prompt",
+      "sha256": "7cc1795431c0ac502b484e5cda6b068540c7a9f8ccf30f9c218e42c59f25bc02"
+    },
+    {
+      "path": "prompts/zh-CN/emoji_selection.prompt",
+      "gitBlobSha": "d72806d6c14690b13c29c7eed241a48c7c260b21",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/emoji_selection.prompt",
+      "sha256": "80b4619115f9431dd57edfaa4e67ae1aa22b7a7c5330b560db7ebec0829e8b62"
+    },
+    {
+      "path": "prompts/zh-CN/expression_evaluation.prompt",
+      "gitBlobSha": "e0d4c3cc4ee382fa4d5abf28a55bc5496cc3740d",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/expression_evaluation.prompt",
+      "sha256": "1c82474c8fc5cf3678bbcb570bd032d3b049590751b9653020ad1543da8f78d3"
+    },
+    {
+      "path": "prompts/zh-CN/heuristic_memory_impression.prompt",
+      "gitBlobSha": "de368977084c9854781fa1deab8bcf43e780d256",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/heuristic_memory_impression.prompt",
+      "sha256": "8ac8e0f6e47ef1f55a685f5b57193112f152ab02334bacf7f9156d22152092f2"
+    },
+    {
+      "path": "prompts/zh-CN/image_description.prompt",
+      "gitBlobSha": "61bac82223bb3ce6ebb2ae53558d77d01721ceee",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/image_description.prompt",
+      "sha256": "8a09a77d94e19e49fd65db6ebea7ccb15717365749c919e6ccbcec22ff1916ba"
+    },
+    {
+      "path": "prompts/zh-CN/jargon_compare_inference.prompt",
+      "gitBlobSha": "b412be174bb046b4809d0b49e1bbe80e285f1647",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/jargon_compare_inference.prompt",
+      "sha256": "d5902a5478dc564b4353213bcf51161ee112da57aad13c0a652d6f36618f3758"
+    },
+    {
+      "path": "prompts/zh-CN/jargon_inference_content_only.prompt",
+      "gitBlobSha": "f6258e91c94c7c1a41960b0bbfd7e20ab64483f6",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/jargon_inference_content_only.prompt",
+      "sha256": "faced88ae0a0e60386cb8909be3e246fe17270c2e2ab52272590a611416ab232"
+    },
+    {
+      "path": "prompts/zh-CN/jargon_inference_with_context.prompt",
+      "gitBlobSha": "295896e3ec4c5c8e2b9a562ec71cca9fec15c4f2",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/jargon_inference_with_context.prompt",
+      "sha256": "fdc49d127b07a9d9c1426812afb050f7e572182530a1e002143b0a211a36f647"
+    },
+    {
+      "path": "prompts/zh-CN/learn_jargon.prompt",
+      "gitBlobSha": "d035f41ddc920663eee46d253657db50838e4a90",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/learn_jargon.prompt",
+      "sha256": "7ff47c16b08d10aafa6a449f21e5f29a22470eecce656bf776b1531d88566c65"
+    },
+    {
+      "path": "prompts/zh-CN/learn_style.prompt",
+      "gitBlobSha": "3460aa96141cb57ff803b8f9234ddebb1307a07e",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/learn_style.prompt",
+      "sha256": "9f323d09bd38e8692242bfef99437e7c499708b557545bc22e13f9f2d28aa2d5"
+    },
+    {
+      "path": "prompts/zh-CN/maisaka_chat.prompt",
+      "gitBlobSha": "54aebb204168ed13358030d2f8eea6f41642039c",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/maisaka_chat.prompt",
+      "sha256": "623674c9db09fb76493275688c2acc3be314df556bf8cb4b526c53814b2e01eb"
+    },
+    {
+      "path": "prompts/zh-CN/maisaka_chat_focus.prompt",
+      "gitBlobSha": "b52ef339fb1f325e4ae5c3269939121dcba2a5da",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/maisaka_chat_focus.prompt",
+      "sha256": "1f1a8ce6e6c855941e6931be71f95b1a5c5e60afa232020704331460fb93305b"
+    },
+    {
+      "path": "prompts/zh-CN/maisaka_chat_passive.prompt",
+      "gitBlobSha": "a002d9e173318acec9d27597f130bdf23e119439",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/maisaka_chat_passive.prompt",
+      "sha256": "f7ce87a82bddf618a2283f954a72b26ca2197b522fb6ef184109216dcde17ee1"
+    },
+    {
+      "path": "prompts/zh-CN/maisaka_expression_selector.prompt",
+      "gitBlobSha": "3b092f91fa6bcda56153f433337acb1d091d9e4e",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/maisaka_expression_selector.prompt",
+      "sha256": "45f3152ff0b2099edc25fb0d0a8d34b815297cda677aa3c2ce934d7fb2a2fb7f"
+    },
+    {
+      "path": "prompts/zh-CN/maisaka_replyer.prompt",
+      "gitBlobSha": "e11ba64e70bdd4fccad9e3be9b847f044d5da7df",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/maisaka_replyer.prompt",
+      "sha256": "79fc57654b27d88c9c322c080bcce8b79d949f5aaf886fd2759c47879f5d4122"
+    },
+    {
+      "path": "prompts/zh-CN/maisaka_replyer_document.prompt",
+      "gitBlobSha": "eaad8de3ccdd425af458c1e8a8f09863797fd64d",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/maisaka_replyer_document.prompt",
+      "sha256": "d28866e82c9afb07d238235896f152bca88e6f2586de4f3be8b3ec6228d899e3"
+    },
+    {
+      "path": "prompts/zh-CN/maisaka_wait_reminder.prompt",
+      "gitBlobSha": "4a7a80d84252ebc77cdb835bf8fce4456b8d6403",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/maisaka_wait_reminder.prompt",
+      "sha256": "a9de77d05f80d9de2be75cc21c1e419e4022d71ff1d427d3c4e5b66bd5b2cb5e"
+    },
+    {
+      "path": "prompts/zh-CN/memory_fuzzy_modify_plan.prompt",
+      "gitBlobSha": "d16943d751c190e3185cb0a922320d94eed853e6",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/memory_fuzzy_modify_plan.prompt",
+      "sha256": "df50f2fd08341cc0acbc236f65788fbbbd8a5f4b5ac01633efa326e8d55496d7"
+    },
+    {
+      "path": "prompts/zh-CN/reply_attachments.prompt",
+      "gitBlobSha": "55999479fc00289c7ee64e655af1cb44cf37d85a",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/reply_attachments.prompt",
+      "sha256": "2202c362fb17fd6fc9b3ad0616bcbf2ca1a0fd24b3c9c1f6723852960293567d"
+    },
+    {
+      "path": "prompts/zh-CN/reply_supplement.prompt",
+      "gitBlobSha": "07b562929b753c747197370ea4f3389484bcf55b",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/reply_supplement.prompt",
+      "sha256": "ee6160a1e6e993fde0296d7efd3f1a86e8dd0e5f4755b76a71afe74870ec153a"
+    },
+    {
+      "path": "prompts/zh-CN/retro_private_replyer.prompt",
+      "gitBlobSha": "a02c03bb7cedfe1a5fe87e71e7912c685d1fd0f4",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/retro_private_replyer.prompt",
+      "sha256": "6618e68493e2c81981b81fc69ead1bf1735453e80c81699e667617acdf2bd8f1"
+    },
+    {
+      "path": "prompts/zh-CN/retro_private_replyer_self.prompt",
+      "gitBlobSha": "5a933bfcf7856ad142dac7ea17903fb8b2eb5780",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/retro_private_replyer_self.prompt",
+      "sha256": "b799f388beaea983168065418398b9805fd8fa6c71ed97fdb92afddfbaafca9b"
+    },
+    {
+      "path": "prompts/zh-CN/retro_replyer.prompt",
+      "gitBlobSha": "0a033a636ce2bc46f2f1ba8ca34761fe6ddd3c27",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/retro_replyer.prompt",
+      "sha256": "a3b39a4064e839c6a919cef833171883b10a0fa6daa9509ce7b34d7d80556216"
+    },
+    {
+      "path": "prompts/zh-CN/retro_replyer_light.prompt",
+      "gitBlobSha": "07fdd8a32cf44986d32489a39e9eb45814c0e1e0",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/retro_replyer_light.prompt",
+      "sha256": "6d30d52069b9c82087ae7dbff9d6e2eb23b8a8f5bb5cfa31e3374680c6cc7bba"
+    },
+    {
+      "path": "prompts/zh-CN/text_learning_expression.prompt",
+      "gitBlobSha": "79fb157d904cf2f372ca9064ad1248f56070d93f",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/text_learning_expression.prompt",
+      "sha256": "e3d8f2d64a526e3031b063419b94a1a17da30fd2099d55de599f593fb82564d9"
+    },
+    {
+      "path": "prompts/zh-CN/text_learning_jargon.prompt",
+      "gitBlobSha": "6c5be694950dddf6bfade43e58e799cf0286edbd",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/prompts/zh-CN/text_learning_jargon.prompt",
+      "sha256": "371dae7fb7a2a2abcc186569e29d915fa84dc61d0ac7bcecced0e360a5a9ddea"
+    },
+    {
+      "path": "LICENSE",
+      "gitBlobSha": "f288702d2fa16d3cdf0035b15a9fcbc552cd88e7",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/LICENSE",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "path": "src/config/official_configs.py",
+      "gitBlobSha": "bc2eb0be0543228b9e6d5b268a184472ebbfd05d",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/src/config/official_configs.py",
+      "sha256": "644cf81f9f1ad76257847255223eae0032da8f1eecd9fc7adda6383d2c8c007b"
+    },
+    {
+      "path": "src/chat/replyer/maisaka_generator_base.py",
+      "gitBlobSha": "3b05d2d6763ce298839fb7a41d675c8857c756bd",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/src/chat/replyer/maisaka_generator_base.py",
+      "sha256": "f30a6b85d47d9877334a9f482ab6f5ad1054aa658e45ae048a2ddf33752cffee"
+    },
+    {
+      "path": "locales/en-US/config.json",
+      "gitBlobSha": "bda9ef9ec2c80e2afd1a4f6d06f3888b321cccd9",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/locales/en-US/config.json",
+      "sha256": "50a370e1b204ac01821619601df78518f3a5f32657e104775b7520e4eec14d6d"
+    },
+    {
+      "path": "locales/en-US/prompts.json",
+      "gitBlobSha": "d550dcd1d06f16d6838957bc0efa6521196522d5",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/locales/en-US/prompts.json",
+      "sha256": "83638ce33ffa8e2699b21c1afe4a408d2bed661ca68840b4675ae3d7c4d3b5d4"
+    },
+    {
+      "path": "src/maisaka/attention_drift.py",
+      "gitBlobSha": "bfd0914fd02511da55e1b4c4757dd7d51ef3509d",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/src/maisaka/attention_drift.py",
+      "sha256": "48f0a314622d3e6d095679bcb23a1283156b34f5c13e87ca3e5f56eb54afdbc0"
+    },
+    {
+      "path": "src/maisaka/builtin_tool/reply.py",
+      "gitBlobSha": "b9551f8caff0d235a3c031164e36aab23355de43",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/src/maisaka/builtin_tool/reply.py",
+      "sha256": "3a78fb8756f027163f9b83b91a60519f7eba8c7ef1f4d2c724a4cfdbd7216251"
+    },
+    {
+      "path": "src/chat/replyer/retro_prompt.py",
+      "gitBlobSha": "ea96dccb9bf1943c278da00af2241e07f3115544",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/src/chat/replyer/retro_prompt.py",
+      "sha256": "3a13b7c936980f8a2c2add9acb982150894718be0c6e3b1e80784ea91109f024"
+    },
+    {
+      "path": "src/chat/replyer/maisaka_expression_selector.py",
+      "gitBlobSha": "88421df17319450135b8a7e02c5d6afa121ef857",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/src/chat/replyer/maisaka_expression_selector.py",
+      "sha256": "e9b2abf13b7e94e8ca237dedf969f75bacae4262b30440b81058255ea52f83bd"
+    },
+    {
+      "path": "src/learners/weighted_sampling.py",
+      "gitBlobSha": "dd9ad93ae11afb34db4168f55f46a456276f9e4d",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/src/learners/weighted_sampling.py",
+      "sha256": "fa32354ce0fbcb5dee37ec0b2387ece169c08a11d3ae552374f11ab0a87cce0c"
+    },
+    {
+      "path": "src/chat/utils/utils.py",
+      "gitBlobSha": "ec81624c840c20cab47bad0f26edc28e3e60d625",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/src/chat/utils/utils.py",
+      "sha256": "d4009753f6b389226f89d4878e66f04922986ad487e1033e724e0a75ba1d5548"
+    },
+    {
+      "path": "src/chat/utils/llm_sentence_splitter.py",
+      "gitBlobSha": "7f5ac93db5a1f5b0122ca0fe70ff22d2b97fee0b",
+      "sourceUrl": "https://github.com/Mai-with-u/MaiBot/blob/fe88ec6b6053e40eaf430cb5ba7ed7e805add2cb/src/chat/utils/llm_sentence_splitter.py",
+      "sha256": "c9af74a1e9d2c46ae2d105a713a0e0dbd74eb9829752f0a0e1cc6b36ac95811a"
+    }
+  ],
+  "derivedResources": [
+    {
+      "path": "../persona-source.json",
+      "source": "src/config/official_configs.py",
+      "extraction": "PersonalityConfig field defaults, extracted with Python AST without executing upstream code"
+    },
+    {
+      "path": "../attention-drift.json",
+      "source": "src/maisaka/attention_drift.py",
+      "extraction": "Exact rule dictionaries and localized template text, with f-string fields retained as placeholders"
+    },
+    {
+      "path": "../chat-source.json",
+      "source": "src/config/official_configs.py",
+      "extraction": "private_chat_prompts default, extracted with Python AST"
+    }
+  ],
+  "translations": [
+    {
+      "path": "../../profiles.mjs",
+      "scope": "Maimai personality, behaviorStyle, replyStyle English",
+      "basis": "Faithful Droy translation of original Chinese defaults; en-US config/prompts locale files do not contain translated persona defaults"
+    },
+    {
+      "path": "../../maibot-prompts.mjs",
+      "scope": "Private-chat guidance, alternate styles and runtime-only helper messages",
+      "basis": "Original Chinese defaults/helper text where available, translated into paired English resources; Droy-only adaptations are paired directly"
+    },
+    {
+      "path": "../tool-copy.mjs",
+      "scope": "Reply tool parameter descriptions English",
+      "basis": "Paired translation of upstream Chinese, with media references adapted to available Droy capabilities"
+    }
+  ]
+}

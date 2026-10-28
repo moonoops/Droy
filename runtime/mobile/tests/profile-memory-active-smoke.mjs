@@ -29,6 +29,7 @@ const nativeBridge = createServer(async (req, res) => {
   }
   if (req.url === '/memory' && input.operation === 'settings') Object.assign(memoryState.settings, input.patch);
   const result = req.url === '/memory' ? memoryState : req.url === '/history' ? { config: { activityEnabled: false, locationEnabled: false }, running: false }
+    : req.url === '/clock' ? { now: Date.now(), timeZone: 'Asia/Shanghai' }
     : req.url === '/companion' ? companionState : { pluginActive: true, localEnabled: true, appsEnabled: false, channels: [] };
   res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, result }));
 });

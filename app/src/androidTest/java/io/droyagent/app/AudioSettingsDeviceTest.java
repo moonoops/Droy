@@ -45,15 +45,15 @@ public final class AudioSettingsDeviceTest {
 
     @Before public void setUp() throws Exception {
         instrumentation=InstrumentationRegistry.getInstrumentation();
-        boolean landscape="true".equals(InstrumentationRegistry.getArguments().getString("layoutLandscape"));
         UiAutomation automation=instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
-        if(landscape) assertTrue("Landscape fixture requires a dedicated emulator",isEmulator());
         context=instrumentation.getTargetContext();
         assertTrue("Stop existing tasks and engine before audio UI acceptance",RuntimeService.canManageHistory());
         assertTrue("Do not interrupt an existing recording",AudioCapture.get(context).uiStatus().isNull("active"));
         preferences=ProductPermissions.preferences(context);
         for(String key:KEYS) if(preferences.contains(key)) saved.put(key,preferences.getBoolean(key,true));
         ownsRuntime=true;
+        assertTrue("UiAutomation did not establish portrait orientation",automation.setRotation(UiAutomation.ROTATION_FREEZE_0));
+        rotated=true;
         Bundle args=InstrumentationRegistry.getArguments();
         if(args.containsKey("layoutMaxTextFont")||args.containsKey("layoutTheme")) {
             assertTrue("Theme/font variants only run on a dedicated emulator",isEmulator());
@@ -72,11 +72,7 @@ public final class AudioSettingsDeviceTest {
             +"const entry={kind,x:e.clientX,y:e.clientY,tag:e.target.tagName,role:e.target.getAttribute('role'),preference:e.target.closest('[data-droy-preference]')?.getAttribute('data-droy-preference'),open:e.target.open};"
             +"window.__droyAudioTouches.push(entry);queueMicrotask(()=>entry.prevented=e.defaultPrevented);"
             +"if(window.__droyAudioTouches.length>24)window.__droyAudioTouches.shift()},true)})()");
-        if(landscape) {
-            assertTrue("UiAutomation did not accept landscape rotation",automation.setRotation(UiAutomation.ROTATION_FREEZE_90));
-            rotated=true;
-            DeviceUi.await("The Activity never reached a landscape viewport",5000,()->ui.truth("innerWidth>innerHeight"));
-        }
+        DeviceUi.await("The Activity never reached a portrait viewport",5000,()->ui.truth("innerHeight>innerWidth"));
         ui.evaluate("(()=>{for(const h of document.querySelectorAll('[role=dialog] h2')){if(!['开始使用','Get started'].includes(h.textContent.trim()))continue;"
             +"h.closest('[role=dialog]').querySelector('button[aria-label=关闭],button[aria-label=Close]')?.click()}})()");
     }
@@ -295,7 +291,7 @@ public final class AudioSettingsDeviceTest {
 
     private void tapControl(String selector) throws Exception {
         lastTarget=selector;
-        if(rotated) assertTrue("Landscape rotation was lost before touching "+selector,ui.truth("innerWidth>innerHeight"));
+        assertTrue("Portrait orientation was lost before touching "+selector,ui.truth("innerHeight>innerWidth"));
         // The shared helper may return a target inside the window but covered by
         // the sticky settings header. Reveal it inside the actual scroll viewport.
         for(int attempt=0;attempt<40;attempt++) {
@@ -355,7 +351,7 @@ public final class AudioSettingsDeviceTest {
 
     private void reportViewport() throws Exception {
         JSONObject viewport=(JSONObject)ui.evaluate("({width:innerWidth,height:innerHeight,font:getComputedStyle(document.body).getPropertyValue('--dsh-content-font-size'),theme:document.documentElement.getAttribute('data-ds-theme-source')})");
-        if(rotated) assertTrue("Landscape rotation was lost: "+viewport,viewport.getInt("width")>viewport.getInt("height"));
+        assertTrue("Portrait orientation was lost: "+viewport,viewport.getInt("height")>viewport.getInt("width"));
         java.util.concurrent.atomic.AtomicInteger zoom=new java.util.concurrent.atomic.AtomicInteger();
         android.webkit.WebView view=ui.web();
         instrumentation.runOnMainSync(()->zoom.set(view.getSettings().getTextZoom()));

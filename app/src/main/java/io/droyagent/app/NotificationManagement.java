@@ -157,9 +157,11 @@ final class NotificationManagement {
         queueAccessCheck();
     }
 
-    synchronized JSONObject request(JSONObject request) throws Exception {
+    synchronized JSONObject request(JSONObject request) throws Exception { return request(request, true); }
+
+    synchronized JSONObject request(JSONObject request, boolean includeApps) throws Exception {
         switch (request.getString("operation")) {
-            case "get": return state();
+            case "get": return state(includeApps);
             case "archive": return new JSONObject().put("items", archive());
             case "configure": {
                 Boolean nextEnabled = booleanOption(request, "enabled"), nextCloud = booleanOption(request, "cloudAnalysisEnabled");
@@ -181,7 +183,7 @@ final class NotificationManagement {
                 BackgroundRuntime.settingsChanged(context);
                 if (!enabled()) { cancelManaged(); error = ""; }
                 rescan();
-                return state();
+                return state(includeApps);
             }
             case "setAppMode": {
                 String packageName = NotificationManagementRules.packageName(request.get("packageName"));
@@ -189,7 +191,7 @@ final class NotificationManagement {
                 if (!installedApps().containsKey(packageName)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("此应用不支持通知接管", "Notification management is not supported for this app"));
                 JSONObject exceptions = config.getJSONObject("exceptions");
                 if (mode.equals("managed")) exceptions.remove(packageName); else exceptions.put(packageName, mode);
-                changed(); rescan(); return state();
+                changed(); rescan(); return state(includeApps);
             }
             case "upsertRule": {
                 JSONArray next = new JSONArray(), rules = config.getJSONArray("rules");
@@ -203,25 +205,32 @@ final class NotificationManagement {
                     if (!rules.getJSONObject(i).getString("id").equals(rule.getString("id"))
                             && !rules.getJSONObject(i).getString("packageName").equals(rule.getString("packageName"))) next.put(rules.get(i));
                 if (next.length() >= 100) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("规则过多", "Too many rules"));
-                next.put(rule); config.put("rules", next); changed(); rescan(); return state();
+                next.put(rule); config.put("rules", next); changed(); rescan(); return state(includeApps);
             }
             case "deleteRule": {
                 String id = NotificationManagementRules.text(request.get("id"), 80, false);
                 JSONArray next = new JSONArray(), rules = config.getJSONArray("rules");
                 for (int i = 0; i < rules.length(); i++) if (!rules.getJSONObject(i).getString("id").equals(id)) next.put(rules.get(i));
-                config.put("rules", next); changed(); rescan(); return state();
+                config.put("rules", next); changed(); rescan(); return state(includeApps);
             }
             default: throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("通知管理操作无效", "Invalid notification management operation"));
         }
     }
 
-    synchronized JSONObject state() throws Exception {
+    synchronized JSONObject state() throws Exception { return state(true); }
+
+    synchronized JSONObject state(boolean includeApps) throws Exception {
         queueAccessCheck();
         JSONArray apps = new JSONArray(), exceptions = new JSONArray();
-        for (Map.Entry<String, String> app : installedApps().entrySet()) {
+        Map<String, String> visibleApps = includeApps ? installedApps() : new LinkedHashMap<>();
+        if (!includeApps) for (java.util.Iterator<String> keys = config.getJSONObject("exceptions").keys(); keys.hasNext();) {
+            String key = keys.next();
+            if (applicationNames.containsKey(key)) visibleApps.put(key, applicationNames.get(key));
+        }
+        for (Map.Entry<String, String> app : visibleApps.entrySet()) {
             String mode = appMode(app.getKey());
             Boolean confirmed = silentApps.get(app.getKey());
-            if (confirmed == null) confirmed = channels.packageSilent(app.getKey());
+            if (confirmed == null && includeApps) confirmed = channels.packageSilent(app.getKey());
             JSONObject item = new JSONObject().put("packageName", app.getKey()).put("label", app.getValue())
                     .put("mode", mode).put("managed", !mode.equals("allow"))
                     .put("silent", confirmed == null ? JSONObject.NULL : confirmed);
@@ -232,7 +241,7 @@ final class NotificationManagement {
         JSONObject autoSilence = new JSONObject(channels.status().toString());
         if (scanQueued || applyingChannels) autoSilence.put("state", "syncing").put("message", "");
         autoSilence.put("actionRequired", !autoSilence.optString("state").equals("ready") && !autoSilence.optString("message").isEmpty());
-        return new JSONObject().put("enabled", enabled()).put("revision", revision()).put("apps", apps)
+        return new JSONObject().put("enabled", enabled()).put("revision", revision()).put("apps", includeApps ? apps : null)
                 .put("exceptions", exceptions).put("rules", new JSONArray(config.getJSONArray("rules").toString()))
                 .put("reminderMinutes", config.optInt("reminderMinutes", 5)).put("cloudAnalysisEnabled", config.optBoolean("cloudAnalysisEnabled", true)).put("autoSilence", autoSilence)
                 .put("permissionGranted", access.optBoolean("permissionGranted")).put("connected", listener != null && access.optBoolean("connected"))
@@ -361,12 +370,14 @@ final class NotificationManagement {
         for (ResolveInfo alarm : packages.queryIntentActivities(new Intent(AlarmClock.ACTION_SET_ALARM), 0))
             protectedApps.add(alarm.activityInfo.packageName);
         List<ApplicationInfo> applications = new ArrayList<>(packages.getInstalledApplications(0));
-        applications.sort(Comparator.comparing(info -> info.loadLabel(packages).toString(), String.CASE_INSENSITIVE_ORDER));
-        Map<String, String> names = new LinkedHashMap<>();
+        Map<String, String> eligible = new LinkedHashMap<>();
         for (ApplicationInfo info : applications)
             if (NotificationManagementRules.eligibleApplication(info.packageName, info.uid,
                     (info.flags & ApplicationInfo.FLAG_SYSTEM) != 0, launchable.contains(info.packageName),
-                    context.getPackageName(), protectedApps)) names.put(info.packageName, info.loadLabel(packages).toString());
+                    context.getPackageName(), protectedApps)) eligible.put(info.packageName, info.loadLabel(packages).toString());
+        Map<String, String> names = new LinkedHashMap<>();
+        eligible.entrySet().stream().sorted(Map.Entry.comparingByValue(String.CASE_INSENSITIVE_ORDER))
+                .forEach(entry -> names.put(entry.getKey(), entry.getValue()));
         applicationNames = names;
         return new LinkedHashMap<>(names);
     }

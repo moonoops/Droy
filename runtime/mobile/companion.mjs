@@ -45,15 +45,17 @@ export function installCompanionIdentity(ctx, bridge) {
   // assembly waterfall, as the upstream working-directory provider does.
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     if (!context.agent) return next();
-    const value = await bridge.companion(context.signal);
+    const companions = ctx.get('droyCompanions');
+    const value = companions ? await companions.identityForAgent(context.agent) : await bridge.companion(context.signal);
+    if (!value) { snapshots.delete(context.agent); return next(); }
     let imageInput = 'unknown';
     const { provider, model } = context.agent.options ?? {};
-    if (provider && model && ctx.get('llm')) {
+    if (!companions && provider && model && ctx.get('llm')) {
       const info = await ctx.llm.resolveModelInfo(provider, model, context.signal);
       imageInput = info.inputModalities === undefined ? 'unknown' : info.inputModalities.includes('image') ? 'supported' : 'unsupported';
     }
     const locale = resolveMobileLocale(ctx);
-    const text = identityText(value, locale) + '\n' + runtimeText(value.runtime, imageInput, locale);
+    const text = identityText(value, locale) + (companions ? '' : '\n' + runtimeText(value.runtime, imageInput, locale));
     context.signal?.throwIfAborted();
     snapshots.set(context.agent, text);
     const assembly = await next();

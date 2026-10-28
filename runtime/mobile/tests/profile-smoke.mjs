@@ -28,7 +28,7 @@ const nativeBridge=createServer(async(req,res)=>{
  const memoryState={settings:{enabled:false,recallEnabled:true,automaticExtraction:false,privacyEverActivated:false},
    root:{authorized:false,checkedAt:0},execution:{ready:false,reason:'MEMORY_DISABLED'}};
  const historyState={config:{activityEnabled:false,locationEnabled:false},running:false};
- res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,result:req.url==='/memory'?memoryState:req.url==='/history'?historyState:req.url==='/companion'?companionState:nativeState}));
+ res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,result:req.url==='/memory'?memoryState:req.url==='/history'?historyState:req.url==='/clock'?{now:Date.now(),timeZone:'Asia/Shanghai'}:req.url==='/companion'?companionState:nativeState}));
 });
 await new Promise(resolve=>nativeBridge.listen(0,'127.0.0.1',resolve));
 Object.assign(process.env,{DSH_HOME:home,DROY_RUNTIME_DIR:runtime,DROY_LOCALE:'zh',DROY_WEB_TOKEN:token,DROY_BRIDGE_TOKEN:token,DROY_BRIDGE_PORT:String(nativeBridge.address().port),DROY_WEB_PORT:String(port),DSH_TELEMETRY_DISABLED:'1'});
@@ -72,8 +72,13 @@ try {
  assert.ok([...ctx.registry.values()].some(runtime=>[...runtime.fibers].some(fiber=>fiber.entry?.options?.name==='@deepseek-ai/dsh-experimental-client-ui-voice-input'&&!fiber.entry.disabled)),'DSH voice plugin must be enabled in the actual profile');
  assert.ok(ctx.get('sessionController'),'chat controller must be active');
  assert.ok(ctx.get('droyInitialization')?.ready);assert.ok(ctx.get('droyLifecycle'));
- const initial=ctx.workspaceRegistry.list();assert.equal(initial.length,1);assert.equal(initial[0].path,await realpath(join(home,'workspace')));
+ const companionDeadline=Date.now()+5000;while(!ctx.get('droyCompanions')&&Date.now()<companionDeadline)await new Promise(resolve=>setTimeout(resolve,10));
+ assert.ok(ctx.get('droyCompanions'),'non-Root companion service must activate');
+ const defaultPath=await realpath(join(home,'workspace'));
+ const initial=ctx.workspaceRegistry.list().filter(workspace=>workspace.path===defaultPath);assert.equal(initial.length,1);
+ assert.equal(ctx.workspaceRegistry.list().length,3,'default workspace and the two managed companion workspaces');
  assert.equal(initial[0].title,'默认空间');
+ assert.equal(ctx.get('droyInitialization').defaultWorkspaceId,initial[0].id,'mobile initialization exposes the durable default identity');
  const same=await ctx.workspaceRegistry.initializeDefault(async()=>{throw new Error('Must reuse existing default');});assert.equal(same.id,initial[0].id);
  for(const agentPreset of expectedPresets){
   const created=await ctx.sessionController.create({workspaceId:initial[0].id,agentPreset});
@@ -98,7 +103,7 @@ try {
   const prompt=assembled.sections.map(section=>section.text).join('\n\n');
   assert.equal(prompt.split(persona).length-1,1,`${agentPreset}: final packaged assembly must include Android defaults once`);
   assert.equal(prompt.split(defaultCompanionPersona).length-1,1,`${agentPreset}: default companion personality must be included once`);
-  assert.ok(assembled.contexts.find(context=>context.name===COMPANION_CONTEXT)?.text.includes(JSON.stringify(companionState)),`${agentPreset}: current companion identity must survive persona selection`);
+  assert.ok(!assembled.contexts.find(context=>context.name===COMPANION_CONTEXT)?.text,`${agentPreset}: default work must remain neutral without a companion identity`);
   assert.ok(!prompt.includes('You are a coding agent'),`${agentPreset}: stale default coding identity`);
   const baseTools=assembled.tools.map(tool=>tool.name);
   if(agentPreset==='standard'){
@@ -151,6 +156,7 @@ try {
  assert.match(JSON.stringify(locale),/"preference":"zh"/);
  for(const path of ['/','/api','/droy/preferences','/droy/ready','/droy/shutdown','/droy/notify/plugin','/assets/unknown.js'])assert.equal((await fetch(`http://127.0.0.1:${port}${path}`)).status,401);
  const cookie=`droy_session=${token}`;
+ const companionRoot=await fetch(`http://127.0.0.1:${port}/droy/companions`,{headers:{cookie}});assert.equal(companionRoot.status,200);assert.equal((await companionRoot.json()).defaultWorkspaceId,initial[0].id);
  const ready=await fetch(`http://127.0.0.1:${port}/droy/ready`,{headers:{cookie}});assert.equal(ready.status,200);const readiness=await ready.json();assert.equal(readiness.ready,true);assert.equal(readiness.dshVersion,expectedDsh);assert.equal(readiness.mobileVersion,expectedMobile);
  const login=await fetch(`http://127.0.0.1:${port}/?token=${token}`,{headers:{cookie},redirect:'manual'});
  assert.equal(login.status,303);assert.ok(login.headers.get('set-cookie').includes('HttpOnly'));

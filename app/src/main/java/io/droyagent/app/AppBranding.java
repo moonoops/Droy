@@ -34,17 +34,21 @@ final class AppBranding {
 
     static JSONObject state(Context context, SharedPreferences preferences) throws Exception {
         JSONObject base = defaults(context);
-        JSONObject backgrounds = new JSONObject(preferences.getString("brandLogoBackgrounds", "{}"));
-        String petId = preferences.getString("petId", "default");
-        return new JSONObject().put("name", name(context, preferences))
+        return logoState(preferences.getString("brandLogoBackgrounds", "{}")).put("name", name(context, preferences))
             .put("sidebarLabel", preferences.getString("brandSidebarLabel", base.getString("sidebarLabel")))
             .put("heroBadge", preferences.getString("brandHeroBadge", base.getString("heroBadge")))
             .put("welcomeTemplate", preferences.getString("brandWelcomeTemplate", defaultTemplate(base, "welcomeTemplate")))
             .put("composerTemplate", preferences.getString("brandComposerTemplate", defaultTemplate(base, "composerTemplate")))
-            .put("logoPetId", petId)
-            .put("logoBackgrounds", backgrounds.opt(petId)).put("logoBackgroundsByPet", backgrounds)
-            .put("logoUrl", "/droy/branding/installed-logo")
             .put("dshVersion", RuntimeInstaller.release(context).dshVersion);
+    }
+
+    static JSONObject logoState(String stored) throws Exception {
+        JSONObject backgrounds = new JSONObject(stored);
+        // Keep existing wire keys and saved pet palettes without using the
+        // selected pet to choose the product's installed logo or its colors.
+        return new JSONObject().put("logoPetId", "default")
+            .put("logoBackgrounds", backgrounds.opt("default")).put("logoBackgroundsByPet", backgrounds)
+            .put("logoUrl", "/droy/branding/installed-logo");
     }
 
     private static String defaultTemplate(JSONObject base, String key) throws org.json.JSONException {
@@ -60,9 +64,9 @@ final class AppBranding {
         return key.equals("brandSidebarLabel") || key.equals("brandHeroBadge") || key.equals("brandWelcomeTemplate") || key.equals("brandComposerTemplate");
     }
 
-    static String updateLogoBackgrounds(String stored, String activePetId, JSONObject args) throws Exception {
+    static String updateLogoBackgrounds(String stored, JSONObject args) throws Exception {
         String petId = args.getString("petId");
-        if (!petId.equals(activePetId)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("伙伴形象已切换，请重新打开底色设置", "Companion artwork changed. Please reopen background settings"));
+        if (!petId.equals("default")) throw new IllegalArgumentException(NativeLocale.text("请重新打开产品标志底色设置", "Please reopen the product logo background settings"));
         JSONObject palettes = new JSONObject(stored);
         if (args.has("reset") && NativeUiProtocol.booleanArgument(args, "reset")) palettes.remove(petId);
         else palettes.put(petId, new JSONObject().put("light", logoColor(args.get("light"))).put("dark", logoColor(args.get("dark"))));

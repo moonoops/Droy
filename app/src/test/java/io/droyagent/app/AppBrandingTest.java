@@ -5,27 +5,30 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class AppBrandingTest {
-    @Test public void logoColorsAreAtomicAndBelongToTheSelectedCompanion() throws Exception {
+    @Test public void productLogoAndColorsDoNotSelectSavedPetArtwork() throws Exception {
         String custom = "a00b0000-0000-4000-8000-000000000001";
-        String stored = AppBranding.updateLogoBackgrounds("{}", "default", new JSONObject()
+        JSONObject petColors = new JSONObject().put("light", "#4A4650").put("dark", "#37333D");
+        String stored = AppBranding.updateLogoBackgrounds(new JSONObject().put(custom, petColors).toString(), new JSONObject()
             .put("petId", "default").put("light", "#f2eee7").put("dark", "#d8d3cb"));
-        JSONObject palettes = new JSONObject(stored);
-        assertEquals("#F2EEE7", palettes.getJSONObject("default").getString("light"));
-        stored = AppBranding.updateLogoBackgrounds(stored, custom, new JSONObject()
-            .put("petId", custom).put("light", "#4A4650").put("dark", "#37333D"));
-        String updated = AppBranding.updateLogoBackgrounds(stored, custom, new JSONObject().put("petId", custom).put("reset", true));
-        assertFalse(new JSONObject(updated).has(custom));
-        assertEquals(palettes.toString(), new JSONObject(updated).toString());
-        assertThrows(IllegalArgumentException.class, () -> AppBranding.updateLogoBackgrounds("{}", "default",
+        JSONObject state = AppBranding.logoState(stored);
+        assertEquals("default", state.getString("logoPetId"));
+        assertEquals("/droy/branding/installed-logo", state.getString("logoUrl"));
+        assertEquals("#F2EEE7", state.getJSONObject("logoBackgrounds").getString("light"));
+        assertEquals(petColors.toString(), state.getJSONObject("logoBackgroundsByPet").getJSONObject(custom).toString());
+        String reset = AppBranding.updateLogoBackgrounds(stored, new JSONObject().put("petId", "default").put("reset", true));
+        assertFalse(new JSONObject(reset).has("default"));
+        assertEquals(petColors.toString(), new JSONObject(reset).getJSONObject(custom).toString());
+        assertFalse("A saved pet palette must not become the product fallback", AppBranding.logoState(reset).has("logoBackgrounds"));
+        assertThrows(IllegalArgumentException.class, () -> AppBranding.updateLogoBackgrounds(stored,
             new JSONObject().put("petId", custom).put("light", "#FFFFFF").put("dark", "#000000")));
     }
 
     @Test public void logoColorsRejectCssInjectionTransparencyAndCoercedValues() {
         for (Object color : new Object[]{"transparent", "red", "#FFF", "#FFFFFF00", "url(example)", "#fff;display:none", 123, JSONObject.NULL}) {
-            assertThrows(IllegalArgumentException.class, () -> AppBranding.updateLogoBackgrounds("{}", "default",
+            assertThrows(IllegalArgumentException.class, () -> AppBranding.updateLogoBackgrounds("{}",
                 new JSONObject().put("petId", "default").put("light", "#F2EEE7").put("dark", color)));
         }
-        assertThrows(IllegalArgumentException.class, () -> AppBranding.updateLogoBackgrounds("{}", "default",
+        assertThrows(IllegalArgumentException.class, () -> AppBranding.updateLogoBackgrounds("{}",
             new JSONObject().put("petId", "default").put("reset", "true")));
     }
 

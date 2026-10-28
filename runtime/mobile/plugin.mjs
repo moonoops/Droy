@@ -19,6 +19,7 @@ import { installSetupServices } from './setup.mjs';
 import { resolveMobileLocale } from './locale.mjs';
 import { translateBackendText } from './backend-i18n.mjs';
 import { protectHardwareDisclosure } from './hardware-disclosure.mjs';
+import { installCompanions } from './companions/host.mjs';
 
 export const name = 'droy-android-use';
 export const inject = ['tools', 'llm', 'attachments', 'webServer', 'settings', 'agents', 'userQuestions', 'systemPrompt', 'droyPluginPolicy'];
@@ -29,6 +30,7 @@ export function apply(ctx) {
   const getLocale = () => resolveMobileLocale(ctx);
   const message = text => translateBackendText(text, getLocale());
   const bridge = createBridge({ getLocale });
+  installCompanions(ctx,bridge);
   installSetupServices(ctx, bridge);
   const audio = installAudioServices(ctx, bridge);
   installCompanionIdentity(ctx, bridge);
@@ -54,12 +56,14 @@ export function apply(ctx) {
   }));
   ctx.webServer.register({ kind:'exact', path:'/droy/ready', async handler(req,res) {
     if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
-    const required = ['sessionController','tools','settings','agents','agentPresets','attachments','llm','connection','workspaceRegistry','droyInitialization','droyLifecycle','droyPluginPolicy'];
+    const required = ['sessionController','tools','settings','agents','agentPresets','attachments','llm','connection','workspaceRegistry','droyInitialization','droyLifecycle','droyPluginPolicy','droyCompanions'];
     const tools = ctx.tools.schemas().map(tool => tool.name);
-    const ready = !ctx.get('droyLifecycle')?.stopping && required.every(service => ctx.get(service) !== undefined)
+    const pendingServices=required.filter(service=>ctx.get(service)===undefined);
+    const ready = !ctx.get('droyLifecycle')?.stopping && !pendingServices.length
+      && ctx.get('droyCompanionStartup')?.phase==='ready'
       && definitions.every(tool => tools.includes(tool.name));
     res.writeHead(ready ? 200 : 503, {'Content-Type':'application/json','Cache-Control':'no-store'});
-    res.end(JSON.stringify({ready,...runtimeVersions}));
+    res.end(JSON.stringify({ready,...runtimeVersions,...(!ready?{pendingServices,companions:ctx.get('droyCompanionStartup')}:{})}));
   } });
   ctx.webServer.register({ kind:'exact', path:'/droy/preferences', async handler(req,res) {
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }

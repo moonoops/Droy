@@ -15,5 +15,11 @@ export function composeMobileClient(client, touch, usage = readFileSync(new URL(
   const copyMarker = '/* DROY_UI_COPY_MODULE */';
   if (client.split(copyMarker).length !== 2) throw new Error('Mobile UI copy marker must occur exactly once');
   const copy = readFileSync(new URL('../runtime/mobile/ui-copy.js', import.meta.url), 'utf8');
-  return client.replace(copyMarker, () => copy).replace(marker, () => touch).replace(usageMarker, () => usage).replace(setupMarker, () => setup);
+  const companionMarker = '/* DROY_COMPANION_MODULE */';
+  if (client.split(companionMarker).length !== 2) throw new Error('Mobile companion module marker must occur exactly once');
+  const companionFiles = ['copy.js','client.js','input-adapters.js'];
+  const companion = companionFiles.map(file => readFileSync(new URL('../runtime/mobile/companions/' + file, import.meta.url), 'utf8')).join('\n');
+  const companionStyles = readFileSync(new URL('../runtime/mobile/companions/client.css', import.meta.url), 'utf8');
+  return client.replace(copyMarker, () => copy).replace(marker, () => touch).replace(usageMarker, () => usage).replace(setupMarker, () => setup)
+    .replace(companionMarker, () => 'const DROY_COMPANION_STYLES = ' + JSON.stringify(companionStyles) + ';\n' + companion);
 }

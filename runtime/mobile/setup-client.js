@@ -1,15 +1,3 @@
-function setupPermissionFor(preference) {
-  return ({ allowObserve: 'accessibility', allowControl: 'accessibility', allowScreenshot: 'accessibility',
-    allowCalendar: 'calendar', allowContacts: 'contacts', allowNotifications: 'notificationAccess',
-    allowUsage: 'usage', allowPrivacyUsage: 'usage', allowDiagnostics: 'usage',
-    allowAudioMicrophone: 'microphone', allowSettingsWrite: 'brightness',
-    allowLocationRead: 'location', allowBluetoothRead: 'bluetooth', allowBluetoothControl: 'bluetooth',
-    allowWifiRead: 'wifiScan', allowWifiControl: 'nearbyWifi', allowCellularRead: 'phoneState',
-    allowNfcRead: 'nfcSettings', allowNfcWrite: 'nfcSettings', allowNfcEmulation: 'nfcSettings',
-    allowActivitySensors: 'activityRecognition', allowBodySensors: 'bodySensors',
-    allowFiles: 'file', allowFileExport: 'directory' })[preference] || null;
-}
-
 function installSetupClient({ ctx, React, h, Input, target, doc, bridge, controller, useState,
   actionButton, Permissions, BrandMark, PetStudio }) {
   let disposed = false;
@@ -30,7 +18,6 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
 [data-droy-setup-model-settings] input,[data-droy-setup-model-settings] select{min-height:48px;min-width:0;max-width:100%;box-sizing:border-box}
 @media(max-width:360px){.droy-setup-head{padding:14px 16px 8px}.droy-setup-main{padding:6px 16px 20px}.droy-setup-footer-inner{padding-left:16px;padding-right:16px}}
 @media(max-height:420px){.droy-setup-head{padding-top:6px;padding-bottom:4px}.droy-setup-progress{margin-bottom:4px}.droy-setup-footer-inner{padding-top:6px}.droy-setup-main{padding-top:0}.droy-setup-main h1{font-size:1.35em}}
-@media(orientation:landscape){html[data-droy-ime-visible="true"] .droy-setup{display:block;overflow:auto}html[data-droy-ime-visible="true"] .droy-setup-head{display:none}html[data-droy-ime-visible="true"] .droy-setup-scroll{overflow:visible}html[data-droy-ime-visible="true"] .droy-setup-main{padding-top:8px}html[data-droy-ime-visible="true"] .droy-setup-field textarea{min-height:calc(1.5em + 24px);height:clamp(calc(1.5em + 24px),calc(100dvh - var(--droy-ime-bottom,0px) - var(--droy-safe-top,0px) - 16px),112px);resize:none}}
 `;
   doc.head.appendChild(style);
 
@@ -50,33 +37,28 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
     } finally { target.clearTimeout(timer); requests.delete(abort); }
   }
 
-  function Identity({ snapshot, prefix = 'droy-setup', onSaved, onDraft, includeName = true }) {
+  function Identity({ snapshot, prefix = 'droy-setup', onSaved, onDraft }) {
     useDroyLocale();
     const identity = snapshot.state?.setup?.identity || {};
-    const saved = { companionName: identity.companionName || snapshot.state?.petName || 'Droy',
-      userAddress: identity.userAddress || '', personality: identity.personality || '' };
+    const saved = { userAddress: identity.userAddress || '' };
     const [draft, setDraft] = React.useState(saved);
-    React.useEffect(() => setDraft(saved), [saved.companionName, saved.userAddress, saved.personality]);
-    React.useEffect(() => { onDraft?.(draft); }, [draft.companionName, draft.userAddress, draft.personality]);
+    React.useEffect(() => setDraft(saved), [saved.userAddress]);
+    React.useEffect(() => { onDraft?.(draft); }, [draft.userAddress]);
     const pending = snapshot.pending !== null;
-    const field = (key, label, limit, multiline = false, hint = '') => h('label', { className: 'droy-setup-field', htmlFor: `${prefix}-${key === 'companionName' ? 'name' : key === 'userAddress' ? 'address' : 'personality'}` },
-      h('span', null, label), h(multiline ? 'textarea' : Input, {
-        id: `${prefix}-${key === 'companionName' ? 'name' : key === 'userAddress' ? 'address' : 'personality'}`,
-        className: 'droy-input', value: draft[key], maxLength: limit, disabled: pending,
-        placeholder: hint, onChange: event => setDraft(value => ({ ...value, [key]: event.target.value })),
-      }));
     const save = async () => {
       try { await controller.run('setupUpdate', draft); onSaved?.(); }
       catch { /* The shared settings feedback retains the save error. */ }
     };
     const dirty = Object.keys(saved).some(key => draft[key] !== saved[key]);
-    return h('div', { className: 'droy-setup-identity', 'data-droy-general': 'companionIdentity' },
-      includeName ? field('companionName', droyText("Droy 的名称"), 40) : null,
-      field('userAddress', droyText("Droy 怎么称呼你"), 40, false, droyText("可留空，例如：小林")),
-      field('personality', droyText("性格"), 1000, true, droyText("留空使用当前形象的默认性格")),
-      h('p', { className: 'droy-description' }, droyText("之后可在设置中修改。")),
+    return h('div', { className: 'droy-setup-identity', 'data-droy-general': 'welcomeAddress' },
+      h('label', { className: 'droy-setup-field', htmlFor: `${prefix}-address` },
+        h('span', null, droyText("欢迎页怎么称呼你（可选）")), h(Input, {
+          id: `${prefix}-address`, className: 'droy-input', value: draft.userAddress, maxLength: 40, disabled: pending,
+          placeholder: droyText("可留空，例如：小林"), onChange: event => setDraft({ userAddress: event.target.value }),
+        })),
+      h('p', { className: 'droy-description' }, droyText("只用于安装完成后的欢迎语，不会设置聊天伙伴的人设。")),
       onSaved ? null : h('div', { className: 'droy-actions' }, actionButton({ 'data-droy-setup-save-identity': true,
-        disabled: pending || !draft.companionName.trim() || (!dirty && !onSaved), onClick: save }, onSaved ? droyText("保存并继续") : droyText("保存个性化配置"))),
+        disabled: pending || (!dirty && !onSaved), onClick: save }, onSaved ? droyText("保存并继续") : droyText("保存称呼"))),
       snapshot.error ? h('p', { className: 'droy-error', role: 'alert' }, droyText(snapshot.error)) : null);
   }
 
@@ -84,7 +66,7 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
     useDroyLocale();
     const snapshot = useState();
     return h('section', { className: 'droy-row droy-setup-identity' }, h('div', { className: 'droy-row-copy' },
-      h('h3', { className: 'droy-section-title' }, droyText("伙伴名字、称呼与性格")), h(Identity, { snapshot, prefix: 'droy-identity' })));
+      h('h3', { className: 'droy-section-title' }, droyText("欢迎页称呼")), h(Identity, { snapshot, prefix: 'droy-identity' })));
   }
 
   function InstallationSettings() {
@@ -192,7 +174,7 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
   }
 
   function Setup() {
-    const steps = [droyText("欢迎"), droyText("模型配置"), droyText("环境准备"), droyText("个性化"), droyText("权限与验证"), droyText("欢迎使用")];
+    const steps = [droyText("欢迎"), droyText("模型配置"), droyText("环境准备"), droyText("认识伙伴"), droyText("权限与验证"), droyText("欢迎使用")];
 
     useDroyLocale();
     const snapshot = useState();
@@ -237,7 +219,7 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
       target.addEventListener('droy-model-updated', reload);
       reload(); target.addEventListener('focus', reload); doc.addEventListener('visibilitychange', visible);
       return () => { current = false; for (const unsubscribe of unsubscribers) unsubscribe?.(); target.removeEventListener('droy-model-updated', reload); target.removeEventListener('focus', reload); doc.removeEventListener('visibilitychange', visible); };
-    }, [active, step]);
+    }, [active, step, setup?.mode, JSON.stringify(setup?.capabilities)]);
     React.useEffect(() => {
       if (!active || step !== 3 || snapshot.state?.setupComponents?.downloadState !== 'downloading') return;
       const timer = target.setInterval(() => controller.refresh().catch(() => {}), 1000);
@@ -327,15 +309,17 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
         h('div', { className: 'droy-actions' }, actionButton({ onClick: () => run(() => controller.run('requestPermission', { name: 'aboutPhone' })) }, droyText("打开关于手机")),
           actionButton({ onClick: () => run(() => controller.run('requestPermission', { name: 'development' })) }, droyText("打开开发者选项")))) : null);
     if (step === 4) body = h(React.Fragment, null,
-      h('h1', { tabIndex: -1, 'data-droy-setup-title': true }, droyText("认识你的 Droy")), h(BrandMark, { size: 72 }),
+      h('h1', { tabIndex: -1, 'data-droy-setup-title': true }, droyText("认识伙伴")),
+      h('p', null, droyText("默认有咔咔和麦麦两个聊天伙伴，聊天和记忆各自独立。")),
+      h('p', { className: 'droy-setup-description' }, droyText("首次聊天会使用你在前面配置的模型；之后可在各自资料页更换。")),
+      h('p', { className: 'droy-setup-description' }, droyText("聊天与记忆无需 Root。手机操作从工作台发起，权限可按需开启。")),
       h(Identity, { snapshot, onDraft: setIdentityDraft, onSaved: () => navigate(5) }),
-      h('details', null, h('summary', null, droyText("选择或定制伙伴形象")), h(PetStudio, { snapshot })));
+      h('details', null, h('summary', null, droyText("选择或定制宠物形象（可选）")),
+        h('p', { className: 'droy-setup-description' }, droyText("宠物是可选的动态形象，可悬浮显示；这里的设置不会修改咔咔或麦麦。")), h(PetStudio, { snapshot })));
     if (step === 5) body = h(React.Fragment, null,
       h('h1', { tabIndex: -1, 'data-droy-setup-title': true }, droyText("确认权限与可用能力")),
       h('p', { className: 'droy-setup-description' }, droyText("完成所选权限，或关闭不需要的功能。")),
-      h('div', { className: 'droy-actions' }, actionButton({ 'data-droy-setup-dialogue': true, disabled: busy,
-        onClick: () => run(async () => { await change({ mode: 'dialogue' }); updateRemote(await api('verify', {})); }) }, droyText("先使用对话，关闭手机能力"))),
-      h(Permissions, { onboarding: true }),
+      h(Permissions),
       h('details', null, h('summary', null, droyText("无障碍开关无法开启？")),
         h('p', { className: 'droy-setup-description' }, droyText("部分 Android 13 及以上系统会限制侧载应用的敏感设置。确认安装来源可信后，打开 Droy 的应用信息，在右上角菜单选择“允许受限设置”，再返回无障碍设置。菜单名称和位置可能因手机品牌不同。")),
         actionButton({ disabled: busy, onClick: () => run(() => controller.run('requestPermission', { name: 'appDetails' })) }, droyText("打开 Droy 应用信息"))),
@@ -354,8 +338,8 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
       snapshot.state.setupDeviceTest?.error ? h('p', { className: 'droy-error', role: 'alert' }, droyText(snapshot.state.setupDeviceTest.error)) : null,
       h('div', { 'aria-live': 'polite' }, ...checkList));
     if (step === 6) body = h(React.Fragment, null,
-      h(BrandMark, { size: 88 }), h('h1', { tabIndex: -1, 'data-droy-setup-title': true }, droyText("{0}欢迎使用 {1}", [setup.identity?.userAddress ? `${setup.identity.userAddress}${droyLocale?.getSnapshot().active === 'en' ? ', ' : '，'}` : '', setup.identity?.companionName || 'Droy'])),
-      h('p', null, droyText("配置完成，开始和 Droy 对话吧。")),
+      h(BrandMark, { size: 88 }), h('h1', { tabIndex: -1, 'data-droy-setup-title': true }, droyText("{0}欢迎使用 {1}", [setup.identity?.userAddress ? `${setup.identity.userAddress}${droyLocale?.getSnapshot().active === 'en' ? ', ' : '，'}` : '', 'Droy'])),
+      h('p', null, droyText("配置完成，可以在消息里找咔咔或麦麦聊天，也可以进入工作台。")),
       h('p', { className: 'droy-setup-description' }, setup.mode === 'dialogue'
         ? droyText("手机操作尚未开启。需要时，可在“设置 → 权限设置”中开启并完成授权。")
         : droyText("已开启的能力和系统权限，可随时在“设置 → 权限设置”中调整。")));
@@ -387,7 +371,7 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
 
   ctx.slots.inject('settings.models.footer', () => ctx.slots.register({ name: 'settings.models.footer', id: 'droy-default-model', order: 100 }, DefaultModel));
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'droy-setup', order: 100 }, Setup));
-  ctx.slots.inject('settings.general.item', () => ctx.slots.register({ name: 'settings.general.item', id: 'droy-companion-identity', order: 81.5 }, IdentitySettings));
+  ctx.slots.inject('settings.general.item', () => ctx.slots.register({ name: 'settings.general.item', id: 'droy-welcome-address', order: 81.5 }, IdentitySettings));
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({ name: 'settings.general.item', id: 'droy-installation', order: 99 }, InstallationSettings));
   const onFocus = () => {
     if (controller.getSnapshot().state?.setup?.required) controller.refresh().catch(() => {});

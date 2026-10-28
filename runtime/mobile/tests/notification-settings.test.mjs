@@ -44,10 +44,10 @@ function fixture(state = {}, { reveal = false, locale = 'zh' } = {}) {
       observe(element) { this.element = element; }
       disconnect() { this.disconnected = true; }
     } };
-  const make = new Function('React', 'h', 'useState', 'busy', 'submit', 'Feedback', 'Switch', 'Input', 'Modal', 'actionButton', 'button', 'refresh', 'target', 'doc', 'initialReveal', 'language',
+  const make = new Function('React', 'h', 'useState', 'busy', 'submit', 'Feedback', 'Switch', 'Input', 'Modal', 'actionButton', 'button', 'refresh', 'target', 'doc', 'initialReveal', 'language', 'watchSection',
     `let pendingNotificationManagement = initialReveal;${copy}\ndroyLocale = { subscribe() {}, getSnapshot: () => ({active: language}) };\n${components};return {BackgroundRuntime,NotificationSettings,NotificationExceptions};`);
   const rendered = make(React, h, () => snapshot, value => value.pending !== null || !value.state, submit, 'feedback', 'dsh-switch', 'dsh-input', 'dsh-modal', actionButton, button,
-    () => refreshed.push(true), target, doc, reveal, locale);
+    () => refreshed.push(true), target, doc, reveal, locale, () => {});
   const render = (name, props) => { cursor = 0; rendering = name; return rendered[name](props); };
   return { writes, refreshed, snapshot, effects, observers, listeners, options,
     paint() { const next = [...frames.values()]; frames.clear(); next.forEach(callback => callback()); },
@@ -161,7 +161,7 @@ test('new switches keep expanded touch targets and secondary choices have 48px t
   assert.match(source, /\.droy-notification-exceptions-body \.droy-input>input\{[^}]*min-height:48px;height:48px;/);
 });
 
-test('landscape keyboard scrolls the focused search within the whole secondary page', () => {
+test('short keyboard viewport scrolls the focused search within the whole secondary page', () => {
   const ui = fixture(managedState()), tree = ui.exceptions(() => {});
   let focused = true;
   const content = { scrollTop: 0, getBoundingClientRect: () => ({ top: 32, bottom: 107 }) };

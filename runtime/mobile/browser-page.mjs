@@ -68,14 +68,17 @@ export function createNativeBrowserPage(options, { createStore, document, browse
     return queue;
   }
 
-  function viewport() {
-    if (!store.getSnapshot().target || !host || document.visibilityState === 'hidden' || host.isConnected === false) return undefined;
-    if (host.getClientRects && host.getClientRects().length === 0) return undefined;
-    if (host.closest?.('[hidden], [inert], [aria-hidden="true"]')) return undefined;
-    if (view.getComputedStyle?.(host).visibility === 'hidden') return undefined;
-    // Native content must disappear behind DSH's own dialogs and menus.
+  function surfaceVisible() {
+    if (!host || document.visibilityState === 'hidden' || host.isConnected === false) return false;
+    if (host.getClientRects && host.getClientRects().length === 0) return false;
+    if (host.closest?.('[hidden], [inert], [aria-hidden="true"]')) return false;
+    if (view.getComputedStyle?.(host).visibility === 'hidden') return false;
     const overlays = document.querySelectorAll?.('[role="dialog"][aria-modal="true"], [role="menu"], [data-droy-drawer-open="true"]') || [];
-    if (Array.from(overlays).some(node => !node.hasAttribute('data-droy-sidebar'))) return undefined;
+    return !Array.from(overlays).some(node => !node.hasAttribute('data-droy-sidebar'));
+  }
+
+  function viewport() {
+    if (!store.getSnapshot().target || !surfaceVisible()) return undefined;
     const rect = host.getBoundingClientRect();
     const viewportWidth = view.innerWidth, viewportHeight = view.innerHeight, pixelRatio = view.devicePixelRatio;
     if (![rect.left, rect.top, rect.width, rect.height, viewportWidth, viewportHeight, pixelRatio].every(Number.isFinite)
@@ -115,7 +118,7 @@ export function createNativeBrowserPage(options, { createStore, document, browse
       if (disposed || !host || generation !== mountGeneration) return;
       // Transform animations need not emit resize events; polling also observes their final position.
       syncViewport();
-      if (document.visibilityState !== 'hidden') await request('state');
+      if (surfaceVisible()) await request('state');
       schedulePoll(generation);
     }, 500);
   }
@@ -165,8 +168,16 @@ export function createNativeBrowserPage(options, { createStore, document, browse
       const generation = ++mountGeneration;
       if (view.ResizeObserver) { resizeObserver = new view.ResizeObserver(scheduleLayout); resizeObserver.observe(next); }
       if (view.MutationObserver && document.documentElement) {
-        mutationObserver = new view.MutationObserver(scheduleLayout);
-        mutationObserver.observe(document.documentElement, { attributes: true, childList: true, subtree: true });
+        mutationObserver = new view.MutationObserver(records => {
+          const overlays = '[role="dialog"], [role="menu"], [data-droy-sidebar], [data-droy-backdrop]';
+          const relevant = records.some(record => record.type === 'attributes'
+            ? record.target === host || record.target.contains?.(host) || record.target.matches?.(overlays)
+            : [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 1
+              && (node === host || node.contains?.(host) || node.matches?.(overlays) || node.querySelector?.(overlays))));
+          if (relevant) scheduleLayout();
+        });
+        mutationObserver.observe(document.documentElement, { attributes: true, childList: true, subtree: true,
+          attributeFilter: ['style', 'class', 'hidden', 'inert', 'aria-hidden', 'aria-modal', 'data-droy-drawer-open'] });
       }
       view.addEventListener('resize', scheduleLayout);
       view.addEventListener('scroll', scheduleLayout, true);

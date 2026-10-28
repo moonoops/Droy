@@ -78,6 +78,32 @@ test('inactive subprocess keeps upstream behavior; active requests use the host 
   assert.equal(f.calls.length, 1);
 });
 
+test('restricted companion tools bypass legacy Root readiness without relaxing work or subprocess policy', async t => {
+  const f = await fixture(t);
+  f.setReady(false);
+  const agent = { session: { id: 'companion-session' } };
+  f.ctx.provide('droyCompanions', {
+    ownsSession: id => id === agent.session.id,
+    isRestrictedAgent: candidate => candidate === agent,
+  });
+  const exec = { name: 'companion_reply', agent, signal: new AbortController().signal };
+  assert.equal(await f.boundary.around(exec, () => 'scoped reply'), 'scoped reply');
+  // An owned identifier alone, or the same tool name in work, is insufficient.
+  await assert.rejects(f.run(agent.session.id, () => assert.fail('unrestricted agent ran'), exec.name), /PRIVACY_SESSION_UNKNOWN/);
+  await assert.rejects(f.run('clean', () => assert.fail('work tool ran'), exec.name), /EXECUTION_TOOL_NOT_REVIEWED/);
+  await f.boundary.around(exec, async () => {
+    const handle = f.ctx.subprocess.spawn(spec([process.execPath, '-e', 'process.exit(0)']));
+    await assert.rejects(handle.done, /PRIVACY_SESSION_UNKNOWN/);
+  });
+  assert.equal(f.calls.length, 0);
+  await f.run('clean', async () => {
+    const handle = f.ctx.subprocess.spawn(spec([process.execPath, '-e', 'process.exit(0)']));
+    await assert.rejects(handle.done, /EXECUTION_ISOLATION_UNAVAILABLE/);
+  });
+  const abort = new AbortController(); abort.abort(new Error('cancelled companion'));
+  await assert.rejects(f.boundary.around({ ...exec, signal: abort.signal }, () => assert.fail('cancelled tool ran')), /cancelled companion/);
+});
+
 test('namespace file RPC preserves real upstream text/version/edit behavior and binds opaque targets to a session', async t => {
   const f = await fixture(t);
   await writeFile(join(f.workspace, 'synthetic.txt'), '合成记录一');

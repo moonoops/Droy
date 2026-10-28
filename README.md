@@ -53,6 +53,7 @@ Real screens from Redmi K90 Ultra. Select an image to view it at full size.
 **Droy is developed on a rooted Redmi K90 Ultra, with implementation paths for both rooted and non-rooted devices. Other devices, system versions and permission combinations need separate compatibility checks.**
 
 - ARM64 Android 11 / API 30 or later, with an up-to-date system WebView.
+- Droy's interface supports portrait mode only.
 - Without Root, accessibility services provide basic phone interaction; authorized Shizuku can enable some additional operations. Root enables enhanced capabilities. Available features depend on the in-app permission and capability checks. Personal memory requires Root and execution-isolation qualification.
 - Both vision and text-only models are supported, including compatible services such as DeepSeek Flash. Text-only models operate through page text and control structure. Screenshot understanding requires image input support from the selected model and API, declared in its configuration. Check the [provider's current capabilities](https://api-docs.deepseek.com/guides/vision/) and your actual configuration.
 

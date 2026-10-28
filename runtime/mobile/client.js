@@ -2,13 +2,14 @@ window.__ModuleLoader__.load({
   id: '@droyagent/mobile',
   factory: require => {
     const React = require('react');
-    const { Button, Switch, Input, Modal, closeTopModal, modalSelector } = require('@deepseek-ai/dsh-client-ui-primitives');
+    const { Button, Switch, Input, Modal, closeTopModal, modalSelector, IconNewChatOutlineRegular, IconPanelLeftOutlineRegular, IconSettingsOutlineMedium } = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
 
     /* DROY_UI_COPY_MODULE */
     /* DROY_TOUCH_MODULE */
     /* DROY_TOKEN_USAGE_MODULE */
     /* DROY_SETUP_MODULE */
+    /* DROY_COMPANION_MODULE */
 
     function createNativeBridge(target, timeoutMs = 10000) {
       const pending = new Map();
@@ -58,6 +59,134 @@ window.__ModuleLoader__.load({
           pending.clear();
         }
       };
+    }
+
+    function createCompanionWorkbench({ ctx, state, reportError, canInitialize = () => true }) {
+      const { Toast } = require('@deepseek-ai/dsh-client-ui-primitives');
+      const navigation = ctx.uiWorkspace, blocked = new Map(), restorers = [];
+      const noticeListeners = new Set();
+      let refusal = null, refusalSequence = 0;
+      const refusalSnapshot = () => refusal;
+      const subscribeRefusal = listener => { noticeListeners.add(listener); return () => noticeListeners.delete(listener); };
+      let disposed = false, startupRequested = false, startupPending = false;
+      const owners = () => new Map(state.getSnapshot().companions.filter(row => row.workspaceId).map(row => [row.workspaceId, row]));
+      const workspaceFor = sessionId => ctx.workspaces.list.getSnapshot().items.find(row => row.sessionIds.includes(sessionId));
+      const ownerFor = sessionId => owners().get(workspaceFor(sessionId)?.workspaceId);
+      const currentSession = () => Object.values(ctx.sessions.list.getSnapshot().byId).find(row => row.retainedBy?.mainView > 0)?.id;
+      function reason(owner) {
+        const language = /^zh\b/i.test(ctx.locale?.getSnapshot?.().active || '') ? 'zh' : 'en';
+        return DROY_COMPANION_COPY[language].workspaceReadOnly.replace('{name}', () => owner.name);
+      }
+      function refused(owner) {
+        refusal = { owner, seq: ++refusalSequence };
+        for (const listener of noticeListeners) listener();
+        return new Error(reason(owner));
+      }
+      function wrap(name, intercept) {
+        const original = navigation[name];
+        const replacement = function (...args) { return intercept(original.bind(navigation), ...args); };
+        navigation[name] = replacement;
+        restorers.push(() => { if (navigation[name] === replacement) navigation[name] = original; });
+      }
+      // DSH also restores a selection before the first user action. Buddy
+      // spaces remain in the sidebar, but are never automatic work targets.
+      wrap('restoreSelection', async (original, workspaces, sessions) => {
+        if (!state.getSnapshot().companions.length) await state.refreshRoot();
+        if (disposed) return;
+        const managed = owners(), excluded = new Set(workspaces.items.filter(row => managed.has(row.workspaceId)).flatMap(row => row.sessionIds));
+        return original({ ...workspaces, items: workspaces.items.filter(row => !managed.has(row.workspaceId)) },
+          { ...sessions, ids: sessions.ids.filter(id => !excluded.has(id)),
+            byId: Object.fromEntries(Object.entries(sessions.byId).filter(([id]) => !excluded.has(id))) });
+      });
+      wrap('startSession', (original, workspaceId, ...args) => {
+        const owner = owners().get(workspaceId ?? workspaceFor(currentSession())?.workspaceId);
+        if (owner) { refused(owner); return; }
+        return original(workspaceId, ...args);
+      });
+      for (const name of ['connectWorkspace', 'openWorkspace']) wrap(name, (original, workspaceId, ...args) => {
+        const owner = owners().get(workspaceId);
+        if (owner) return Promise.reject(refused(owner));
+        return original(workspaceId, ...args);
+      });
+      wrap('forkSession', (original, sessionId, ...args) => {
+        const owner = ownerFor(sessionId);
+        return owner ? Promise.reject(refused(owner)) : original(sessionId, ...args);
+      });
+      function updateBlocks() {
+        if (disposed) return;
+        const next = new Map(), managed = owners();
+        for (const workspace of ctx.workspaces.list.getSnapshot().items) {
+          const owner = managed.get(workspace.workspaceId); if (!owner) continue;
+          for (const sessionId of workspace.sessionIds) {
+            const text = reason(owner), previous = blocked.get(sessionId);
+            const block = previous?.reason === text ? previous : { reason: text };
+            next.set(sessionId, block);
+            if (block !== previous) ctx.conversation.blocks.set(sessionId, block);
+          }
+        }
+        for (const [sessionId, block] of blocked) if (!next.has(sessionId) && ctx.conversation.blocks.storeFor(sessionId).getSnapshot() === block)
+          ctx.conversation.blocks.set(sessionId, undefined);
+        blocked.clear(); for (const [id, block] of next) blocked.set(id, block);
+      }
+      async function selectDefault() {
+        if (disposed || !startupRequested || startupPending || !canInitialize()) return;
+        const workspaces = ctx.workspaces.list.getSnapshot(), sessions = ctx.sessions.list.getSnapshot();
+        if (workspaces.phase !== 'ready' || sessions.phase !== 'ready') return;
+        const selected = currentSession();
+        if (selected && !ownerFor(selected)) return;
+        startupPending = true;
+        try {
+          const workspace = workspaces.items.find(row => !owners().has(row.workspaceId)) || await ctx.workspaces.initializeDefault();
+          if (!workspace || disposed || !canInitialize()) return;
+          const sessionId = await navigation.connectWorkspace(workspace.workspaceId);
+          if (disposed || !canInitialize()) return;
+          const selectedNow = currentSession();
+          if (selectedNow && !ownerFor(selectedNow)) return;
+          const panel = ctx.layout.panelInfo.getSnapshot().activePanelId;
+          navigation.openSession(sessionId);
+          if (panel !== null) ctx.layout.selectPanel(panel);
+        } catch (error) { if (!disposed) reportError(error); }
+        finally { startupPending = false; }
+      }
+      const changed = () => { updateBlocks(); selectDefault(); };
+      const subscribeCompanions = state.subscribeView || state.subscribe;
+      const companionSnapshot = () => state.getSnapshot().companions;
+      let companionRows = companionSnapshot();
+      const companionsChanged = () => {
+        const next = companionSnapshot();
+        if (next === companionRows) return;
+        companionRows = next; changed();
+      };
+      const subscriptions = [subscribeCompanions(companionsChanged), ctx.workspaces.list.subscribe(changed), ctx.sessions.list.subscribe(changed)];
+      if (ctx.locale?.subscribe) subscriptions.push(ctx.locale.subscribe(updateBlocks));
+      const registration = ctx.slots.inject('conversation.composer', () => ctx.slots.register({ name: 'conversation.composer', priority: -10,
+        select: ({ sessionId }) => ownerFor(sessionId) || null }, function CompanionReadOnlyComposer({ matched }) {
+        if (ctx.locale) React.useSyncExternalStore(callback => ctx.locale.subscribe(callback), () => ctx.locale.getSnapshot(), () => ctx.locale.getSnapshot());
+        return h('p', { className: 'droy-workspace-readonly', role: 'note', style: { margin: '12px 16px', color: 'var(--dsw-alias-label-secondary)', fontSize: '14px', lineHeight: 1.6 } }, reason(matched));
+      }));
+      const noticeRegistration = ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'droy-workspace-readonly-notice' },
+        function CompanionReadOnlyNotice() {
+          const notice = React.useSyncExternalStore(subscribeRefusal, refusalSnapshot, refusalSnapshot);
+          React.useSyncExternalStore(subscribeCompanions, companionSnapshot, companionSnapshot);
+          if (ctx.locale) React.useSyncExternalStore(callback => ctx.locale.subscribe(callback), () => ctx.locale.getSnapshot(), () => ctx.locale.getSnapshot());
+          if (!notice) return null;
+          const owner = state.getSnapshot().companions.find(row => row.id === notice.owner.id) || notice.owner;
+          return h(Toast, { key: notice.seq, text: reason(owner), holdMs: 8000, onDone: () => {
+            if (refusal?.seq !== notice.seq) return;
+            refusal = null; for (const listener of noticeListeners) listener();
+          } });
+        }));
+      updateBlocks();
+      return { ownerFor, initializeDefault() { startupRequested = true; return selectDefault(); },
+        dispose() {
+          disposed = true; for (const stop of subscriptions) stop?.();
+          if (typeof registration === 'function') registration();
+          if (typeof noticeRegistration === 'function') noticeRegistration();
+          refusal = null; noticeListeners.clear();
+          for (const restore of restorers.reverse()) restore();
+          for (const [id, block] of blocked) if (ctx.conversation.blocks.storeFor(id).getSnapshot() === block) ctx.conversation.blocks.set(id, undefined);
+          blocked.clear();
+        } };
     }
 
     function createBrowserNavigation(ctx, bridge, reportError, view = window) {
@@ -268,13 +397,13 @@ window.__ModuleLoader__.load({
       const brand = state?.branding || {};
       const name = brand.name || state?.assistantName || 'Droy';
       const expand = (template, fallback) => (typeof template === 'string' && template.trim() ? template : fallback).replaceAll('{name}', () => name);
-      const petId = brand.logoPetId || state?.petId || 'default';
+      const petId = 'default';
       return {
         name, sidebarLabel: brand.sidebarLabel || 'Droy',
         heroBadge: typeof brand.heroBadge === 'string' ? brand.heroBadge : '',
         welcome: expand(localizedBrandTemplate(brand.welcomeTemplate, '与{name}开始对话'), droyText('与{name}开始对话')),
         composer: expand(localizedBrandTemplate(brand.composerTemplate, '请描述你想让{name}执行的任务，或者你的对话'), droyText('请描述你想让{name}执行的任务，或者你的对话')),
-        logoUrl: petId === 'default' && brand.logoUrl || `/droy/branding/logo?petId=${encodeURIComponent(petId)}`,
+        logoUrl: brand.logoUrl || '/droy/branding/installed-logo',
         logoPetId: petId, logoBackgrounds: brand.logoBackgrounds || null,
         dshVersion: brand.dshVersion || '',
       };
@@ -303,62 +432,130 @@ window.__ModuleLoader__.load({
     }
 
     function createController(bridge) {
-      let snapshot = { state: null, loading: false, pending: null, error: null };
-      const listeners = new Set();
-      let refreshGeneration = 0;
-      let refreshing = null;
-      let lastRefresh = 0;
-      let stateKey = '';
-      let disposed = false;
+      let snapshot = { state: null, loading: false, pending: null, pendingKeys: {}, catalogLoading: {}, error: null, errorKey: null };
+      const listeners = new Set(), views = new Map(), sections = new Map(), sectionRequests = new Map(), mutations = new Map();
+      let refreshGeneration = 0, refreshing = null, lastRefresh = 0, disposed = false, mutationQueue = Promise.resolve();
       const publish = update => {
-        if (disposed) return;
-        if (Object.entries(update).every(([key, value]) => snapshot[key] === value)) return;
+        if (disposed || Object.entries(update).every(([key, value]) => snapshot[key] === value)) return;
         snapshot = { ...snapshot, ...update };
         for (const listener of listeners) listener();
       };
+      const validState = value => value && Array.isArray(value.groups) && Array.isArray(value.fileGrants);
+      function accept(incoming, partial = false) {
+        if (disposed) return;
+        const previous = snapshot.state || {}, next = partial ? { ...previous } : {};
+        for (const [key, supplied] of Object.entries(incoming)) {
+          let value = supplied;
+          if (['notificationManagement', 'proactiveNotifications'].includes(key) && supplied && !Object.hasOwn(supplied, 'apps') && previous[key]?.apps) {
+            value = { ...supplied, apps: previous[key].apps };
+          }
+          if (key === 'notificationManagement' && value?.apps && value.exceptions) {
+            const modes = new Map(value.exceptions.map(item => [item.packageName, item.mode]));
+            value = { ...value, apps: value.apps.map(item => {
+              const mode = modes.get(item.packageName) || 'managed';
+              return mode === item.mode ? item : { ...item, mode, managed: mode !== 'allow' };
+            }) };
+          }
+          next[key] = previous[key] === value || JSON.stringify(previous[key]) === JSON.stringify(value) ? previous[key] : value;
+        }
+        const unchanged = snapshot.state && Object.keys(previous).length === Object.keys(next).length
+          && Object.keys(next).every(key => next[key] === previous[key]);
+        publish({ state: unchanged ? snapshot.state : next, loading: false });
+      }
+      function pending() {
+        const pendingKeys = Object.fromEntries([...mutations].map(([key, item]) => [key, item.action]));
+        publish({ pendingKeys, pending: Object.values(pendingKeys)[0] || null });
+      }
       const controller = {
         getSnapshot: () => snapshot,
         subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-        refresh({ force = false, maxAgeMs = 0 } = {}) {
+        view(fields, actions = []) {
+          const key = JSON.stringify([fields, actions]);
+          if (views.has(key)) return views.get(key);
+          let selected;
+          const relevant = value => actions.some(action => value === action || value?.startsWith(action + ':'));
+          const getSnapshot = () => {
+            const state = snapshot.state ? Object.fromEntries(fields.map(field => [field, snapshot.state[field]])) : null;
+            const next = { state, loading: snapshot.loading,
+              catalogLoading: fields.some(field => snapshot.catalogLoading[field]),
+              pending: Object.keys(snapshot.pendingKeys).some(relevant) ? snapshot.pending : null,
+              error: !snapshot.errorKey || relevant(snapshot.errorKey) ? snapshot.error : null };
+            if (!selected || selected.loading !== next.loading || selected.catalogLoading !== next.catalogLoading || selected.pending !== next.pending || selected.error !== next.error
+              || Boolean(selected.state) !== Boolean(state) || state && fields.some(field => selected.state[field] !== state[field])) selected = next;
+            return selected;
+          };
+          const view = { getSnapshot, subscribe(listener) {
+            let previous = getSnapshot();
+            const changed = () => { const next = getSnapshot(); if (next !== previous) { previous = next; listener(); } };
+            listeners.add(changed); return () => listeners.delete(changed);
+          } };
+          views.set(key, view); return view;
+        },
+        refresh({ force = false, maxAgeMs = 0, section } = {}) {
+          if (section) return controller.refreshSection(section);
           if (!force && refreshing) return refreshing;
-          if (!force && snapshot.state && !snapshot.error && Date.now() - lastRefresh < maxAgeMs)
-            return Promise.resolve(snapshot.state);
+          if (!force && snapshot.state && !snapshot.error && Date.now() - lastRefresh < maxAgeMs) return Promise.resolve(snapshot.state);
           const generation = ++refreshGeneration;
-          // Cached settings stay interactive while grants refresh on return from Android.
-          publish({ loading: !snapshot.state, error: null });
+          publish({ loading: !snapshot.state, error: null, errorKey: null });
           const operation = (async () => { try {
             const state = await bridge.request('getState');
-            if (!state || !Array.isArray(state.groups) || !Array.isArray(state.fileGrants))
-              throw new Error(droyText("手机设置数据不完整，请重试"));
-            if (generation === refreshGeneration) {
-              const key = JSON.stringify(state);
-              lastRefresh = Date.now();
-              if (key !== stateKey) { stateKey = key; publish({ state, loading: false }); }
-              else publish({ loading: false });
-            }
+            if (!validState(state)) throw new Error(droyText("手机设置数据不完整，请重试"));
+            if (generation === refreshGeneration) { lastRefresh = Date.now(); accept(state); }
             return state;
           } catch (error) {
-            if (generation === refreshGeneration) publish({ loading: false, error: error.message });
+            if (generation === refreshGeneration) publish({ loading: false, error: error.message, errorKey: null });
             throw error;
           } })();
           const settled = operation.finally(() => { if (refreshing === settled) refreshing = null; });
-          refreshing = settled;
-          return settled;
+          refreshing = settled; return settled;
         },
-        async run(action, args = {}, refresh = true) {
-          if (snapshot.pending) return;
-          publish({ pending: action, error: null });
-          try {
-            const result = await bridge.request(action, args);
-            if (refresh) await controller.refresh({ force: true });
+        refreshSection(section) {
+          if (sectionRequests.has(section)) return sectionRequests.get(section);
+          const generation = refreshGeneration;
+          if (section !== 'audio') publish({ catalogLoading: { ...snapshot.catalogLoading, [section]: true } });
+          const operation = Promise.resolve().then(() => bridge.request('getStateSection', { section })).then(result => {
+            const required = section === 'audio' ? ['audioCapture', 'audioTranscription'] : [section];
+            if (!result || required.some(key => !result[key] || typeof result[key] !== 'object')
+                || section !== 'audio' && !Array.isArray(result[section].apps))
+              throw new Error(droyText("手机设置数据不完整，请重试"));
+            if (generation === refreshGeneration) accept(result, true);
+            else if (section !== 'audio' && snapshot.state?.[section])
+              accept({ [section]: { ...snapshot.state[section], apps: result[section].apps } }, true);
             return result;
-          } catch (error) {
-            publish({ error: error.message });
-            throw error;
-          } finally { publish({ pending: null }); }
+          }).finally(() => {
+            if (sectionRequests.get(section) === operation) sectionRequests.delete(section);
+            if (section !== 'audio') publish({ catalogLoading: { ...snapshot.catalogLoading, [section]: false } });
+          });
+          sectionRequests.set(section, operation); return operation;
         },
-        report(error) { publish({ error: error.message || String(error) }); },
-        dispose() { disposed = true; ++refreshGeneration; listeners.clear(); }
+        observeSection(section) {
+          sections.set(section, (sections.get(section) || 0) + 1);
+          return () => { const count = sections.get(section) - 1; if (count) sections.set(section, count); else sections.delete(section); };
+        },
+        run(action, args = {}, refresh = true) {
+          const key = action + (action === 'setPreference' ? ':' + args.key : '');
+          if (mutations.has(key)) return mutations.get(key).promise;
+          publish({ error: null, errorKey: null });
+          const operation = mutationQueue.then(async () => {
+            if (disposed) return;
+            try {
+              const result = await bridge.request(action, args);
+              if (refresh) {
+                if (validState(result)) { ++refreshGeneration; lastRefresh = Date.now(); accept(result); }
+                else await controller.refresh({ force: true });
+                for (const section of sections.keys())
+                  if (section === 'audio' && action.startsWith('audio') || action === section || action === 'setPreference')
+                    await controller.refreshSection(section);
+              }
+              return result;
+            } catch (error) { publish({ error: error.message, errorKey: key }); throw error; }
+          });
+          mutationQueue = operation.catch(() => {});
+          const settled = operation.finally(() => { mutations.delete(key); pending(); });
+          mutations.set(key, { action, promise: settled }); pending(); return settled;
+        },
+        report(error) { publish({ error: error.message || String(error), errorKey: null }); },
+        dispose() { disposed = true; ++refreshGeneration; listeners.clear(); views.clear(); sections.clear(); }
       };
       return controller;
     }
@@ -399,6 +596,8 @@ window.__ModuleLoader__.load({
         ['calendar', droyText("日历读取"), yesNo(system.calendar), droyText("设置日历读取权限")],
         ['contacts', droyText("联系人读取"), yesNo(system.contacts), droyText("设置联系人读取权限")],
         ['microphone', droyText("麦克风"), yesNo(system.microphone), droyText("设置麦克风权限")],
+        ['camera', droyText("相机"), yesNo(system.camera), droyText("设置相机权限")],
+        ['petOverlay', droyText("悬浮窗"), yesNo(system.overlay), droyText("设置悬浮窗权限")],
         ['location', droyText("位置访问"), locationStatus, droyText("设置位置权限")],
         ['locationSettings', droyText("系统定位"), enabled(system.locationEnabled), droyText("打开定位设置")],
         ['bluetooth', droyText("附近蓝牙设备"), supported('bluetooth', bluetoothStatus), hardware.bluetooth === false ? null : droyText("设置蓝牙权限")],
@@ -520,7 +719,7 @@ window.__ModuleLoader__.load({
         if (ctx.sidebarRight?.isExpanded()) ctx.sidebarRight.toggleExpanded();
         // Settings is a destination above chat, so returning cannot reveal a
         // stale workspace panel or the drawer which launched it.
-        if (ctx.layout.panelInfo.getSnapshot().activePanelId !== null) ctx.layout.selectPanel(null);
+        if (![null,'droy-companions'].includes(ctx.layout.panelInfo.getSnapshot().activePanelId)) ctx.layout.selectPanel(null);
       };
     }
 
@@ -618,7 +817,8 @@ window.__ModuleLoader__.load({
           && doc.getElementById('droy-mobile-layout')
           && target.getComputedStyle(doc.documentElement).getPropertyValue('--droy-mobile-layout-ready').trim() === '1'
           && frame && !frame.hasAttribute('data-droy-drawer-open')
-          && doc.querySelector('[data-droy-menu]') && doc.querySelector('[data-composer-input]');
+          && (doc.querySelector('[data-droy-im-screen]')
+            || doc.querySelector('[data-droy-menu]') && doc.querySelector('[data-composer-input]'));
       };
       const check = () => {
         if (disposed || scheduled || completing || !isReady()) return;
@@ -814,6 +1014,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
 .droy-notification-settings{flex-direction:column;align-items:stretch;gap:12px}.droy-notification-header{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0}.droy-notification-details{min-width:0}.droy-notification-details>summary{display:flex;align-items:center;gap:8px;min-height:48px;cursor:pointer;font-size:14px}.droy-notification-details>summary:before{content:'›';font-size:20px;transform:rotate(0deg)}.droy-notification-details[open]>summary:before{transform:rotate(90deg)}.droy-notification-details>summary:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}.droy-notification-body{display:flex;flex-direction:column;gap:12px;padding-top:4px;min-width:0}.droy-notification-body .droy-button,.droy-notification-settings>.droy-actions .droy-button{min-height:48px;height:auto;white-space:normal;overflow-wrap:anywhere;line-height:20px;padding:8px 12px}.droy-notification-body .droy-actions{margin-top:0}.droy-notification-list{max-height:320px;overflow-y:auto;overscroll-behavior:contain;min-width:0}.droy-notification-rule,.droy-notification-entry{display:flex;flex-direction:column;gap:6px;padding:12px 0;border-bottom:.5px solid var(--dsw-alias-border-l2);min-width:0;overflow-wrap:anywhere}.droy-notification-rule .droy-actions{justify-content:flex-end}.droy-notification-group-title{margin:4px 0;font-size:14px;font-weight:500}.droy-notification-empty{margin:0;padding:8px 0;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px}
 .droy-pet-studio{display:flex;flex-direction:column;gap:12px;min-width:0;width:100%}.droy-pet-studio-body{display:flex;flex-direction:column;gap:14px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2)}.droy-pet-form{display:flex;flex-direction:column;gap:12px}.droy-pet-field{display:flex;flex-direction:column;gap:5px;min-width:0}.droy-pet-field textarea{box-sizing:border-box;resize:vertical;min-height:80px;width:100%;max-width:100%;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px}.droy-pet-field textarea:focus-visible,.droy-pet-stage:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,var(--dsw-alias-label-primary));outline-offset:2px}.droy-pet-studio .droy-button{min-height:48px;height:auto;white-space:normal;overflow-wrap:anywhere;line-height:20px;padding:8px 12px}.droy-pet-card{display:flex;flex-direction:column;gap:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:12px;min-width:0}.droy-pet-card .droy-row-title{overflow-wrap:anywhere}.droy-pet-reference{width:144px;max-width:100%;height:144px;object-fit:contain;align-self:center;background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base));border-radius:8px}.droy-pet-voice{margin:0;padding-left:20px;font-size:13px;line-height:22px;overflow-wrap:anywhere}.droy-pet-stage{display:block;box-sizing:border-box;width:100%;height:164px;padding:0;overflow:hidden;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base));touch-action:pan-y;position:relative}.droy-pet-stage canvas{display:block;width:100%;height:100%}.droy-pet-preview{display:flex;flex-direction:column;gap:8px}.droy-pet-preview .droy-actions{gap:6px}.droy-pet-preview .droy-button{flex:1 1 62px;padding:8px}.droy-pet-current{font-size:12px;color:var(--dsw-alias-label-secondary)}
 .droy-permissions{color:var(--dsw-alias-label-primary);font-size:14px;line-height:22px}.droy-section-title{font-size:16px;font-weight:500;margin:24px 0 4px}.droy-permissions>.droy-section-title:first-child{margin-top:0}.droy-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.droy-state{padding:12px 0;font-size:13px;line-height:20px}.droy-error{color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-label-primary));font-size:13px;line-height:20px;padding:10px 0}.droy-status{font-size:12px;color:var(--dsw-alias-label-tertiary)}.droy-system-row{align-items:center;gap:16px}.droy-system-row .droy-row-copy{gap:4px}.droy-system-row .droy-button{flex:0 1 45%;font-size:12px}.droy-system-row .droy-button{min-height:var(--droy-touch-target,48px);height:auto;white-space:normal;line-height:18px;padding:8px 10px}.droy-file-row{align-items:flex-start}.droy-advanced{margin-top:24px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:16px}.droy-advanced summary{cursor:pointer;min-height:32px}.droy-inline-error{margin-top:8px}
+.droy-permission-presets .droy-button,.droy-permission-confirm .droy-button{flex:1 1 150px;min-height:48px;height:auto;white-space:normal;line-height:22px;overflow-wrap:anywhere;padding:10px 12px}.droy-permission-confirm[role=dialog]{box-sizing:border-box;width:calc(100vw - 32px);max-width:420px;max-height:calc(100dvh - 32px);overflow:auto}.droy-permission-confirm-content{min-width:0;overflow-wrap:anywhere}.droy-permission-confirm .droy-description{line-height:1.6}.droy-permission-confirm .droy-actions{padding-bottom:4px}
 .droy-audio-settings{flex-direction:column;align-items:stretch;gap:12px}.droy-audio-settings details{min-width:0}.droy-audio-settings summary{display:flex;align-items:center;min-height:48px;cursor:pointer;font-weight:500}.droy-audio-body{display:flex;flex-direction:column;gap:12px;min-width:0;padding-top:8px}.droy-audio-body label{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:14px;line-height:22px}.droy-audio-body select,.droy-audio-body input{box-sizing:border-box;width:100%;max-width:100%;min-height:48px;padding:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit}.droy-audio-body .droy-audio-check{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:48px}.droy-audio-check input{width:22px;min-height:22px;flex:none}.droy-audio-body .droy-button{min-height:48px;height:auto;white-space:normal;line-height:20px;padding:8px 12px}.droy-audio-card{display:flex;flex-direction:column;gap:6px;min-width:0;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:12px;overflow-wrap:anywhere}.droy-audio-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:22px;margin:0}.droy-audio-card .droy-actions{margin-top:4px}.droy-audio-body .droy-actions{margin-top:0}.droy-audio-body progress{width:100%;max-width:100%}
 `;
 
@@ -855,10 +1056,27 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       });
       let pendingNotificationManagement = false;
       const themeFrames = new Map();
-      const useState = () => React.useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
+      const useState = (fields, actions) => {
+        const store = fields ? controller.view(fields, actions) : controller;
+        return React.useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+      };
+      const watchSection = (section, active = true) => React.useEffect(() => {
+        if (!active) return;
+        const stop = controller.observeSection(section);
+        controller.refreshSection(section).catch(error => controller.report(error));
+        return stop;
+      }, [section, active]);
       const submit = (action, args, refresh = true) => controller.run(action, args, refresh).catch(() => {});
+      let syncedTimeZone = '';
+      const syncTimeZone = async state => {
+        if (!state.timeZone || state.timeZone === syncedTimeZone) return;
+        const response = await target.fetch('/droy/companions/settings', { method: 'PATCH', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ timeZone: state.timeZone }) });
+        if (!response.ok) throw new Error(droyText("手机设置数据不完整，请重试"));
+        syncedTimeZone = state.timeZone;
+      };
       const refresh = options => controller.refresh(options).then(async state => {
-        await initializeTheme(state);
+        if (!options?.section) { await initializeTheme(state); await syncTimeZone(state); }
         return state;
       }).catch(error => controller.report(error));
       const busy = snapshot => snapshot.pending !== null || !snapshot.state;
@@ -876,7 +1094,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function AssistantName() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['assistantName'], ['setPreference:assistantName']);
         const saved = snapshot.state?.assistantName || 'Droy';
         const [draft, setDraft] = React.useState(saved);
         React.useEffect(() => setDraft(saved), [saved]);
@@ -965,7 +1183,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function BrandingSettings() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['branding', 'assistantName', 'petId'], ['setPreference', 'setBrandLogoBackgrounds']);
         const fields = [
           ['brandHeroBadge', droyText("欢迎页状态标签（留空隐藏）"), 'heroBadge', '', 40],
           ['brandWelcomeTemplate', droyText("欢迎语"), 'welcomeTemplate', droyText("与{name}开始对话"), 240],
@@ -974,7 +1192,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         return h('div', { className: 'droy-row droy-brand-settings', 'data-droy-brand-settings': true },
           h('details', null, h('summary', { className: 'droy-row-title' }, droyText("界面品牌与文案")),
             h('div', { className: 'droy-brand-settings-body' },
-              h('p', { className: 'droy-description' }, droyText("标志跟随伙伴形象。新形象会同时生成头部或半身标志；旧形象暂用默认黑猫标志。{name} 会自动替换为页面显示名称。")),
+              h('p', { className: 'droy-description' }, droyText("产品标志与宠物形象相互独立。{name} 会自动替换为页面显示名称。")),
               h(BrandBackgroundSettings, { key: brandingSnapshot(snapshot.state).logoPetId, snapshot }),
               ...fields.map(entry => h(BrandField, { key: entry[0], entry, snapshot })), h(Feedback, { snapshot }))));
       }
@@ -1007,7 +1225,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function EncryptedDns() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['browserEncryptedDns'], ['setPreference:browserEncryptedDns']);
         return h('div', { className: 'droy-row', 'data-droy-general': 'browserEncryptedDns' },
           h('span', { className: 'droy-row-copy' }, h('span', { className: 'droy-row-title' }, droyText("浏览器加密 DNS")),
             h('span', { className: 'droy-description' }, droyText("内置浏览器使用 Cloudflare 解析域名。此项仅控制浏览器域名解析。"))),
@@ -1017,7 +1235,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function AutomationScreenDisplay() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['automationScreenDisplay','automationScreenDisplayReady','automationScreenDisplayError'], ['setPreference:automationScreenDisplay','requestPermission']);
         const enabled = snapshot.state?.automationScreenDisplay !== false;
         const needsPermission = snapshot.state && enabled && snapshot.state.automationScreenDisplayReady !== true;
         return h('div', { className: 'droy-row droy-screen-display', 'data-droy-general': 'automationScreenDisplay' },
@@ -1038,7 +1256,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function ReturnOnCompletion() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['returnToDroyOnCompletion'], ['setPreference:returnToDroyOnCompletion']);
         return h('div', { className: 'droy-row', 'data-droy-general': 'returnToDroyOnCompletion' },
           h('div', { className: 'droy-row-copy' },
             h('span', { className: 'droy-row-title' }, droyText("任务完成后总是返回DroyAPP")),
@@ -1072,7 +1290,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function ProactiveNotificationSettings() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['proactiveNotifications','notificationPermissionGranted'], ['proactiveNotifications','requestPermission']);
         const settings = snapshot.state?.proactiveNotifications || {};
         const [plugin, setPlugin] = React.useState(null);
         const [pending, setPending] = React.useState(false);
@@ -1080,6 +1298,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         const [search, setSearch] = React.useState('');
         const [opened, setOpened] = React.useState(false);
         const request = createNotificationPluginApi(target);
+        watchSection('proactiveNotifications', opened && settings.appsEnabled === true);
         React.useEffect(() => {
           const panel = doc.querySelector('[data-droy-general=proactiveNotifications]')?.closest('[data-droy-settings-panel]');
           if (!panel) return;
@@ -1125,7 +1344,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
             h('div', { className: 'droy-notification-body' },
               h('div', { className: 'droy-notification-header' },
                 h('div', { className: 'droy-row-copy' }, h('span', { className: 'droy-row-title' }, droyText("本机通知")),
-                  h('p', { className: 'droy-description' }, droyText("选择系统通知或伙伴提示，遵循已有声音与形象显示设置。"))),
+                  h('p', { className: 'droy-description' }, droyText("选择系统通知或宠物提示，遵循已有声音与形象显示设置。"))),
                 h(Switch, { label: droyText("本机通知"), className: 'droy-touch-switch', checked: settings.localEnabled !== false,
                   disabled: busy(snapshot), onChange: value => configure({ localEnabled: value }) })),
               snapshot.state?.notificationPermissionGranted === false && settings.localEnabled !== false
@@ -1138,14 +1357,15 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
               settings.appsEnabled ? h('div', { className: 'droy-notify-apps' },
                 h(Input, { className: 'droy-input', value: search, 'aria-label': droyText("搜索通知应用"), placeholder: droyText("搜索应用以添加"),
                   onChange: event => setSearch(event.target.value) }),
-                !needle && !allowedApps.length ? h('p', { className: 'droy-description' }, droyText("尚未选择应用。搜索后开启要使用的 App。")) : null,
-                needle && !visible.length ? h('p', { className: 'droy-description' }, droyText("没有找到匹配的应用。")) : null,
+                snapshot.catalogLoading && !apps.length ? h('p', { className: 'droy-description', role: 'status' }, droyText("正在读取通知设置…")) : null,
+                !snapshot.catalogLoading && !needle && !allowedApps.length ? h('p', { className: 'droy-description' }, droyText("尚未选择应用。搜索后开启要使用的 App。")) : null,
+                !snapshot.catalogLoading && needle && !visible.length ? h('p', { className: 'droy-description' }, droyText("没有找到匹配的应用。")) : null,
                 ...visible.map(app => h(NotificationAppTarget, { key: app.packageName, app, allowedApps, snapshot,
                   selected: allowedApps.find(entry => entry.packageName === app.packageName) }))) : null)) : null);
       }
       function BackgroundRuntime() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['backgroundRuntimeEnabled'], ['setPreference:backgroundRuntimeEnabled']);
         return h('div', { className: 'droy-row', 'data-droy-general': 'backgroundRuntimeEnabled' },
           h('div', { className: 'droy-row-copy' },
             h('span', { className: 'droy-row-title' }, droyText("持续后台运行")),
@@ -1156,7 +1376,8 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function NotificationExceptions({ onClose }) {
         useDroyLocale();
-        const snapshot = useState();
+        watchSection('notificationManagement');
+        const snapshot = useState(['notificationManagement'], ['notificationManagement']);
         const management = snapshot.state?.notificationManagement || {};
         const apps = management.apps || [];
         const [search, setSearch] = React.useState('');
@@ -1184,7 +1405,8 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
             h(Input, { className: 'droy-input', 'aria-label': droyText("搜索应用"), placeholder: droyText("搜索应用"), value: search,
               onChange: event => setSearch(event.target.value), maxLength: 100 }),
             h(Feedback, { snapshot }),
-            matches.length === 0 ? h('p', { className: 'droy-notification-empty' }, query ? droyText("没有匹配的应用") : droyText("暂无例外应用")) : null,
+            snapshot.catalogLoading && !apps.length ? h('p', { className: 'droy-description', role: 'status' }, droyText("正在读取通知设置…")) : null,
+            !snapshot.catalogLoading && matches.length === 0 ? h('p', { className: 'droy-notification-empty' }, query ? droyText("没有匹配的应用") : droyText("暂无例外应用")) : null,
             ...matches.map(app => h('div', { className: 'droy-notification-exception', key: app.packageName,
               'data-droy-notification-app': app.packageName },
               h('span', { className: 'droy-row-title' }, app.label),
@@ -1196,12 +1418,12 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function NotificationSettings() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['notificationManagement','notificationManagementEnabled','capabilities','notificationPermissionGranted'], ['notificationManagement','setPreference:notificationManagementEnabled','requestPermission']);
         const state = snapshot.state;
         const management = state?.notificationManagement || {};
         const enabled = state?.notificationManagementEnabled ?? management.enabled ?? true;
         const apps = management.apps || [], rules = management.rules || [], archive = management.archive || [];
-        const exceptions = apps.filter(app => app.mode === 'allow' || app.mode === 'block');
+        const exceptions = management.exceptions || apps.filter(app => app.mode === 'allow' || app.mode === 'block');
         const [exceptionsOpened, setExceptionsOpened] = React.useState(false);
         const [opened, setOpened] = React.useState(pendingNotificationManagement);
         const [archiveOpened, setArchiveOpened] = React.useState(pendingNotificationManagement);
@@ -1251,7 +1473,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
                   onChange: value => submit('notificationManagement', { operation: 'configure', cloudAnalysisEnabled: value }) })),
               h('div', { className: 'droy-row-copy' },
                 h('span', { className: 'droy-row-title', id: 'droy-notification-reminder-label' }, droyText("重要通知提醒")),
-                h('p', { className: 'droy-description' }, droyText("重要通知保留超过所选时长后提醒一次。亮屏解锁时优先用伙伴气泡，否则发送系统通知。")),
+                h('p', { className: 'droy-description' }, droyText("重要通知保留超过所选时长后提醒一次。亮屏解锁时优先用宠物气泡，否则发送系统通知。")),
                 h('div', { className: 'droy-notification-modes', role: 'group', 'aria-labelledby': 'droy-notification-reminder-label' },
                   ...[5, 10].map(minutes => actionButton({ key: minutes, className: 'droy-button',
                     'data-droy-notification-reminder': minutes, 'aria-pressed': (management.reminderMinutes || 5) === minutes,
@@ -1259,7 +1481,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
                   droyText("{0} 分钟", [minutes]))))),
               actionButton({ className: 'droy-button droy-notification-exception-link',
                 'data-droy-action': 'openNotificationExceptions', disabled: busy(snapshot),
-                onClick: () => { setExceptionsOpened(true); refresh(); } },
+                onClick: () => { setExceptionsOpened(true); } },
                 h('span', null, droyText("例外应用")), h('span', { className: 'droy-status' }, droyText("{0} 个 ›", [exceptions.length]))),
               enabled ? h('p', { className: 'droy-description', 'data-droy-cleared-ads': true },
                 droyText("最近24小时已清理 {0} 条广告", [management.clearedAdsCount || 0])) : null,
@@ -1283,7 +1505,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function PetSettings() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['petEnabled','petName','petExternalDisplay','petInternalDisplay','petId','petLoadError','petPermissionGranted','branding'], ['setPreference','selectPet','previewPet','requestPermission']);
         const saved = snapshot.state?.petName || 'Droy';
         const granted = snapshot.state?.petPermissionGranted === true;
         const [draft, setDraft] = React.useState(saved);
@@ -1298,16 +1520,16 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
               onClick: () => submit('setPreference', { key, value }) }, text))));
         return h('div', { className: 'droy-row droy-pet-settings', 'data-droy-general': 'pet' },
           h('div', { className: 'droy-pet-header' }, h('div', { className: 'droy-row-copy' },
-            h('span', { className: 'droy-row-title' }, droyText("Droy伙伴")),
-            h('p', { className: 'droy-description' }, droyText("同一个伙伴，以对话和形象陪你办事。可设置姓名、显示方式，再定制形象与性格。")))),
+            h('span', { className: 'droy-row-title' }, droyText("宠物")),
+            h('p', { className: 'droy-description' }, droyText("设置宠物名字、动态形象和显示方式。这些设置不会修改消息里的咔咔或麦麦。")))),
           display('petExternalDisplay', droyText("在其他应用和桌面显示"), [['always', droyText("始终显示")], ['adaptive', droyText("自适应")], ['off', droyText("关闭")]],
             snapshot.state?.petEnabled === false ? 'off' : 'always'),
           display('petInternalDisplay', droyText("在 Droy 内显示"), [['off', droyText("关闭")], ['adaptive', droyText("自适应")], ['always', droyText("始终显示")]], 'off'),
           h('p', { className: 'droy-description' }, droyText("自适应：有进行中的任务或待告知的信息时出现，其他时间完全隐藏。")),
           h('div', { className: 'droy-row-copy' },
-            h('label', { className: 'droy-row-title', htmlFor: 'droy-pet-name' }, droyText("伙伴姓名")),
+            h('label', { className: 'droy-row-title', htmlFor: 'droy-pet-name' }, droyText("宠物名字")),
             h('div', { className: 'droy-name-editor droy-pet-name-editor' },
-              h(Input, { id: 'droy-pet-name', className: 'droy-input', 'aria-label': droyText("伙伴姓名"),
+              h(Input, { id: 'droy-pet-name', className: 'droy-input', 'aria-label': droyText("宠物名字"),
                 value: draft, maxLength: 40, disabled: busy(snapshot),
                 onChange: event => setDraft(event.target.value) }),
               actionButton({ 'data-droy-action': 'savePetName',
@@ -1319,7 +1541,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
           h('div', { className: 'droy-actions' },
             !granted ? button(droyText("开启显示权限"), 'requestPermission', { name: 'petOverlay' }, snapshot, false,
               { 'data-droy-permission': 'petOverlay' }) : null,
-            button(droyText("和伙伴打个招呼"), 'previewPet', {}, snapshot, false)),
+            button(droyText("和宠物打个招呼"), 'previewPet', {}, snapshot, false)),
           h(Feedback, { snapshot }),
           h(PetStudio, { snapshot }));
       }
@@ -1361,7 +1583,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         };
         const cancelPress = () => { target.clearTimeout(press.current?.timer); press.current = null; };
         return h('div', { className: 'droy-pet-preview', 'data-droy-pet-preview': pet.id },
-          h('button', { type: 'button', className: 'droy-pet-stage', 'aria-label': droyText("伙伴形象动态预览，点击回应，长按互动"), disabled: loading || !!error,
+          h('button', { type: 'button', className: 'droy-pet-stage', 'aria-label': droyText("宠物动态预览，点击回应，长按互动"), disabled: loading || !!error,
             onContextMenu: event => event.preventDefault(),
             onPointerDown: event => {
               if (event.button !== 0) return;
@@ -1392,7 +1614,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         const [open, setOpen] = React.useState(false);
         return h('div', { className: 'droy-pet-studio' },
           actionButton({ 'data-droy-action': 'openPetStudio', 'aria-expanded': open,
-            onClick: () => setOpen(value => !value) }, open ? droyText("收起形象与性格设置") : droyText("定制形象与性格")),
+            onClick: () => setOpen(value => !value) }, open ? droyText("收起宠物形象设置") : droyText("定制宠物形象")),
           open ? h(PetStudioBody, { snapshot }) : null);
       }
 
@@ -1454,30 +1676,30 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         return h('div', { className: 'droy-pet-studio-body', 'data-droy-pet-studio': true },
           h('div', { className: 'droy-pet-card' },
             h('span', { className: 'droy-row-title' }, droyText("默认黑猫")),
-            h('p', { className: 'droy-description' }, droyText("机智、机灵、不啰嗦；办事利落，幽默适量。")),
+            h('p', { className: 'droy-description' }, droyText("黑猫宠物，点击回应、长按互动，可选择悬浮显示。")),
             (snapshot.state?.petId || 'default') === 'default' ? h('span', { className: 'droy-pet-current' }, droyText("正在使用")) :
               button(droyText("使用默认黑猫"), 'selectPet', { id: 'default' }, snapshot)),
           h('div', { className: 'droy-pet-form' },
-            h('span', { className: 'droy-row-title' }, editing ? droyText("调整形象方案") : droyText("设计形象与性格")),
-            h('p', { className: 'droy-description' }, droyText("为当前伙伴更换形象、界面标志与性格，应用后保留伙伴姓名和已有对话。完整素材包含参考图、品牌标志及六组动作。")),
+            h('span', { className: 'droy-row-title' }, editing ? droyText("调整形象方案") : droyText("设计宠物形象")),
+            h('p', { className: 'droy-description' }, droyText("为宠物更换动态形象、界面标志和互动风格，不会修改聊天伙伴的资料、记忆或聊天。完整素材包含参考图、品牌标志及六组动作。")),
             h('label', { className: 'droy-pet-field' }, h('span', { className: 'droy-row-title' }, droyText("形象方案名称")),
               h(Input, { id: 'droy-pet-create-name', className: 'droy-input', value: form.name, maxLength: 40,
                 disabled: pending, onChange: event => update('name', event.target.value), placeholder: droyText("例如：眼镜小狐狸") })),
             h('label', { className: 'droy-pet-field' }, h('span', { className: 'droy-row-title' }, droyText("形象描述")),
               h('textarea', { id: 'droy-pet-description', value: form.description, maxLength: 1000, rows: 3,
                 disabled: pending, onChange: event => update('description', event.target.value), placeholder: droyText("例如：戴圆眼镜的灰色小狐狸，柔和的水彩画风") })),
-            h('label', { className: 'droy-pet-field' }, h('span', { className: 'droy-row-title' }, droyText("性格与说话习惯")),
+            h('label', { className: 'droy-pet-field' }, h('span', { className: 'droy-row-title' }, droyText("宠物性格与互动短句")),
               h('textarea', { id: 'droy-pet-personality', value: form.personality, maxLength: 1000, rows: 3,
                 disabled: pending, onChange: event => update('personality', event.target.value), placeholder: droyText("例如：有点傲娇但很关心我，话少，开心时会偷偷得意") })),
-            h('p', { className: 'droy-description' }, droyText("性格影响对话语气、动作和互动短句；任务事实与确认内容保持准确。")),
+            h('p', { className: 'droy-description' }, droyText("这里只影响宠物动作和互动短句，不会改变聊天伙伴的人设。")),
             catalog?.available === false ? h('p', { className: 'droy-description', role: 'status' }, droyText(catalog.configurationMessage)) : null,
-            catalog?.provider ? h('p', { className: 'droy-description' }, droyText("性格与外观描述会发送给当前文本模型以设计角色；外观描述、性格与参考图会发送至 {0} 图片服务。按各服务计费。", [catalog.provider])) : null,
-            catalog?.textModel ? h('p', { className: 'droy-description' }, droyText("角色设计：{0} / {1}", [catalog.textProvider || '', catalog.textModel])) : null,
+            catalog?.provider ? h('p', { className: 'droy-description' }, droyText("宠物性格与外观描述会发送给当前文本模型以设计形象；外观描述、性格与参考图会发送至 {0} 图片服务。按各服务计费。", [catalog.provider])) : null,
+            catalog?.textModel ? h('p', { className: 'droy-description' }, droyText("宠物设计：{0} / {1}", [catalog.textProvider || '', catalog.textModel])) : null,
             catalog?.model ? h('p', { className: 'droy-description' }, droyText("图片生成：{0}", [catalog.model])) : null,
-            editing ? h('p', { className: 'droy-description' }, droyText("重新生成会替换这份方案的参考图和动作；当前伙伴的形象保持不变。")) : null,
+            editing ? h('p', { className: 'droy-description' }, droyText("重新生成会替换这份方案的参考图和动作；当前宠物的形象保持不变。")) : null,
             h('div', { className: 'droy-actions' },
               actionButton({ 'data-droy-action': 'createPet', disabled: disabled || generationBusy || !catalog || !valid, onClick: submitForm },
-                pending ? droyText("正在保存…") : generationBusy ? droyText("正在制作形象…") : catalog?.available ? editing ? droyText("重新生成形象") : droyText("生成形象与性格预览") : droyText("保存描述")),
+                pending ? droyText("正在保存…") : generationBusy ? droyText("正在制作形象…") : catalog?.available ? editing ? droyText("重新生成形象") : droyText("生成宠物形象预览") : droyText("保存描述")),
               editing ? actionButton({ disabled: pending, onClick: () => { setEditing(null); setForm({ name: '', description: '', personality: '' }); } }, droyText("取消调整")) : null)),
           !catalog && !error ? h('p', { className: 'droy-description', role: 'status' }, droyText("正在读取形象方案和生成服务…")) : null,
           error ? h('div', { className: 'droy-error', role: 'alert' }, droyText(error),
@@ -1490,7 +1712,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
               backgrounds: snapshot.state?.branding?.logoBackgroundsByPet?.[pet.id] || null }) : null,
             pet.referenceUrl && pet.referenceCurrent === false ? h('p', { className: 'droy-description' }, droyText("这是上次生成的形象，当前描述尚未生成成功。")) : null,
             pet.persona?.description ? h('p', { className: 'droy-description' }, pet.persona.description) : null,
-            pet.personaGenerated === true && pet.persona?.voice ? h('ul', { className: 'droy-pet-voice', 'aria-label': droyText("说话风格预览") },
+            pet.personaGenerated === true && pet.persona?.voice ? h('ul', { className: 'droy-pet-voice', 'aria-label': droyText("宠物互动短句预览") },
               ...[...(pet.persona.voice.working || []).slice(0, 2), ...(pet.persona.voice.idle || []).slice(0, 1)].map((line, index) =>
                 h('li', { key: index }, line.replaceAll('{name}', pet.name)))) : null,
             h('p', { className: 'droy-description', role: 'status' }, droyText(pet.stage) || ({ draft: droyText("描述已保存"), ready: droyText("动作已生成，可试玩并使用"), reference_ready: droyText("形象已生成，可继续制作动作") }[pet.status] || droyText("正在准备"))),
@@ -1498,7 +1720,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
             pet.status === 'ready' && previewId === pet.id ? h(PetAnimationPreview, { pet }) : null,
             h('div', { className: 'droy-actions' },
               pet.status === 'ready' ? actionButton({ disabled, 'data-droy-action': 'previewPetCandidate', onClick: () => setPreviewId(previewId === pet.id ? null : pet.id) }, previewId === pet.id ? droyText("收起试玩") : droyText("试玩动作")) : null,
-              pet.status === 'ready' && snapshot.state?.petId !== pet.id ? button(droyText("应用形象与性格"), 'selectPet', { id: pet.id }, snapshot, true, { disabled }) : null,
+              pet.status === 'ready' && snapshot.state?.petId !== pet.id ? button(droyText("应用宠物形象"), 'selectPet', { id: pet.id }, snapshot, true, { disabled }) : null,
               pet.status === 'ready' && snapshot.state?.petId === pet.id ? h('span', { className: 'droy-pet-current' }, droyText("正在使用")) : null,
               !generating(pet) ? actionButton({ disabled, onClick: () => edit(pet) }, pet.status === 'ready' ? droyText("复制描述新建") : droyText("调整描述")) : null,
               !generating(pet) && pet.status !== 'ready' && catalog.available ? actionButton({ disabled: disabled || generationBusy, onClick: () => run(pet.referenceUrl && pet.referenceCurrent !== false ? '/generate' : '/retry', { id: pet.id }) },
@@ -1507,7 +1729,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
 
       function Diagnostics() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['runtimeReady'], ['openDiagnostics']);
         return h('div', { className: 'droy-row' }, h('div', { className: 'droy-row-copy' },
           h('span', { className: 'droy-row-title' }, 'Droy'),
           h('span', { className: 'droy-description' }, droyText("版本、运行诊断、数据管理与停止任务和引擎。"))),
@@ -1515,7 +1737,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       }
       function AudioSettings() {
         useDroyLocale();
-        const snapshot = useState();
+        const snapshot = useState(['audioCapture','audioTranscription','toolsPaused','capabilities','groups','runtimeReady'], ['audioCapture','audioTranscription','audioAuthorize','audioPlay','audioExport','audioImport']);
         const state = snapshot.state;
         const [expanded, setExpanded] = React.useState(false);
         const [source, setSource] = React.useState('microphone');
@@ -1525,9 +1747,17 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         const [pageCaptureId, setPageCaptureId] = React.useState(null);
         React.useEffect(() => {
           if (!expanded) return;
-          refresh({ force: true });
-          const timer = target.setInterval(() => refresh({ force: true }), 1000);
-          return () => target.clearInterval(timer);
+          let stopped = false, timer;
+          const stop = controller.observeSection('audio');
+          const poll = async () => {
+            if (stopped) return;
+            const panel = doc.querySelector('[data-droy-audio-details]');
+            if (doc.visibilityState !== 'hidden' && panel?.getClientRects().length)
+              await controller.refreshSection('audio').catch(error => controller.report(error));
+            if (!stopped) timer = target.setTimeout(poll, 1000);
+          };
+          poll();
+          return () => { stopped = true; target.clearTimeout(timer); stop(); };
         }, [expanded]);
         const capture = state?.audioCapture || {};
         const active = capture.active;
@@ -1600,14 +1830,32 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
                   button(droyText("停止转写"),'audioTranscription',{operation:'stop_transcription',transcriptId:job.transcriptId},snapshot)) : null) : null,
               h('p',{className:'droy-description','data-droy-audio-privacy-notice':true},droyText("语音对话和唤醒不保留录音；手动采集可选择保存录音文件。")))));
       }
-      function Permissions({ onboarding = false } = {}) {
+      function PermissionPresetConfirmation({ mode, snapshot, onClose, onConfirm }) {
+        const title = { all: droyText("一键开启所有权限"), dialogue: droyText("关闭所有权限"), assistant: droyText("仅开启最小化权限") }[mode];
+        const explanation = {
+          all: droyText("将开启全部手机能力，包括屏幕、联系人、位置、麦克风和 Root 等。读取的信息可能发送给当前模型。系统授权将连续请求，请逐项确认；无障碍等权限需在系统设置中开启，返回后自动继续。"),
+          dialogue: droyText("将立即关闭全部手机能力并停止相关操作，对话仍可使用。Android 已授予的系统权限及选定文件授权会保留，但已关闭的手机能力不再使用这些授权；如需撤销，可到系统设置或下方文件列表操作。"),
+          assistant: droyText("仅开启页面观察、手机操作和应用查找，并申请无障碍授权。其他手机能力全部关闭，包括 Root、联系人、位置和麦克风；已有 Android 系统授权会保留。")
+        }[mode];
+        return h(Modal, { open: true, title, closeLabel: droyText("取消"), onClose,
+          className: 'droy-permission-confirm', contentClassName: 'droy-permission-confirm-content' },
+          h('div', { 'data-droy-permission-confirmation': mode },
+            h(Feedback, { snapshot }),
+            h('p', { className: 'droy-description' }, explanation),
+            mode === 'all' ? h('p', { className: 'droy-description' }, droyText("文件和目录需另行选择；屏幕或音频捕获按使用时授权。Shizuku、Root 和电脑专用授权取决于设备环境，不能自动授予。拒绝或跳过的项目可稍后补配。")) : null,
+            h('div', { className: 'droy-actions' },
+              actionButton({ 'data-droy-permission-cancel': true, disabled: busy(snapshot), onClick: onClose }, droyText("取消")),
+              actionButton({ 'data-droy-permission-confirm': true, disabled: busy(snapshot), onClick: onConfirm }, droyText("确认并应用")))));
+      }
+      function Permissions() {
         useDroyLocale();
         const snapshot = useState();
         const state = snapshot.state;
+        const [preset, setPreset] = React.useState(null);
         React.useEffect(() => { refresh({ maxAgeMs: 5000 }); }, []);
         if (!state) return h('div', { className: 'droy-permissions', 'data-droy-permissions': true }, h(Feedback, { snapshot }));
         const caps = state.capabilities || {};
-        const paused = state.toolsPaused ?? caps.product?.stopped ?? true;
+        const queue = state.permissionSetup || {};
         const grouped = new Map();
         for (const group of state.groups) {
           const section = group.section || droyText("手机能力");
@@ -1618,49 +1866,43 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
           disabled: droyText("产品未授权"), last_command_succeeded: droyText("最近一次命令成功；后续动作仍会重新验证"),
           unavailable: droyText("系统 su 不可用"), denied_or_failed: droyText("最近一次命令被拒绝或失败"), not_verified: droyText("系统授权尚未验证")
         }[caps.rootAuthorization] || droyText("系统授权尚未验证");
-        const executionPhase = {
-          thinking: droyText("等待模型响应"), executing: droyText("正在执行工具"), verifying: droyText("正在核实执行结果"),
-          completed: droyText("本轮执行已结束"), interrupted: droyText("任务已中断，请核实当前状态")
-        }[caps.executionProgress?.phase];
         return h('div', { className: 'droy-permissions', 'data-droy-permissions': true },
-          h('h2', { className: 'droy-section-title' }, droyText("手机权限")),
-          h('p', { className: 'droy-description' }, droyText("选择 Droy 可以使用的手机能力。读取的内容会发送给当前模型；系统权限需另行授权。")),
+          h('h2', { className: 'droy-section-title' }, droyText("权限快速配置")),
+          h('p', { className: 'droy-description' }, droyText("修改立即生效并自动保存。读取的信息可能发送给当前模型；手机能力还需对应的系统授权。")),
           h(Feedback, { snapshot }),
-          h('div', { className: 'droy-state', role: 'status' }, !state.runtimeReady ? droyText("引擎未就绪，暂不能执行手机操作。")
-            : paused ? droyText("手机操作已暂停，对话仍可继续。") : droyText("手机操作已开启，仅使用你允许的能力。")),
-          executionPhase ? h('div', { className: 'droy-state', 'data-droy-execution-phase': caps.executionProgress.phase }, executionPhase,
-            '') : null,
-          h('div', { className: 'droy-actions' }, paused
-            ? button(droyText("恢复手机操作"), 'resumeOperations', {}, snapshot)
-            : button(droyText("暂停手机操作"), 'pauseOperations', {}, snapshot),
-          actionButton({ 'data-droy-action': 'refresh', disabled: snapshot.loading, onClick: () => refresh() }, droyText("刷新状态"))),
+          h('div', { className: 'droy-actions droy-permission-presets' },
+            ...[['all', droyText("一键开启所有权限")], ['dialogue', droyText("关闭所有权限")], ['assistant', droyText("仅开启最小化权限")]].map(([mode, label]) =>
+              actionButton({ key: mode, 'data-droy-permission-preset': mode, disabled: busy(snapshot) || queue.active && mode !== 'dialogue', onClick: () => setPreset(mode) }, label))),
+          preset ? h(PermissionPresetConfirmation, { mode: preset, snapshot, onClose: () => setPreset(null),
+            onConfirm: async () => {
+              try { await controller.run('configurePermissions', { mode: preset }); setPreset(null); }
+              catch { /* Keep the confirmation available after a failed save. */ }
+            } }) : null,
+          queue.active ? h('div', { className: 'droy-state', 'data-droy-permission-queue': true, role: 'status' },
+            h('p', null, droyText("正在依次请求系统授权。完成当前弹窗或设置后，返回 Droy 将自动继续。")),
+            button(droyText("停止后续授权"), 'cancelPermissionSetup', {}, snapshot)) : null,
+          !queue.active && queue.total > 0 && queue.completed >= queue.total ? h('p', { className: 'droy-state', role: 'status' },
+            droyText("授权流程已结束，实际授权状态见下方。未授权的项目可单独配置。")) : null,
+          queue.error ? h('p', { className: 'droy-error', role: 'alert' }, droyText(queue.error)) : null,
           ...Array.from(grouped, ([section, groups]) => h('section', { key: section, className: 'droy-capability-section' },
             h('h3', { className: 'droy-section-title' }, section),
             ...groups.map(group => h('div', { className: 'droy-row', key: group.preference },
               h('span', { className: 'droy-row-copy' }, h('span', { className: 'droy-row-title' }, group.label),
                 h('span', { className: 'droy-description' }, group.description)),
               h('label', { className: 'droy-switch-wrap', 'data-droy-preference': group.preference },
-                h(Switch, { label: group.label, checked: group.enabled === true, disabled: busy(snapshot),
-                  onChange: async value => {
-                    try {
-                      await controller.run('setPreference', { key: group.preference, value });
-                      if (onboarding && value) {
-                        const permission = setupPermissionFor(group.preference);
-                        if (permission) await controller.run('requestPermission', { name: permission });
-                      }
-                    } catch { /* The controller presents the failed permission or setting. */ }
-                  } })))))),
+                h(Switch, { label: group.label, checked: group.enabled === true, disabled: busy(snapshot) || queue.active && !group.enabled,
+                  onChange: value => submit('setPreference', { key: group.preference, value }) })))))),
           h('h3', { className: 'droy-section-title' }, droyText("系统授权")),
           ...permissionRows(state).map(([name, label, status, actionLabel]) => h('div', { className: 'droy-row droy-system-row', key: name },
             h('div', { className: 'droy-row-copy' }, h('span', { className: 'droy-row-title' }, label),
               h('span', { className: 'droy-status', 'data-droy-permission-status': name }, status)),
-            actionLabel ? button(actionLabel, 'requestPermission', { name }, snapshot, true, { 'data-droy-permission': name }) : null)),
+            actionLabel ? button(actionLabel, 'requestPermission', { name }, snapshot, true, { 'data-droy-permission': name, disabled: busy(snapshot) || queue.active }) : null)),
           h('p', { className: 'droy-description' }, `Root：${rootStatus}`),
           h('h3', { className: 'droy-section-title' }, droyText("选定文件与目录")),
           h('p', { className: 'droy-description' }, droyText("助理只访问你通过系统选择器授权的来源。撤销后将无法继续访问。")),
           h('div', { className: 'droy-actions' },
-            button(droyText("选择只读文字文件"), 'requestPermission', { name: 'file' }, snapshot, true, { 'data-droy-permission': 'file' }),
-            button(droyText("选择可读取及导出的目录"), 'requestPermission', { name: 'directory' }, snapshot, true, { 'data-droy-permission': 'directory' })),
+            button(droyText("选择只读文字文件"), 'requestPermission', { name: 'file' }, snapshot, true, { 'data-droy-permission': 'file', disabled: busy(snapshot) || queue.active }),
+            button(droyText("选择可读取及导出的目录"), 'requestPermission', { name: 'directory' }, snapshot, true, { 'data-droy-permission': 'directory', disabled: busy(snapshot) || queue.active })),
           state.fileGrants.length === 0 ? h('p', { className: 'droy-state' }, droyText("尚未选择文件或目录。")) : null,
           ...state.fileGrants.map(grant => h('div', { className: 'droy-row droy-file-row', key: grant.grantId || grant.id },
             h('div', { className: 'droy-row-copy' }, h('span', { className: 'droy-row-title' }, grant.name),
@@ -1738,8 +1980,67 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       const initial = refresh();
       const oldMobile = target.DroyMobile;
       const browserNavigation = createBrowserNavigation(ctx, bridge, error => controller.report(error), target);
+      const companionUi = createCompanionUi({React,ctx,target,nativeBridge:bridge,
+        ...createCompanionInputAdapters({ctx,target,bridge,loadSpeech:()=>require('@deepseek-ai/dsh-experimental-client-ui-voice-input').createDroyVoiceInput(ctx)})});
+      ctx.slots.inject('main',()=>ctx.slots.register({name:'main',key:'droy-companions'},companionUi.Panel));
+      ctx.slots.inject('settings.general.item',()=>ctx.slots.register({name:'settings.general.item',id:'droy-default-mode',order:1},companionUi.DefaultModeSetting));
+      function WorkModeSwitch() {
+        const panel=React.useSyncExternalStore(ctx.layout.panelInfo.subscribe,ctx.layout.panelInfo.getSnapshot,ctx.layout.panelInfo.getSnapshot);
+        const locale=React.useSyncExternalStore(callback=>ctx.locale.subscribe(callback),()=>ctx.locale.getSnapshot(),()=>ctx.locale.getSnapshot());
+        if(panel.activePanelId!==null)return null;
+        const copy=DROY_COMPANION_COPY[/^zh\b/i.test(locale.active||'')?'zh':'en'];
+        const navigate=operation=>{
+          doc.activeElement?.blur?.();
+          bridge.request('hideKeyboard').catch(error=>controller.report(error));
+          operation();
+        };
+        const button=(marker,label,icon,onClick,extra={})=>h('button',{type:'button',className:'droy-work-header-button',[marker]:true,
+          'aria-label':label,title:label,onClick:()=>navigate(onClick),...extra},h(icon,{size:24,'aria-hidden':true}));
+        return h('header',{className:'droy-work-header'},h('div',{className:'droy-work-mode-switch'},h(companionUi.WorkModeSwitch)),
+          h('div',{className:'droy-work-header-actions'},
+            button('data-droy-menu',copy.conversationsSpaces,IconNewChatOutlineRegular,()=>ctx.layout.toggleSidebar()),
+            button('data-droy-resource-toggle',copy.resourcePanel,IconPanelLeftOutlineRegular,()=>ctx.sidebarRight.toggleExpanded(),{className:'droy-work-header-button droy-work-resource-button'}),
+            button('data-droy-global-settings',copy.settings,IconSettingsOutlineMedium,()=>target.dispatchEvent(new target.CustomEvent('droy-mobile-open-settings',{detail:{section:'general'}})))));
+      }
+      ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'droy-work-mode-switch',order:1},WorkModeSwitch));
+      const updateCompanionPanel=()=>{
+        const selected=ctx.layout.panelInfo.getSnapshot().activePanelId;
+        doc.body.toggleAttribute('data-droy-im-active',selected==='droy-companions');
+        doc.body.toggleAttribute('data-droy-work-active',selected===null);
+      };
+      const stopCompanionPanel=ctx.layout.panelInfo.subscribe(updateCompanionPanel);updateCompanionPanel();
+      let companionWorkspaceKey='';
+      const updateWorkspaceOrder=()=>{
+        const snapshot=companionUi.state.getSnapshot();
+        const key=JSON.stringify([snapshot.defaultWorkspaceId??null,...snapshot.companions.map(row=>row.workspaceId).filter(Boolean)]);
+        if(key===companionWorkspaceKey)return;
+        companionWorkspaceKey=key;
+        target.dispatchEvent(new target.CustomEvent('droy-workspace-order-change'));
+      };
+      const stopWorkspaceOrder=companionUi.state.subscribeView(updateWorkspaceOrder);
+      let initialInteraction=false;
+      const markInitialInteraction=()=>{initialInteraction=true;};
+      target.addEventListener('pointerdown',markInitialInteraction,{once:true});
+      target.addEventListener('keydown',markInitialInteraction,{once:true});
+      const companionWorkbench = createCompanionWorkbench({ctx,state:companionUi.state,reportError:error=>controller.report(error),canInitialize:()=>!disposed&&!initialInteraction});
+      companionUi.initialize().then(async()=>{
+        await companionWorkbench.initializeDefault();
+        if(!disposed&&!initialInteraction) {
+          if(companionUi.state.getSnapshot().settings.defaultMode==='messages')companionUi.open();
+          else ctx.layout.selectPanel(null);
+        }
+      }).catch(error=>controller.report(error));
       const mobile = {
         ...browserNavigation,
+        companionWorkspaceIds() { return companionUi.state.getSnapshot().companions.map(row=>row.workspaceId).filter(Boolean); },
+        defaultWorkspaceId() { return companionUi.state.getSnapshot().defaultWorkspaceId ?? null; },
+        async openCompanion(id) {
+          if(!['kaka','maimai'].includes(id))throw new Error('COMPANION_NOT_FOUND');
+          initialInteraction=true;await companionUi.initialize();
+          closeTopModal(doc);
+          if(doc.querySelector('[data-droy-drawer-open="true"]'))ctx.layout.toggleSidebar();
+          companionUi.open(id);return {companionId:id};
+        },
         mediaInput(args) { return bridge.request('mediaInput', args); },
         saveMemoryArchive(id) { return bridge.request('memoryArchiveSave', { archiveId: id }); },
         voiceRequest(action, args = {}) {
@@ -1755,7 +2056,11 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
           } catch (error) { controller.report(error); throw error; }
         },
         handleBack() {
+          const topLayer=Array.from(doc.querySelectorAll(modalSelector)).at(-1);
+          if(topLayer?.closest('[data-droy-im]'))return companionUi.back();
+          if (doc.querySelector(modalSelector)) return createBackHandler(ctx, doc, closeTopModal, touch)();
           if (!doc.querySelector(modalSelector) && setup.handleBack()) return true;
+          if(ctx.layout.panelInfo.getSnapshot().activePanelId==='droy-companions') return companionUi.back();
           return createBackHandler(ctx, doc, closeTopModal, touch)();
         },
         refresh,
@@ -1799,6 +2104,9 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
       doc.addEventListener('visibilitychange', onVisibility);
       ctx.effect(() => () => {
         disposed = true;
+        companionWorkbench.dispose();stopWorkspaceOrder();companionUi.dispose();stopCompanionPanel();doc.body.removeAttribute('data-droy-im-active');doc.body.removeAttribute('data-droy-work-active');
+        target.removeEventListener('pointerdown',markInitialInteraction);
+        target.removeEventListener('keydown',markInitialInteraction);
         setup.dispose();
         browserNavigation.dispose();
         stopReadyObserver();
@@ -1826,6 +2134,6 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         bridge.dispose();
       }, 'droy-mobile: native settings bridge');
     }
-    return { apply, inject: ['locale', 'remote', 'slots', 'theme', 'layout', 'configForms', 'sidebarRight', 'sessions', 'workspaces', 'uiWorkspace'], createNativeBridge, createBrowserNavigation, createController, brandingSnapshot, logoBackgroundsFromPixels, installBranding, createTouchController, createMicrophoneGuard, permissionRows, createBackHandler, createSettingsOpenHandler, observePanelNavigation, observePetContext, createNotificationPluginApi, createPetApi, petAssetUrl, petPreviewFrame, createPetPreview, setThemeDurably, readThemeBackground, observeUiReady };
+    return { apply, inject: ['locale', 'remote', 'slots', 'theme', 'layout', 'configForms', 'sidebarRight', 'sessions', 'workspaces', 'uiWorkspace', 'conversation'], createNativeBridge, createCompanionWorkbench, createBrowserNavigation, createController, brandingSnapshot, logoBackgroundsFromPixels, installBranding, createTouchController, createMicrophoneGuard, permissionRows, createBackHandler, createSettingsOpenHandler, observePanelNavigation, observePetContext, createNotificationPluginApi, createPetApi, petAssetUrl, petPreviewFrame, createPetPreview, setThemeDurably, readThemeBackground, observeUiReady };
   }
 });

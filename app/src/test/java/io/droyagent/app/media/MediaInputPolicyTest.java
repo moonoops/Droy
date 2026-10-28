@@ -51,4 +51,29 @@ public final class MediaInputPolicyTest {
             try { MediaInputPolicy.draftHash(value); fail(value); } catch (IllegalArgumentException expected) { }
         }
     }
+
+    @Test public void legacyWorkAndCompanionConsumersHaveExplicitTargets() {
+        assertEquals("work", MediaInputPolicy.consumer(null));
+        assertEquals("work", MediaInputPolicy.consumer("work"));
+        assertEquals("companion", MediaInputPolicy.consumer("companion"));
+        assertEquals("profile", MediaInputPolicy.consumer("profile"));
+        assertEquals("user", MediaInputPolicy.targetSession("profile", "user"));
+        assertNull(MediaInputPolicy.targetSession("work", null));
+        assertEquals("fixture-work", MediaInputPolicy.targetSession("work", "fixture-work"));
+        assertEquals("im:kaka", MediaInputPolicy.targetSession("companion", "im:kaka"));
+        assertEquals("im:maimai", MediaInputPolicy.targetSession("companion", "im:maimai"));
+    }
+
+    @Test public void malformedOrCrossConsumerTargetsCannotClaimAnotherDraft() {
+        for (String value : new String[]{"", "chat", "COMPANION", "companion\nwork"})
+            assertThrows(IllegalArgumentException.class, () -> MediaInputPolicy.consumer(value));
+        for (String target : new String[]{"fixture-work", "im:other", "im:kaka/../maimai", "im:kaka\n", ""})
+            assertThrows(IllegalArgumentException.class, () -> MediaInputPolicy.targetSession("companion", target));
+        assertThrows(IllegalArgumentException.class, () -> MediaInputPolicy.targetSession("companion", null));
+        for (String target : new String[]{"im:kaka", "im:maimai", "fixture-work", "", "user/../kaka"})
+            assertThrows(IllegalArgumentException.class, () -> MediaInputPolicy.targetSession("profile", target));
+        assertThrows(IllegalArgumentException.class, () -> MediaInputPolicy.targetSession("profile", null));
+        assertThrows(IllegalArgumentException.class, () -> MediaInputPolicy.targetSession("work", "im:kaka"));
+        assertThrows(IllegalArgumentException.class, () -> MediaInputPolicy.targetSession(null, "im:maimai"));
+    }
 }
