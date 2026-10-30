@@ -22,12 +22,24 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 
 /** Review screenshots use fictional records in the same isolated, restorable development fixture. */
 @RunWith(AndroidJUnit4::class)
 class NativePageGalleryDeviceTest {
     @get:Rule(order = 0) val compose = createEmptyComposeRule()
     @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture()
+    @get:Rule(order = 2) val failureEvidence = object : TestWatcher() {
+        override fun failed(failure: Throwable, description: Description) {
+            val name = "native-gallery-failed-${description.methodName}"
+            try { fixture.capture(name) } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+            try {
+                File(fixture.context.getExternalFilesDir(null), "native-isolated-evidence/$name.txt")
+                    .writeText(compose.onRoot(useUnmergedTree = true).printToString())
+            } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+        }
+    }
     private lateinit var work: NativeWorkbenchViewModel
     private lateinit var companions: NativeCompanionViewModel
     private lateinit var settings: NativeSettingsViewModel
@@ -70,7 +82,7 @@ class NativePageGalleryDeviceTest {
         fixture.startRuntime()
         compose.waitUntil(30_000) { File(fixture.home, "native-gallery-ready.json").isFile && settings.state.value.loaded && work.state.value.workspaceResolved }
         fixture.scenario.onActivity { settings.setLanguage("zh") }
-        compose.waitUntil(20_000) { settings.state.value.locale == "zh" && work.state.value.runtime.locale == "zh" && !settings.state.value.saving }
+        compose.waitUntil(20_000) { settings.state.value.locale == "zh" && work.state.value.runtime.locale == "zh" && NativeLocale.active() == "zh" && !settings.state.value.saving }
         val owner = JSONObject(File(fixture.home, "native-gallery-ready.json").readText()).getString("companionId")
         fixture.scenario.onActivity { companions.refresh() }
         compose.waitUntil(20_000) { companions.state.value.companions.any { it.id == owner && it.lastMessage != null } }
@@ -97,7 +109,8 @@ class NativePageGalleryDeviceTest {
         fixture.scenario.onActivity { work.refresh() }
         compose.waitUntil(15_000) { work.state.value.sessions.size >= 3 }
         capture("gallery-04-workbench")
-        compose.onNodeWithText(text(R.string.native_spaces_chats)).performClick()
+        compose.onNodeWithTag("native-space-switch").assertIsDisplayed().assertIsEnabled()
+            .assert(hasContentDescription(text(R.string.native_spaces_chats))).performClick()
         waitTag("native-workspaces")
         compose.waitUntil(15_000) { compose.onAllNodesWithText("今日工作计划").fetchSemanticsNodes(false).isNotEmpty() }
         capture("gallery-05-spaces")

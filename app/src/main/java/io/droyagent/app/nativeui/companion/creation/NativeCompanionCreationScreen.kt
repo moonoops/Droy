@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -222,20 +223,24 @@ private fun CreationImageStatus(state: NativeCreationState, model: NativeCompani
 }
 @Composable
 private fun CreationTemplates(state: NativeCreationState, model: NativeCompanionCreationViewModel, modifier: Modifier, choose: (NativeCreationTemplate) -> Unit) {
-    LazyColumn(modifier.fillMaxWidth().navigationBarsPadding().testTag("native-creation-templates"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        if (state.catalogError != null) item("error") { CreationError(state.catalogError, model::refresh, refresh = true) }
-        if (state.editor != null) item("resume") { FilledTonalButton(onClick = { model.page(NativeCreationPage.EDITOR) }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("native-creation-resume")) { Text(stringResource(R.string.native_companion_creation_resume)) } }
-        items(state.templates.chunked(2), key = { row -> row.first().id }) { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                row.forEach { template ->
-                    CreationTemplateChoice(template, model::loadImage,
-                        enabled = state.runtime.ready && state.canEdit && state.image == null,
-                        modifier = Modifier.weight(1f), onClick = { choose(template) })
+    val minimumCardWidth = 128.dp * LocalDensity.current.fontScale
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val columns = if ((maxWidth - 32.dp - 12.dp) / 2 < minimumCardWidth) 1 else 2
+        LazyColumn(Modifier.fillMaxSize().navigationBarsPadding().testTag("native-creation-templates"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (state.catalogError != null) item("error") { CreationError(state.catalogError, model::refresh, refresh = true) }
+            if (state.editor != null) item("resume") { FilledTonalButton(onClick = { model.page(NativeCreationPage.EDITOR) }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("native-creation-resume")) { Text(stringResource(R.string.native_companion_creation_resume)) } }
+            items(state.templates.chunked(columns), key = { row -> row.first().id }) { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    row.forEach { template ->
+                        CreationTemplateChoice(template, model::loadImage,
+                            enabled = state.runtime.ready && state.canEdit && state.image == null,
+                            modifier = Modifier.weight(1f), onClick = { choose(template) })
+                    }
+                    if (row.size < columns) Spacer(Modifier.weight(1f))
                 }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
+            if (state.catalogLoaded && !state.loading && state.catalogError == null && state.templates.isEmpty()) item("empty") { Text(stringResource(R.string.native_companion_creation_no_templates)) }
         }
-        if (state.catalogLoaded && !state.loading && state.catalogError == null && state.templates.isEmpty()) item("empty") { Text(stringResource(R.string.native_companion_creation_no_templates)) }
     }
 }
 
@@ -257,13 +262,15 @@ private fun CreationTemplateChoice(template: NativeCreationTemplate, loader: Com
         Surface(Modifier.fillMaxWidth().aspectRatio(.72f), shape = shape,
             color = if (template.id == "maimai") MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer) {
             CompanionImage(template.avatarUrl, null, loader, Modifier.fillMaxSize().clip(shape),
-                contentScale = ContentScale.Fit) {
+                contentScale = ContentScale.Crop) {
                 DroyIcon(R.drawable.native_companion_person, null, Modifier.size(64.dp))
             }
         }
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text(template.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            Text(template.name, style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f).testTag("native-creation-template-name-${template.id}"),
+                maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             DroyIcon(R.drawable.native_companion_chevron_right, null)
         }
     }

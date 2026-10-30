@@ -1,164 +1,173 @@
 package io.droyagent.app
 
 import android.app.UiModeManager
-import android.content.Context
-import android.content.Intent
-import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.os.Build
 import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.webkit.WebView
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextReplacement
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.test.core.app.ActivityScenario
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.droyagent.app.nativeui.companion.data.NativeCompanionViewModel
+import io.droyagent.app.nativeui.data.NativeWorkbenchViewModel
+import io.droyagent.app.nativeui.settings.NativeSettingsViewModel
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
-import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestWatcher
+import org.junit.rules.ExternalResource
+import org.junit.runner.Description
 import org.junit.runner.RunWith
 
-/** Cold UI only: no model calls, synthetic conversations or engine start. */
+/** Native foreground entry starts the isolated local engine without sending a prompt. */
 @RunWith(AndroidJUnit4::class)
 class NativeWorkbenchUiDeviceTest {
-    @get:Rule val compose = createEmptyComposeRule()
-    private val instrumentation = InstrumentationRegistry.getInstrumentation()
-    private val context get() = instrumentation.targetContext
-    private var scenario: ActivityScenario<NativeAppActivity>? = null
-    private var product: SharedPreferences? = null
-    private var workbench: SharedPreferences? = null
-    private var originalProduct = emptyMap<String, Any?>()
-    private var originalWorkbench = emptyMap<String, Any?>()
-    private val otherPreferences = linkedMapOf<SharedPreferences, Map<String, Any?>>()
+    @get:Rule(order = 0) val compose = createEmptyComposeRule()
+    @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture()
+    @get:Rule(order = 2) val systemTheme = object : ExternalResource() {
+        override fun after() = restoreSystemTheme()
+    }
+    @get:Rule(order = 3) val failureEvidence = object : TestWatcher() {
+        override fun failed(failure: Throwable, description: Description) {
+            val name = "native-ui-failed-${description.methodName}"
+            try { fixture.capture(name) } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+            try {
+                File(context.getExternalFilesDir(null), "native-isolated-evidence/$name.txt")
+                    .writeText(compose.onRoot(useUnmergedTree = true).printToString())
+            } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+        }
+    }
+    private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
+    private val context get() = fixture.context
+    private val scenario get() = fixture.scenario
+    private lateinit var work: NativeWorkbenchViewModel
+    private lateinit var settings: NativeSettingsViewModel
+    private lateinit var companions: NativeCompanionViewModel
     private var originalNightMode = UiModeManager.MODE_NIGHT_AUTO
-    private var owned = false
+    private var ownsNightMode = false
 
     @Before fun prepare() {
-        assertEquals("Development package only", "io.droyagent.app.dev", context.packageName)
-        assertTrue("Use -e nativeUiFixture true on a dedicated emulator",
-            InstrumentationRegistry.getArguments().getString("nativeUiFixture") == "true")
-        assertTrue("Physical devices are not allowed for this fixture",
-            Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish") ||
-                Build.FINGERPRINT.startsWith("generic") || Build.MODEL.contains("sdk_gphone"))
-        assertTrue("Stop existing tasks before the cold UI fixture", RuntimeService.canManageHistory())
         originalNightMode = context.getSystemService(UiModeManager::class.java).nightMode
-        assertTrue("Restoreable emulator theme required", originalNightMode in setOf(
+        assertTrue("Restorable emulator theme required", originalNightMode in setOf(
             UiModeManager.MODE_NIGHT_AUTO, UiModeManager.MODE_NIGHT_NO, UiModeManager.MODE_NIGHT_YES))
-        product = context.getSharedPreferences("product", Context.MODE_PRIVATE)
-        workbench = context.getSharedPreferences("native_workbench", Context.MODE_PRIVATE)
-        originalProduct = product!!.all.mapValues { copyValue(it.value) }
-        originalWorkbench = workbench!!.all.mapValues { copyValue(it.value) }
-        for (name in listOf("native_companions", "native_media", "native_setup_draft", "native_companion_creation",
-            "native_share_preview", "native_share_inbox", "native_voice_input", "native_voice_capture", "native-engine-drafts", "native_workspaces", "native_standard_voice")) {
-            val preference = context.getSharedPreferences(name, Context.MODE_PRIVATE)
-            otherPreferences[preference] = preference.all.mapValues { copyValue(it.value) }
-        }
-        val installation = context.getSharedPreferences("installation", Context.MODE_PRIVATE)
-        otherPreferences[installation] = installation.all.mapValues { copyValue(it.value) }
-        owned = true
-        otherPreferences.keys.filterNot { it == installation }.forEach { assertTrue(it.edit().clear().commit()) }
-        assertTrue(installation.edit().putBoolean("completed", true).commit())
-        assertTrue(product!!.edit().putBoolean(BackgroundRuntime.STOPPED, true).commit())
-        assertTrue(workbench!!.edit().clear().commit())
-        instrumentation.runOnMainSync { NativeLocale.adopt("zh") }
+        ownsNightMode = true
+        // The shared fixture owns the complete home and preference backup. Its foreground
+        // launch has already booted the local provider through the production startup path.
+        assertTrue(RuntimeService.ready)
+        assertTrue(File(fixture.home, "native-fixture-ready.json").isFile)
+        assertTrue(context.getSharedPreferences("product", 0).edit().putString("appearanceMode", "system")
+            .putString("colorSource", "preset").putString("themePalette", "purple").commit())
         setNight(false)
+        bindModels()
+        awaitRuntime()
+        setLanguage("zh")
     }
 
-    @After fun restore() {
-        if (!owned) return
-        try {
-            scenario?.close()
-            scenario = null
-            instrumentation.waitForIdleSync()
-            assertTrue("Cold fixture unexpectedly started an engine", RuntimeService.canManageHistory())
-        } finally {
-            val night = when (originalNightMode) {
-                UiModeManager.MODE_NIGHT_YES -> "yes"
-                UiModeManager.MODE_NIGHT_NO -> "no"
-                else -> "auto"
-            }
-            shell("cmd uimode night $night")
-            workbench?.let { restorePreferences(it, originalWorkbench, null) }
-            otherPreferences.forEach { (preference, values) -> restorePreferences(preference, values, null) }
-            product?.let { restorePreferences(it, originalProduct, null) }
-            owned = false
+    private fun restoreSystemTheme() {
+        if (!ownsNightMode) return
+        val night = when (originalNightMode) {
+            UiModeManager.MODE_NIGHT_YES -> "yes"
+            UiModeManager.MODE_NIGHT_NO -> "no"
+            else -> "auto"
         }
+        shell("cmd uimode night $night")
+        instrumentation.waitForIdleSync()
+        ownsNightMode = false
+        // NativeIsolatedRuntimeFixture stops the engine before restoring home/preferences.
     }
 
     @Test fun nativeColdUiRetainsDraftAcrossRecreationAndFollowsLocaleAndTheme() {
-        scenario = ActivityScenario.launch(Intent(context, NativeAppActivity::class.java).putExtra("destination", "workbench"))
-        compose.waitForIdle()
-        compose.onNodeWithTag("native-workbench").assertIsDisplayed()
-        compose.onNodeWithTag("native-start-runtime").assertIsDisplayed().assertIsEnabled()
-        compose.onNodeWithTag("native-workbench-title").assertIsDisplayed().assertTextContains(localized("zh", R.string.native_workbench))
-        scenario!!.onActivity { activity ->
+        compose.onNodeWithTag("native-tab-workbench").assertIsDisplayed().performClick()
+        awaitWorkbench("zh")
+        compose.onNodeWithTag("native-start-runtime").assertDoesNotExist()
+        scenario.onActivity { activity ->
             assertEquals("Native entry must not host a hidden browser", 0, countWebViews(activity.window.decorView))
-            assertTrue("The new native surface must count as sensitive UI", NativeRuntimeHost.isVisible())
+            assertTrue("The native surface must count as sensitive UI", NativeRuntimeHost.isVisible())
         }
-        assertFalse("No engine starts without an explicit action", RuntimeService.isStartingOrRunning())
+        assertTrue("Foreground entry must start the local engine automatically", RuntimeService.isStartingOrRunning())
         capture("cold-zh-light", expectedSurface = 0xFFFEF7FF.toInt())
 
         compose.onNodeWithTag("native-tab-messages").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodesWithTag("native-open-user-profile").fetchSemanticsNodes(false).isNotEmpty() }
+        awaitTag("native-open-user-profile")
         compose.onNodeWithTag("native-open-user-profile").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodesWithTag("native-user-name").fetchSemanticsNodes(false).isNotEmpty() }
-        compose.onNodeWithTag("native-user-name").assertIsNotEnabled()
-        compose.onNodeWithTag("native-companion-start-runtime").assertIsDisplayed()
-        scenario!!.onActivity { it.onBackPressedDispatcher.onBackPressed() }
-        compose.waitUntil(10_000) { compose.onAllNodesWithTag("native-root-navigation").fetchSemanticsNodes(false).isNotEmpty() }
+        awaitTag("native-user-name")
+        compose.waitUntil(15_000) { companions.state.value.runtime.ready && !companions.state.value.loading && !companions.state.value.profileSaving }
+        compose.onNodeWithTag("native-user-name").assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithTag("native-companion-start-runtime").assertDoesNotExist()
+        scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        awaitTag("native-root-navigation")
         compose.onNodeWithTag("native-tab-workbench").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodesWithTag("native-composer").fetchSemanticsNodes(false).isNotEmpty() }
+        awaitWorkbench("zh")
 
         val draft = "native-ui-fixture-draft"
-        compose.onNodeWithTag("native-composer").performClick().performTextReplacement(draft)
+        compose.onNodeWithTag("native-composer").assertIsEnabled().performClick().performTextReplacement(draft)
         compose.onNodeWithTag("native-composer").assertTextContains(draft)
         compose.waitUntil(timeoutMillis = 10_000) { isImeVisible() }
         capture("cold-ime-draft")
-        scenario!!.recreate()
-        compose.waitForIdle()
+        fixture.recreate()
+        bindModels()
+        awaitRuntime()
+        awaitWorkbench("zh")
         compose.onNodeWithTag("native-composer").assertTextContains(draft)
-        scenario!!.onActivity { activity ->
+        scenario.onActivity { activity ->
             assertEquals(0, countWebViews(activity.window.decorView))
+            assertTrue(NativeRuntimeHost.isVisible())
             WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
         }
         compose.waitUntil(timeoutMillis = 10_000) { !isImeVisible() }
         capture("cold-recreated-draft")
 
-        instrumentation.runOnMainSync { NativeLocale.adopt("en") }
+        setLanguage("en")
         setNight(true)
-        compose.waitUntil(timeoutMillis = 10_000) {
-            compose.onAllNodesWithText(localized("en", R.string.native_workbench)).fetchSemanticsNodes().isNotEmpty()
-        }
+        awaitWorkbench("en")
         compose.onNodeWithTag("native-composer").assertTextContains(draft)
-        compose.onNodeWithTag("native-start-runtime").assertIsDisplayed()
+        compose.onNodeWithTag("native-start-runtime").assertDoesNotExist()
         capture("cold-en-dark", expectedSurface = 0xFF151218.toInt())
-        assertFalse("Theme and Activity changes must not start the engine", RuntimeService.isStartingOrRunning())
-        assertTrue(product!!.getBoolean(BackgroundRuntime.STOPPED, false))
+        assertTrue("The local engine remains available across theme and Activity changes", RuntimeService.ready)
+        val calls = File(fixture.home, "native-fixture-calls.jsonl")
+        assertTrue("Navigation, drafts and appearance changes must not call a model", !calls.exists() || calls.length() == 0L)
     }
+
+    private fun bindModels() = scenario.onActivity {
+        val models = ViewModelProvider(it)
+        work = models[NativeWorkbenchViewModel::class.java]
+        settings = models[NativeSettingsViewModel::class.java]
+        companions = models[NativeCompanionViewModel::class.java]
+    }
+    private fun awaitRuntime() {
+        compose.waitUntil(30_000) { RuntimeService.ready && work.state.value.runtime.ready && work.state.value.workspaceResolved &&
+            settings.state.value.loaded && settings.state.value.writable && !settings.state.value.loading }
+    }
+    private fun setLanguage(locale: String) {
+        scenario.onActivity { settings.setLanguage(locale) }
+        compose.waitUntil(20_000) { settings.state.value.locale == locale && !settings.state.value.saving &&
+            work.state.value.runtime.locale == locale && NativeLocale.active() == locale }
+        assertNull(settings.state.value.error)
+    }
+    private fun awaitWorkbench(locale: String) {
+        awaitTag("native-workbench")
+        compose.waitUntil(15_000) { compose.onAllNodes(hasTestTag("native-workbench-title") and
+            hasText(localized(locale, R.string.native_workbench))).fetchSemanticsNodes(false).isNotEmpty() }
+        compose.onNodeWithTag("native-workbench").assertIsDisplayed()
+        compose.onNodeWithTag("native-workbench-title").assertIsDisplayed().assertTextContains(localized(locale, R.string.native_workbench))
+        compose.onNodeWithTag("native-composer").assertIsDisplayed().assertIsEnabled()
+    }
+    private fun awaitTag(tag: String) = compose.waitUntil(15_000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes(false).isNotEmpty() }
 
     private fun isImeVisible(): Boolean {
         val visible = AtomicBoolean()
-        scenario!!.onActivity { visible.set(it.window.decorView.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true) }
+        scenario.onActivity { visible.set(it.window.decorView.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true) }
         return visible.get()
     }
 
@@ -206,7 +215,8 @@ class NativeWorkbenchUiDeviceTest {
     }
 
     private fun surfaceMatches(image: Bitmap, expected: Int): Boolean {
-        val actual = image.getPixel(image.width / 2, image.height * 3 / 5)
+        // Sample the unobstructed scaffold edge; the current empty page has a central welcome illustration.
+        val actual = image.getPixel(image.width / 100, image.height * 3 / 5)
         return listOf(0, 8, 16).all { shift ->
             kotlin.math.abs(((actual shr shift) and 255) - ((expected shr shift) and 255)) <= 3
         }
@@ -228,22 +238,4 @@ class NativeWorkbenchUiDeviceTest {
         else -> 0
     }
 
-    private fun copyValue(value: Any?): Any? = if (value is Set<*>) value.toSet() else value
-
-    private fun restorePreferences(preferences: SharedPreferences, values: Map<String, Any?>, keys: Set<String>?) {
-        val editor = preferences.edit()
-        if (keys == null) editor.clear() else keys.forEach(editor::remove)
-        values.forEach { (key, value) ->
-            when (value) {
-                is String -> editor.putString(key, value)
-                is Boolean -> editor.putBoolean(key, value)
-                is Int -> editor.putInt(key, value)
-                is Long -> editor.putLong(key, value)
-                is Float -> editor.putFloat(key, value)
-                is Set<*> -> { @Suppress("UNCHECKED_CAST") editor.putStringSet(key, value as Set<String>) }
-                else -> error("Unsupported fixture preference type")
-            }
-        }
-        assertTrue("Could not restore fixture preferences", editor.commit())
-    }
 }

@@ -153,6 +153,8 @@ class NativeVoiceHoldInjectedAudioDeviceTest {
             // No navigation is performed here: this asserts the actual automatic Done result.
             compose.onNodeWithTag("native-workbench").assertIsDisplayed()
             compose.onNodeWithTag("native-composer").assertIsDisplayed()
+            compose.onNodeWithTag("native-root-navigation").assertIsDisplayed()
+            compose.onNodeWithTag("native-tab-workbench").assertIsSelected()
             // DSH also uses user/message for engine context; the reducer marks those as context.
             val users = work.state.value.messages.filter { it.role == "user" && it.kind != "context" }
             assertEquals("Exactly one voice message must reach the conversation", 1, users.size)

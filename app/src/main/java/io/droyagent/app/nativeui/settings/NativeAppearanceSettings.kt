@@ -56,18 +56,19 @@ internal fun NativeAppearanceSettings() {
                 "amber" to R.string.native_theme_amber, "rose" to R.string.native_theme_rose).forEach { (value, label) ->
                 val colors = droyPresetColorScheme(value, false)
                 val selected = palette == value && (source != "dynamic" || Build.VERSION.SDK_INT < Build.VERSION_CODES.S)
+                val labelText = stringResource(label)
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                     ToggleButton(checked = selected, onCheckedChange = {
                         preferences.edit().putString("themePalette", value).putString("colorSource", "preset").apply()
                     }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("theme-palette:$value")
-                        .semantics { role = Role.RadioButton; this.selected = selected; contentDescription = context.getString(label) },
+                        .semantics { role = Role.RadioButton; this.selected = selected; contentDescription = labelText },
                         colors = ToggleButtonDefaults.colors(
                             containerColor = colors.primaryContainer, contentColor = colors.onPrimaryContainer,
                             checkedContainerColor = colors.primary, checkedContentColor = colors.onPrimary)) {
                         if (selected) DroyIcon(R.drawable.native_ui_check, null, Modifier.clearAndSetSemantics {})
                         else Spacer(Modifier.size(24.dp))
                     }
-                    Text(stringResource(label), style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center,
+                    Text(labelText, style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center,
                         modifier = Modifier.padding(top = 6.dp))
                 }
             }

@@ -43,7 +43,7 @@ final class PermissionSetupPlan {
             .filter(step -> !step.equals("camera") || hardware.contains("camera"))
             .filter(step -> !step.equals("microphone") || hardware.contains("microphone"))
             .filter(step -> !step.equals("location") || hardware.contains("location") || hardware.contains("wifi") || hardware.contains("telephony"))
-            .toList();
+            .collect(java.util.stream.Collectors.toList());
     }
 
     static List<String> ordinaryPermissionNames() {

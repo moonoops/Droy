@@ -98,6 +98,7 @@ test('memory resolves its package export from both staged mobile deployment loca
   for (const layout of layouts) {
     await mkdir(layout, { recursive: true });
     for (const name of ['memory.mjs', 'memory-spaces.mjs', 'profiles.mjs']) await copyFile(new URL('../companions/' + name, import.meta.url), join(layout, name));
+    await cp(new URL('../companions/presets/', import.meta.url), join(layout, 'presets'), { recursive: true });
     await mkdir(join(layout,'maibot'),{recursive:true});
     await copyFile(new URL('../companions/maibot/persona-source.json',import.meta.url),join(layout,'maibot','persona-source.json'));
   }

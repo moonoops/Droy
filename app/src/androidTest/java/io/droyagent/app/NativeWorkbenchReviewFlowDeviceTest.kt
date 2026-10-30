@@ -31,12 +31,24 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 
 /** Real local DSH logs/attachments and the existing isolated fixture; no remote provider or device permissions. */
 @RunWith(AndroidJUnit4::class)
 class NativeWorkbenchReviewFlowDeviceTest {
     @get:Rule(order = 0) val compose = createEmptyComposeRule()
     @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture()
+    @get:Rule(order = 2) val failureEvidence = object : TestWatcher() {
+        override fun failed(failure: Throwable, description: Description) {
+            val name = "native-review-failed-${description.methodName}"
+            try { fixture.capture(name) } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+            try {
+                File(fixture.context.getExternalFilesDir(null), "native-isolated-evidence/$name.txt")
+                    .writeText(compose.onRoot(useUnmergedTree = true).printToString())
+            } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+        }
+    }
     private lateinit var work: NativeWorkbenchViewModel
     private lateinit var spaces: NativeWorkspacesViewModel
     private lateinit var tools: NativeToolsViewModel
@@ -104,15 +116,22 @@ class NativeWorkbenchReviewFlowDeviceTest {
         assertEquals("file", audio.kind)
         val readAudio = runBlocking { tools.loadMessageAttachment(session, requireNotNull(media.seq), requireNotNull(audio.attachmentId)) }
         assertArrayEquals(File(fixture.home, "review-silence.wav").readBytes(), readAudio)
-        compose.onNodeWithTag("native-history").performScrollToNode(hasText("review-silence.wav"))
-        compose.onNodeWithContentDescription(text(R.string.native_work_play)).assertIsDisplayed().performClick()
-        compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(text(R.string.native_work_pause)).fetchSemanticsNodes(false).isNotEmpty() }
-        compose.onNodeWithContentDescription(text(R.string.native_work_pause)).performClick()
-        val slider = SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress)
-        compose.onNode(slider).performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(5000f)) }
-        val range = compose.onNode(slider).fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
-        assertEquals(5000f, range.current, 1f)
-        compose.onNodeWithText(text(R.string.native_work_audio_failed)).assertDoesNotExist()
+        val mediaBubble = hasTestTag("native-message-bubble:${media.id}")
+        compose.onNodeWithTag("native-history").performScrollToNode(mediaBubble)
+        val play = hasContentDescription(text(R.string.native_companion_play_voice)) and hasAnyAncestor(mediaBubble)
+        val pause = hasContentDescription(text(R.string.native_work_pause)) and hasAnyAncestor(mediaBubble)
+        compose.onNode(play).assertIsDisplayed().assertIsEnabled().performClick()
+        compose.waitUntil(15_000) { compose.onAllNodes(pause).fetchSemanticsNodes(false).isNotEmpty() }
+        compose.onNode(pause).assertIsDisplayed().performClick()
+        compose.onNode(play).assertIsDisplayed().assertIsEnabled()
+        compose.onNode(pause).assertDoesNotExist()
+        // The compact voice bubble has play/pause rather than a seek slider. Exercise
+        // resumed playback as well, keeping the original durable attachment assertion above.
+        compose.onNode(play).performClick()
+        compose.waitUntil(15_000) { compose.onAllNodes(pause).fetchSemanticsNodes(false).isNotEmpty() }
+        compose.onNode(pause).assertIsDisplayed().performClick()
+        compose.onNode(play).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.native_work_audio_failed)).assertDoesNotExist()
         fixture.capture("native-review-durable-audio-player")
 
         val index = media.attachments.indexOf(image)
@@ -131,6 +150,9 @@ class NativeWorkbenchReviewFlowDeviceTest {
         compose.runOnIdle { assertTrue(zoomActions.single { it.label == text(R.string.native_work_zoom_reset) }.action()) }
         fixture.capture("native-review-image-zoom")
         back(); awaitHistory(session)
+        compose.onNodeWithTag("native-history").performScrollToNode(mediaBubble)
+        compose.onNode(play).assertIsDisplayed().assertIsEnabled()
+        compose.onNode(pause).assertDoesNotExist()
 
         // This emulator's system DNS returns a reserved FakeIP. Use the existing public-DNS policy; the fixture restores product preferences.
         assertTrue(fixture.context.getSharedPreferences("product", 0).edit().putBoolean("browserEncryptedDns", true).commit())

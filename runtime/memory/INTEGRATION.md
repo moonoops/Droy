@@ -14,7 +14,7 @@ The mobile profile composes the Android host adapter, `@droyagent/privacy`, `@dr
 
 ## Activation
 
-Collection is off by default. Activation initializes the App-private memory and privacy stores and establishes the current host's readiness. It does not request Root or qualify a Root execution sandbox. `host-ready` is accepted only after both stores and processing guards are ready. Existing stores, source settings and endpoint grants remain in place when upgrading from the earlier Root-dependent lifecycle.
+Personal memory and automatic organization are on by default; saved off choices remain off. Startup activates memory when it is enabled and its feature is available. Activation initializes the App-private memory and privacy stores and establishes the current host's readiness. It does not request Root or qualify a Root execution sandbox. `host-ready` is accepted only after both stores and processing guards are ready. Existing stores, source settings and endpoint grants remain in place when upgrading from the earlier Root-dependent lifecycle.
 
 Activity, page, device and location sources require independent consent. Activity and page capture use accessibility access; location uses Android location permissions and foreground-service rules. Missing source permission affects that source rather than disabling all memory. Missing memory/privacy services or a changed runtime identity still stop private processing. Turning memory off stops collection and extraction while existing session processing restrictions remain active.
 

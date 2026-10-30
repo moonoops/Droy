@@ -45,7 +45,8 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
     private val capabilityPreferences = catalog.groups().let { groups ->
         (0 until groups.length()).map { groups.getJSONObject(it).getString("preference") }.toSet()
     }
-    private val _state = MutableStateFlow(NativePermissionsState())
+    private val _state = MutableStateFlow(NativePermissionsState(
+        batchIndependent = saved?.getStringArrayList("nativePermissionBatchIndependent")?.toList().orEmpty()))
     val state: StateFlow<NativePermissionsState> = _state.asStateFlow()
     private lateinit var queue: PermissionSetup
     private var polling: Job? = null
@@ -55,7 +56,9 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
     private var resumed = false
     private var screenVisible = false
     private var closed = false
-    private var batchIndependent = saved?.getStringArrayList("nativePermissionBatchIndependent")?.toList().orEmpty()
+    private var batchIndependent: List<String>
+        get() = _state.value.batchIndependent
+        set(value) { _state.update { it.copy(batchIndependent = value) } }
     private var observedStep: String? = saved?.getString("nativePermissionObservedStep")
     private var pendingApprovalId: String? = saved?.getString("nativePermissionPendingApprovalId")
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -174,8 +177,24 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
                     }
                     queue.requestOrdinaryBatch(choices.keys)
                 }
+                is NativePermissionAction.ConfirmIndependent -> {
+                    if (action.id != batchIndependent.firstOrNull()) return
+                    requireForeground(); requireIdleQueue()
+                    check(!SetupRootVerification.status().getBoolean("running")) { "PERMISSION_QUEUE_BUSY" }
+                    val request = when (action.id) {
+                        "accessibility" -> NativePermissionAction.ConfirmAccessibility
+                        "root" -> NativePermissionAction.ConfirmRoot
+                        "shizuku" -> NativePermissionAction.ConfirmShizuku
+                        "background" -> NativePermissionAction.SetBackgroundEnabled(true)
+                        "battery" -> NativePermissionAction.OpenEnergySettings
+                        else -> throw IllegalArgumentException("UNKNOWN_PERMISSION")
+                    }
+                    batchIndependent = batchIndependent.drop(1)
+                    onAction(request)
+                    return
+                }
                 is NativePermissionAction.SkipIndependent -> {
-                    require(action.id == batchIndependent.firstOrNull())
+                    if (action.id != batchIndependent.firstOrNull()) return
                     policy.recordOutcome(action.id, NativePermissionOutcome.SKIPPED)
                     batchIndependent = batchIndependent.drop(1)
                 }
@@ -212,12 +231,10 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
                 }
                 NativePermissionAction.ConfirmAccessibility -> {
                     requireForeground(); requireIdleQueue()
-                    if (batchIndependent.firstOrNull() == "accessibility") batchIndependent = batchIndependent.drop(1)
                     if (!queue.requestIfNeeded("accessibility")) openSystemSettings("accessibility")
                 }
                 NativePermissionAction.ConfirmRoot -> {
                     requireForeground(); requireIdleQueue()
-                    if (batchIndependent.firstOrNull() == "root") batchIndependent = batchIndependent.drop(1)
                     SetupManager.update(owner, JSONObject().put("capabilities", JSONObject().put("allowRoot", true)))
                     policy.recordRequested("root")
                     SetupRootVerification.start(owner)
@@ -229,7 +246,6 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
                 }
                 NativePermissionAction.ConfirmShizuku -> {
                     requireForeground(); requireIdleQueue()
-                    if (batchIndependent.firstOrNull() == "shizuku") batchIndependent = batchIndependent.drop(1)
                     if (!ShizukuAccess.get(owner).status().getBoolean("running")) openShizuku()
                     else if (!queue.requestIfNeeded("shizuku")) openShizuku()
                 }
@@ -246,7 +262,6 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
                 }
                 is NativePermissionAction.SetBackgroundEnabled -> {
                     requireForeground()
-                    if (batchIndependent.firstOrNull() == "background") batchIndependent = batchIndependent.drop(1)
                     BackgroundRuntime.setEnabled(owner, action.enabled)
                     saveDecision(BACKGROUND_DECISION, if (action.enabled) "enabled" else "disabled")
                 }
@@ -258,7 +273,6 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
                 NativePermissionAction.OpenRuntimeNotificationSettings -> { requireForeground(); openRuntimeNotificationSettings() }
                 NativePermissionAction.OpenEnergySettings -> {
                     requireForeground()
-                    if (batchIndependent.firstOrNull() == "battery") batchIndependent = batchIndependent.drop(1)
                     owner.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                 }
                 is NativePermissionAction.ReviewEnergy -> saveDecision(ENERGY_DECISION, if (action.later) "later" else "reviewed")
@@ -268,7 +282,8 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
                     if (action.paused) { pendingApprovalId = null; queue.cancel(); firstUse.cancelPending() }
                 }
             }
-            _state.update { it.copy(error = null) }
+            val rootRunning = SetupRootVerification.status().getBoolean("running")
+            _state.update { it.copy(error = null, queue = queueState(), root = it.root.copy(running = rootRunning)) }
         } catch (error: Exception) {
             val code = when (error.message) {
                 "PERMISSION_QUEUE_BUSY" -> "permission_queue_busy"
@@ -308,15 +323,19 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
         reconcilePendingApproval()
         reconcilePolling()
         if (refreshing?.isActive == true) { refreshAgain = true; return }
-        val queueSnapshot = queue.state()
         refreshing = scope.launch {
             if (!_state.value.fresh) _state.update { it.copy(loading = true) }
             try {
-                val snapshot = withContext(Dispatchers.IO) { snapshot(queueSnapshot) }
-                if (!snapshot.root.running && policy.records()["root"]?.outcome == NativePermissionOutcome.REQUESTING)
+                val snapshot = withContext(Dispatchers.IO) { snapshot() }
+                val rootRunning = SetupRootVerification.status().getBoolean("running")
+                if (!rootRunning && !snapshot.root.running && policy.records()["root"]?.outcome == NativePermissionOutcome.REQUESTING)
                     policy.recordOutcome("root", if (snapshot.root.verified) NativePermissionOutcome.GRANTED else NativePermissionOutcome.NOT_GRANTED)
                 val restoring = rootRevocation?.isActive == true
-                _state.update { snapshot.copy(error = it.error?.takeUnless { error -> error == "permission_state_failed" }, loading = restoring, fresh = !restoring) }
+                // A system read can finish after a confirmation has consumed its batch item.
+                // Keep the current control state instead of reviving the snapshot's old queue.
+                _state.update { snapshot.copy(error = it.error?.takeUnless { error -> error == "permission_state_failed" },
+                    loading = restoring, fresh = !restoring, batchIndependent = it.batchIndependent,
+                    queue = queueState(), root = snapshot.root.copy(running = rootRunning)) }
             } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 _state.update { it.copy(loading = false, fresh = false, error = "permission_state_failed") }
@@ -345,6 +364,7 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
 
     private fun queueChanged() {
         if (!::queue.isInitialized || closed) return
+        _state.update { it.copy(queue = queueState()) }
         val firstUseRequest = pendingApprovalId
         try {
             val current = queue.state().optString("current").takeIf(String::isNotBlank)
@@ -399,12 +419,16 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
         }
     }
 
-    private fun snapshot(queue: JSONObject): NativePermissionsState {
+    private fun queueState(): NativePermissionQueue {
+        val current = queue.state()
+        return NativePermissionQueue(current.getBoolean("active"), current.optString("current").takeIf(String::isNotBlank),
+            current.getJSONArray("pending").let { values -> (0 until values.length()).map(values::getString) },
+            current.getInt("total"), current.getInt("completed"), current.optString("error").takeIf(String::isNotBlank)?.let(NativeLocale::generatedStatus))
+    }
+
+    private fun snapshot(): NativePermissionsState {
         val setup = SetupManager.status(owner)
         val hardware = HardwarePermissionState.status(owner).getJSONObject("hardware")
-        val queueState = NativePermissionQueue(queue.getBoolean("active"), queue.optString("current").takeIf(String::isNotBlank),
-            queue.getJSONArray("pending").let { values -> (0 until values.length()).map(values::getString) },
-            queue.getInt("total"), queue.getInt("completed"), queue.optString("error").takeIf(String::isNotBlank)?.let(NativeLocale::generatedStatus))
         val records = policy.records()
         val system = ordinaryIds.filter { id -> supported(id, hardware) }.map { id ->
             val permissions = PermissionSetup.runtimePermissions(id)
@@ -427,7 +451,7 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
             NativeProductPermission(group.getString("id"), group.getString("preference"), group.getString("label"),
                 group.getString("section"), ProductPermissions.allowed(preferences, group.getString("preference")))
         }.filterNot { it.preference == "allowRoot" }
-        return NativePermissionsState(products = products, policy = policy.selected(), system = system, queue = queueState,
+        return NativePermissionsState(products = products, policy = policy.selected(), system = system,
             accessibility = NativeAccessibilityPermission(access.enabled(), DroyAccessibilityService.isConnected(owner)),
             root = NativeRootPermission(rootOptIn, rootExecutablePresent(), root.getBoolean("running"),
                 rootOptIn && setup.getJSONObject("deviceVerification").optBoolean("rootVerified"),
@@ -439,7 +463,7 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
                 notifications.areNotificationsEnabled(), channel?.let { it.importance != NotificationManager.IMPORTANCE_NONE },
                 preferences.contains(BACKGROUND_DECISION)),
             energy = NativeEnergyPermission(power?.isIgnoringBatteryOptimizations(owner.packageName), preferences.getString(ENERGY_DECISION, null)),
-            toolsPaused = ProductPermissions.stopped(owner), pendingRequests = policy.pendingRequests(), batchIndependent = batchIndependent)
+            toolsPaused = ProductPermissions.stopped(owner), pendingRequests = policy.pendingRequests())
     }
 
     private fun supported(id: String, hardware: JSONObject): Boolean = when (id) {

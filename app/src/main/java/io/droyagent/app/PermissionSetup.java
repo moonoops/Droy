@@ -95,7 +95,7 @@ final class PermissionSetup {
     void requestOrdinaryPermissions(Set<String> permissions) throws Exception {
         if (!PermissionSetupPlan.ordinaryPermissionNames().containsAll(permissions))
             throw new IllegalArgumentException("Invalid ordinary permission set");
-        start(PermissionSetupPlan.ordinaryPermissionNames().stream().filter(permissions::contains).toList());
+        start(PermissionSetupPlan.ordinaryPermissionNames().stream().filter(permissions::contains).collect(java.util.stream.Collectors.toList()));
     }
 
     boolean requestIfNeeded(String name) throws Exception {

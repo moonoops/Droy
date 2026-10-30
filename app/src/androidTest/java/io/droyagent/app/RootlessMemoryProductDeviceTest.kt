@@ -43,6 +43,57 @@ class RootlessMemoryProductDeviceTest {
     private var language = "en"
     private val client = NativeMemoryClient()
 
+    @Test fun memoryDefaultsActivateHostAndKeepAutomaticOffChoiceInBothLanguages() {
+        bindModels()
+        compose.onNodeWithTag("native-settings-memory").performScrollTo().assertIsEnabled().performClick()
+        awaitTag("native-memory-settings")
+        awaitMemory()
+        assertFalse(memory.state.value.status!!.settings.enabled)
+        assertFalse(memory.state.value.status!!.settings.automaticExtraction)
+        val modelLogs = listOf("native-fixture-calls.jsonl", "native-fixture-companion.jsonl")
+            .associateWith { File(fixture.home, it).length() }
+        val preferences = fixture.context.getSharedPreferences("droy_memory", Context.MODE_PRIVATE)
+        assertTrue(preferences.edit().remove("enabled").remove("automaticExtraction").commit())
+        restartHost()
+        compose.waitUntil(30_000) {
+            memory.state.value.status?.let { it.gateReady && it.settings.enabled && it.settings.automaticExtraction } == true
+        }
+        assertTrue(MemoryRuntime.get(fixture.context).status().getJSONObject("execution").getBoolean("ready"))
+        assertFalse("Default intent must not require rewriting the saved master choice", preferences.contains("enabled"))
+        assertFalse(preferences.contains("automaticExtraction"))
+        for (locale in listOf("en", "zh")) {
+            language(locale)
+            page(NativeMemoryPage.SETTINGS)
+            compose.onNodeWithTag("native-memory-master").assertIsOn()
+            compose.onNodeWithText(text(R.string.native_memory_automatic)).assertIsOn()
+            assertSourcesOff()
+            assertNoErrors()
+            capture("rootless-memory-defaults-$locale")
+        }
+        compose.onNodeWithText(text(R.string.native_memory_automatic)).performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(20_000) {
+            !memory.state.value.busy && !memory.state.value.loading && memory.state.value.status?.settings?.automaticExtraction == false
+        }
+        assertTrue(preferences.contains("automaticExtraction"))
+        assertFalse(preferences.getBoolean("automaticExtraction", true))
+        fixture.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        awaitTag("native-settings-memory")
+        compose.onNodeWithTag("native-settings-memory").performScrollTo().performClick()
+        awaitTag("native-memory-settings")
+        awaitMemory()
+        compose.onNodeWithTag("native-memory-master").assertIsOn()
+        compose.onNodeWithText(text(R.string.native_memory_automatic)).assertIsOff()
+        assertSourcesOff()
+        capture("rootless-memory-automatic-off-reopened-zh")
+        for ((name, length) in modelLogs)
+            assertEquals("Default memory and settings navigation must not dispatch model processing: $name", length, File(fixture.home, name).length())
+        File(fixture.context.getExternalFilesDir(null), "native-isolated-evidence/rootless-memory-defaults-receipt.json")
+            .writeText(JSONObject().put("defaultHostReady", true).put("memoryEnabled", true)
+                .put("automaticDefaultEnabled", true).put("savedAutomaticOffRetained", true)
+                .put("sourcesEnabled", false).put("modelProcessingCalls", 0)
+                .put("languages", org.json.JSONArray(listOf("en", "zh"))).toString(2))
+    }
+
     @Test fun memoryControlsAndDurableRecordsWorkInBothLanguagesWithoutRoot() {
         bindModels()
         assertFalse(ProductPermissions.allowed(ProductPermissions.preferences(fixture.context), "allowRoot"))

@@ -2116,7 +2116,7 @@ test('startup waits for workspace readiness and does not steal a user-selected w
   }
 });
 
-test('setup introduces the two chat companions and saves only the optional welcome address in both languages', async () => {
+test('setup introduces the initial companion and four presets and saves only the optional welcome address in both languages', async () => {
   for (const active of ['zh', 'en']) {
     const hooks = hookFixture(), locale = { getSnapshot: () => ({ active }), subscribe: () => () => {} };
     const saved = { ...state(), setup: { required: true, step: 4, mode: 'dialogue', modeSelected: true,
@@ -2127,7 +2127,9 @@ test('setup introduces the two chat companions and saves only the optional welco
     const Setup = fixture.registrations.find(row => row.options.id === 'droy-setup').component;
     let tree = nodes(hooks.render(Setup));
     const strings = tree.flatMap(node => node.children.filter(value => typeof value === 'string'));
-    assert.ok(strings.some(value => value.includes(active === 'en' ? 'Kaka and Maimai' : '咔咔和麦麦')));
+    assert.ok(strings.some(value => value.includes(active === 'en' ? 'Your first installation includes Kaka' : '首次安装自带咔咔')));
+    for (const name of active === 'en' ? ['Kaka', 'Maimai', 'Dafeiyu', 'Lady Claude'] : ['咔咔', '麦麦', '大肥鱼', 'Claude 大小姐'])
+      assert.ok(strings.some(value => value.includes(name)), `Setup must introduce the ${name} preset in ${active}`);
     assert.ok(strings.some(value => value.includes(active === 'en' ? 'first chat' : '首次聊天')));
     assert.ok(strings.some(value => value.includes(active === 'en' ? 'without Root' : '无需 Root')));
     const optional = tree.find(node => node.type === 'details'); assert.notEqual(optional.props.open, true);

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import io.droyagent.app.NativeRuntimeHost
 import io.droyagent.app.nativeui.data.NativeApiException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -75,7 +76,7 @@ class NativeAdvancedViewModel(application: Application) : AndroidViewModel(appli
             inlineReceipt = AdvancedInlineReceipt(result.getString("status"), result.getString("credential"), result.getString("inline"), result.getString("ref")),
         ) }
     }
-    fun loadApprovedPlugins() = action {
+    fun loadApprovedPlugins(): Boolean = startAction(loading = true) {
         val result = api.call("/approved-plugins")
         mutable.update { it.copy(approvedPlugins = AdvancedJson.approved(result), approvedLoaded = true) }
     }
@@ -168,12 +169,20 @@ class NativeAdvancedViewModel(application: Application) : AndroidViewModel(appli
         pendingBuilds = if (installResult) value.optJSONArray("pendingBuilds")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList() else it.pendingBuilds,
         incompatible = ((if (installResult) emptyList() else it.incompatible) + AdvancedJson.incompatible(value.optJSONObject("error")?.optJSONArray("incompatible")) + AdvancedJson.incompatible(value.optJSONObject("packageResult")?.optJSONArray("incompatible"))).distinctBy { candidate -> candidate.packageVersion to candidate.runtimeVersion }) } }
     fun dismissError() { mutable.update { it.copy(error = null) } }
-    private fun action(block: suspend () -> Unit) {
-        if (request?.isActive == true) return
-        request = viewModelScope.launch {
-            mutable.update { it.copy(busy = true, error = null, receipt = null, inlineReceipt = null) }
-            try { block() } catch (e: Exception) { failure(e) } finally { mutable.update { it.copy(busy = false) } }
+    private fun action(block: suspend () -> Unit) { startAction(block = block) }
+    private fun startAction(loading: Boolean = false, block: suspend () -> Unit): Boolean {
+        if (request != null) return false
+        val task = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try { block() } catch (e: Exception) { failure(e) } finally {
+                // Observers may immediately submit the next read when busy becomes false.
+                request = null
+                mutable.update { it.copy(busy = false, loading = false) }
+            }
         }
+        request = task
+        mutable.update { it.copy(busy = true, loading = loading, error = null, receipt = null, inlineReceipt = null) }
+        task.start()
+        return true
     }
     private fun failure(e: Exception) { if (e is CancellationException) throw e; mutable.update { it.copy(error = if (e is NativeApiException) e.code else if (e is IllegalArgumentException || e is org.json.JSONException) "NATIVE_ADVANCED_INVALID" else "request_failed") } }
 }

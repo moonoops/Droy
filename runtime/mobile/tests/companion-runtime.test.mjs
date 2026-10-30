@@ -158,9 +158,12 @@ async function fixture(t, { directory, store: suppliedStore, legacy = true, debo
     if (profile.id === 'maimai') await store.updateProfile(profile.id, { model: modelB });
   }
   let closed = false;
+  const runtimes = new Set([runtime]);
   const close = async () => {
     if (closed) return; closed = true;
-    try { await runtime.close(); }
+    // Restarted instances share this fixture's store and vault, so retire them
+    // before disposing their context or deleting the owned files.
+    try { for (const instance of [...runtimes].reverse()) await instance.close(); }
     finally {
       await ctx.fiber.dispose();
       if (!suppliedStore) await store.close();
@@ -168,7 +171,8 @@ async function fixture(t, { directory, store: suppliedStore, legacy = true, debo
     }
   };
   t.after(close);
-  return { ctx: runtimeContext, store, runtime, calls, workspaces, agents, directory, originals, close };
+  return { ctx: runtimeContext, store, runtime, calls, workspaces, agents, directory, originals, close,
+    ownRuntime(instance) { runtimes.add(instance); return instance; } };
 }
 
 function workbenchMemory(f) {
@@ -321,7 +325,7 @@ test('each companion uses its own model and resumes its durable chat identity', 
   const kakaId = kaka.id;
   await f.runtime.close();
   const resumed = new CompanionRuntime({ ctx: f.ctx, store: f.store, directory: f.directory });
-  t.after(() => resumed.close());
+  f.ownRuntime(resumed);
   await resumed.initialize();
   const restored = await resumed.agent('kaka');
   assert.equal(restored.id, kakaId);
@@ -348,7 +352,7 @@ test('new instances remain lazy and first concurrent use creates one durable pri
   const originalWorkspace = profile.workspaceId;
   await f.runtime.close();
   const resumed = new CompanionRuntime({ ctx: f.ctx, store: f.store, directory: f.directory });
-  t.after(() => resumed.close()); await resumed.initialize();
+  f.ownRuntime(resumed); await resumed.initialize();
   const restored = await resumed.agent(profile.id);
   assert.equal(restored.id, first.id); assert.equal((await f.store.getProfile(profile.id)).workspaceId, originalWorkspace);
   assert.equal(f.workspaces.size, 2); assert.equal(f.calls.agents.at(-1).resumed, true);
@@ -363,7 +367,7 @@ test('missing saved workspace bindings surface an error without inventing a repl
   assert.equal(f.workspaces.size, count); assert.equal(f.calls.agents.length, 0);
   await f.runtime.close();
   const reopened = new CompanionRuntime({ ctx: f.ctx, store: f.store, directory: f.directory });
-  t.after(() => reopened.close());
+  f.ownRuntime(reopened);
   await assert.rejects(reopened.initialize(), code('COMPANION_WORKSPACE_NOT_FOUND'));
   assert.equal((await f.store.getProfile(profile.id)).workspaceId, 'missing-durable-workspace');
 });
@@ -799,7 +803,7 @@ test('a forgotten pending input is never readmitted by retry or startup recovery
   await f.runtime.forget('kaka',{recordId:record.recordId,expectedRevisionId:record.revisionId});
   await f.runtime.retry('kaka');assert.deepEqual((await f.store.getState('kaka')).pendingMessageIds,[]);
   assert.equal(f.runtime.state('kaka').pending.length,0);assert.equal(f.calls.agents.length,1);
-  await f.runtime.close();const resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,options:{debounceMs:0}});t.after(()=>resumed.close());
+  await f.runtime.close();const resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,options:{debounceMs:0}});f.ownRuntime(resumed);
   await resumed.initialize();await resumed.start();assert.equal(resumed.state('kaka').pending.length,0);
 });
 
@@ -1005,7 +1009,7 @@ test('restart completes an older saved multi-part reply without replaying the us
   const abort=new AbortController(),cancelAfterFirst=f.runtime.subscribe(event=>{if(event.kind==='message')abort.abort();});
   await assert.rejects(f.runtime.publish('kaka',draft,abort.signal));cancelAfterFirst();
   assert.equal((await f.store.listMessages('kaka')).messages.filter(item=>item.role==='assistant').length,1);
-  await f.runtime.close();const resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,options:{debounceMs:0,typingMinMs:0,typingMaxMs:0}});t.after(()=>resumed.close());
+  await f.runtime.close();const resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,options:{debounceMs:0,typingMinMs:0,typingMaxMs:0}});f.ownRuntime(resumed);
   await resumed.initialize();await resumed.start();
   const draftId=(await f.store.getState('kaka')).replyDraft.id;
   await resumed.submit('kaka',{clientId:'partial-reply',text:'Fictional request'});
@@ -1068,7 +1072,7 @@ test('startup restores a crashed wait before pending input without replaying the
   await f.store.updateState('kaka',{chatNeedsReset:true,waitingUntil:new Date(Date.now()+120).toISOString(),
     pendingIntent:{kind:'wait',sessionId:original.id,sourceMessageIds:['waiting-source']}});
   await f.runtime.close();
-  const resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,options:{debounceMs:0}});t.after(()=>resumed.close());
+  const resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,options:{debounceMs:0}});f.ownRuntime(resumed);
   await resumed.initialize();await resumed.start();
   assert.equal((await f.store.getProfile('kaka')).chatSessionId,original.id);
   assert.equal(resumed.state('kaka').phase,'waiting');
@@ -1093,7 +1097,7 @@ test('closing an active wait preserves its deadline and restart resumes it once'
   await f.runtime.close();assert.equal((await waiting).error?.name,'AbortError');
   assert.equal((await f.store.getState('kaka')).waitingUntil,saved.waitingUntil);
   assert.deepEqual((await f.store.getState('kaka')).pendingIntent,saved.pendingIntent);
-  const resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,options:{debounceMs:0}});t.after(()=>resumed.close());
+  const resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,options:{debounceMs:0}});f.ownRuntime(resumed);
   await resumed.initialize();await resumed.start();
   assert.equal(f.calls.agents.length,1);assert.equal(resumed.state('kaka').phase,'waiting');
   await eventually(()=>f.calls.agents.length===2,'active wait resumed after restart');
@@ -1249,7 +1253,7 @@ test('a forget request cannot relearn its repeated fact and cancels work that ex
   assert.ok(f.calls.cancelled.some(item=>item.id===worker.id));
   assert.ok((await f.runtime.context('kaka')).messages.every(item=>!item.text.includes('Fictional private city')));
   assert.match((await f.store.listMessages('kaka')).messages.at(-1).text,/no longer use|stopped using/i);
-  assert.match((await f.store.listMessages('kaka')).messages.at(-1).text,/workbench/i);
+  assert.match((await f.store.listMessages('kaka')).messages.at(-1).text,/\bTasks\b/);
   assert.equal((await memory.get(record.recordId)).payload.text,'Fictional private city','chat suppression must retain the source body');
 });
 
@@ -1467,7 +1471,7 @@ test('restart recovers proactive drafts without reply targets and rechecks opt-o
     await f.runtime.close();
     const resumed = new CompanionRuntime({ ctx: f.ctx, store: f.store, directory: f.directory,
       options: { debounceMs: 0, getClock: async () => ({ now: '2026-10-30T23:30:00+08:00', timeZone: 'Asia/Shanghai' }) } });
-    child.after(() => resumed.close());
+    f.ownRuntime(resumed);
     await resumed.initialize(); await resumed.start();
     await eventually(async () => !(await f.store.getState('kaka')).replyDraft, 'proactive draft recovery or suppression');
     const replies = (await f.store.listMessages('kaka')).messages.filter(message => message.role === 'assistant');
@@ -1523,7 +1527,7 @@ test('restart preserves pending purge isolation and resubmits its operation only
   await f.runtime.close();
   const resumedRequests=[],resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,
     options:{requestMemoryPurge:async input=>{resumedRequests.push(structuredClone(input));return {pending:true};}}});
-  t.after(()=>resumed.close());
+  f.ownRuntime(resumed);
   try {
     await resumed.initialize();
     assert.deepEqual(resumedRequests,[],'Initialization must not call a native bridge that is not ready yet');

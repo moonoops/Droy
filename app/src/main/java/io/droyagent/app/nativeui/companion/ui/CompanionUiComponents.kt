@@ -21,7 +21,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -299,7 +299,7 @@ internal fun companionStatusLabel(status: NativeCompanionStatus, stopping: Boole
 
 @Composable
 internal fun companionTime(value: String?, dateOnly: Boolean = false): String? {
-    val locale = LocalContext.current.resources.configuration.locales[0]
+    val locale = LocalConfiguration.current.locales[0]
     return remember(value, locale, dateOnly) {
         if (value.isNullOrEmpty()) null else try {
             val format = if (dateOnly) DateFormat.getDateInstance(DateFormat.SHORT, locale) else DateFormat.getTimeInstance(DateFormat.SHORT, locale)
@@ -310,7 +310,7 @@ internal fun companionTime(value: String?, dateOnly: Boolean = false): String? {
 
 @Composable
 internal fun companionConversationTime(value: String?): String? {
-    val locale = LocalContext.current.resources.configuration.locales[0]
+    val locale = LocalConfiguration.current.locales[0]
     return remember(value, locale) {
         if (value.isNullOrEmpty()) null else try {
             val date = Date.from(Instant.parse(value))

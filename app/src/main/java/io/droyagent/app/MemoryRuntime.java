@@ -59,13 +59,13 @@ final class MemoryRuntime {
         history.start();
     }
     private boolean captureReady() {
-        return executionReady() && preferences.getBoolean("enabled",false) && !ProductPermissions.stopped(context);
+        return executionReady() && preferences.getBoolean("enabled",true) && !ProductPermissions.stopped(context);
     }
     private boolean executionReady() { return runtimeActive && activated && hostReady; }
     JSONObject settings() throws Exception {
-        return new JSONObject().put("enabled", preferences.getBoolean("enabled", false))
+        return new JSONObject().put("enabled", preferences.getBoolean("enabled", true))
             .put("recallEnabled", true)
-            .put("automaticExtraction", preferences.getBoolean("automaticExtraction", false))
+            .put("automaticExtraction", preferences.getBoolean("automaticExtraction", true))
             .put("privacyEverActivated", preferences.getBoolean("privacyEverActivated", false));
     }
     JSONObject status() throws Exception {
@@ -119,9 +119,9 @@ final class MemoryRuntime {
     }
     private JSONObject saveSettings(JSONObject patch) throws Exception {
         fields(patch, "enabled", "recallEnabled", "automaticExtraction");
-        boolean enabling = bool(patch, "enabled", preferences.getBoolean("enabled", false));
+        boolean enabling = bool(patch, "enabled", preferences.getBoolean("enabled", true));
         boolean recall = true;
-        boolean extraction = bool(patch, "automaticExtraction", preferences.getBoolean("automaticExtraction", false));
+        boolean extraction = bool(patch, "automaticExtraction", preferences.getBoolean("automaticExtraction", true));
         synchronized (lock) {
             if (patch.has("enabled") && enabling && !executionReady()) throw new IllegalStateException("MEMORY_EXECUTION_NOT_READY");
             SharedPreferences.Editor edit=preferences.edit().putBoolean("enabled",enabling).putBoolean("recallEnabled",recall).putBoolean("automaticExtraction",extraction);

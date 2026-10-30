@@ -91,6 +91,9 @@ class NativeIsolatedRuntimeFixture(private val destination: String = "workbench"
             }
             changedPreferences = true
             preferences.keys.forEach { assertTrue(context.getSharedPreferences(it, 0).edit().clear().commit()) }
+            // Memory has its own private stores; unrelated fixtures must not initialize or collect into them.
+            assertTrue(context.getSharedPreferences("droy_memory", 0).edit()
+                .putBoolean("enabled", false).putBoolean("automaticExtraction", false).commit())
             assertTrue(context.getSharedPreferences("installation", 0).edit().putBoolean("completed", true).commit())
             val product = context.getSharedPreferences("product", 0).edit().putString("languagePreference", fixtureLocale)
                 .putBoolean(BackgroundRuntime.STOPPED, true).putBoolean("petEnabled", false)

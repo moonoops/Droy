@@ -180,7 +180,7 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
                     }
                     val archived = catalog.archivedSessionIds.toSet()
                     val sessions = catalog.sessions.map {
-                        NativeSession(it.id, it.title?.takeIf(String::isNotBlank) ?: it.id, it.running, it.workspaceId, it.readOnly, it.id in archived)
+                        NativeSession(it.id, it.title.orEmpty(), it.running, it.workspaceId, it.readOnly, it.id in archived)
                     }
                     val defaultWorkspace = catalog.defaultWorkspaceId
                     synchronized(draftPersistenceLock) {

@@ -15,7 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -459,7 +459,7 @@ private fun scheduleRule(record: NativeScheduleRecord): String = when (record.ki
 
 @Composable
 private fun scheduleInstant(value: String, zone: String?): String {
-    val locale = LocalContext.current.resources.configuration.locales[0]
+    val locale = LocalConfiguration.current.locales[0]
     val actualZone = try { zone?.let(ZoneId::of) ?: ZoneId.systemDefault() } catch (_: DateTimeException) { ZoneOffset.UTC }
     val text = remember(value, actualZone, locale) {
         DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT).withLocale(locale).withZone(actualZone).format(Instant.parse(value))

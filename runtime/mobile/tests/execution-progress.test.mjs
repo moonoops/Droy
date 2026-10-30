@@ -38,6 +38,7 @@ test('a ten-second thought is not an error and a real retry cancels that announc
   progress.sessionEvent(session, { type: 'step/start', data: {} }); await settle();
   callbacks.at(-1)(); await settle();
   assert.equal(sent.at(-1).activityKind, 'thinking');
+  assert.equal(sent.at(-1).summaryKind, 'slow');
   assert.equal(sent.at(-1).summary, 'Thinking it through. You can stop the task at any time.');
   progress.sessionEvent(session, { type: 'step/start', data: {} });
   progress.sessionEvent(session, { type: 'llm/retry', data: {} }); await settle();
@@ -45,6 +46,7 @@ test('a ten-second thought is not an error and a real retry cancels that announc
   callbacks.at(-1)(); await settle();
   assert.equal(sent.at(-1), retry);
   assert.equal(retry.activityKind, undefined);
+  assert.equal(retry.summaryKind, 'error');
   assert.match(retry.summary, /request failed/);
   locale = 'zh';
   progress.sessionEvent(session, { type: 'tool/call', data: { name: 'android_observe' } });
@@ -312,9 +314,44 @@ test('a real request retry clears stale action copy without a model or inferred 
   progress.publicSummary(session.id, '正在打开应用', 'executing');
   progress.sessionEvent(session, { type: 'llm/retry', data: { failure: { message: 'private provider detail' } } }); await settle();
   assert.equal(sent.at(-1).summary, '模型请求失败，正在等待重试，可停止任务');
+  assert.equal(sent.at(-1).summaryKind, 'error');
   assert.equal(sent.at(-1).active, true);
   assert.equal(JSON.stringify(sent).includes('private'), false);
   progress.sessionEvent(session, { type: 'tool/call', data: { name: 'android_observe' } }); await settle();
   assert.equal(sent.at(-1).phase, 'executing');
+  assert.equal(sent.at(-1).summaryKind, 'working');
   progress.dispose();
+});
+
+test('only an actual model retry marks an error and pending input keeps priority in both languages', async () => {
+  for (const locale of ['zh', 'en']) {
+    const sent = [], session = { id: `retry-kind-${locale}` };
+    const progress = createExecutionProgress(async row => sent.push(row), () => assert.fail(), undefined, () => locale);
+    progress.publicSummary(session.id, '用户原文包含错误两个字', 'thinking'); await settle();
+    assert.equal(sent.at(-1).summary, '用户原文包含错误两个字');
+    assert.equal(sent.at(-1).summaryKind, undefined);
+    progress.toolFailure(session.id, 'recoverable', { code: 'stale_snapshot' });
+    progress.sessionEvent(session, { type: 'tool/result', data: { message: { toolCallId: 'recoverable', isError: true } } });
+    await settle();
+    assert.equal(sent.at(-1).summaryKind, 'working');
+    progress.sessionEvent(session, { type: 'llm/retry', data: { failure: { message: 'private provider detail' } } });
+    await settle();
+    assert.equal(sent.at(-1).summaryKind, 'error');
+    assert.equal(sent.at(-1).activityKind, undefined);
+    assert.equal(sent.at(-1).summary, locale === 'zh' ? '模型请求失败，正在等待重试，可停止任务'
+      : 'The model request failed. Waiting to retry; you can stop the task.');
+    progress.waiting(session.id, { requestId: 'question', message: '用户原始问题', options: [], inline: false }); await settle();
+    progress.sessionEvent(session, { type: 'llm/retry', data: {} }); await settle();
+    assert.equal(sent.at(-1).phase, 'waiting_input');
+    assert.equal(sent.at(-1).summary, '用户原始问题');
+    assert.equal(sent.at(-1).summaryKind, undefined);
+    assert.equal(sent.at(-1).activityKind, undefined);
+    progress.waiting(session.id, null); await settle();
+    assert.equal(sent.at(-1).summaryKind, 'error');
+    progress.sessionEvent(session, { type: 'turn/end', data: { reason: { kind: 'aborted' } } }); await settle();
+    assert.equal(sent.at(-1).active, false);
+    assert.equal(sent.at(-1).summaryKind, undefined);
+    assert.equal(JSON.stringify(sent).includes('private'), false);
+    progress.dispose();
+  }
 });

@@ -120,6 +120,11 @@ class NativeCompanionCreationDeviceTest {
             val tag = "native-creation-template-$id"
             compose.onNodeWithTag("native-creation-templates").performScrollToNode(hasTestTag(tag))
             compose.onNodeWithTag(tag).assertIsDisplayed().assertTextContains(names.getValue(id), substring = true)
+            val nameLayouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            compose.onNodeWithTag("native-creation-template-name-$id", useUnmergedTree = true)
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(nameLayouts) }
+            assertEquals("Template names must stay on one line", 1, nameLayouts.single().lineCount)
+            assertFalse("Template name $id must remain fully visible", nameLayouts.single().isLineEllipsized(0))
             val avatar = template.getString("avatarUrl")
             compose.waitUntil(15_000) { cachedCompanionImageSize(avatar) != null }
             val dimensions = requireNotNull(cachedCompanionImageSize(avatar))
@@ -361,6 +366,11 @@ class NativeCompanionCreationDeviceTest {
 
     private fun bindModels() { fixture.scenario.onActivity { activity -> creation = ViewModelProvider(activity)[NativeCompanionCreationViewModel::class.java]; companions = ViewModelProvider(activity)[NativeCompanionViewModel::class.java] } }
     private fun openCreation(assertVisible: Boolean = true) {
+        lateinit var navigation: io.droyagent.app.nativeui.navigation.NativeExternalNavigationViewModel
+        fixture.scenario.onActivity { navigation = ViewModelProvider(it)[io.droyagent.app.nativeui.navigation.NativeExternalNavigationViewModel::class.java] }
+        // Tab buttons exist before the initial launch destination has been acknowledged.
+        // Wait for that destination so its deferred root navigation cannot replace this tap.
+        compose.waitUntil(20_000) { navigation.state.value.restored && navigation.state.value.request == null }
         awaitNode("native-tab-messages"); compose.onNodeWithTag("native-tab-messages").performClick()
         awaitNode("native-add-companion"); compose.onNodeWithTag("native-add-companion").performClick()
         compose.waitUntil(20_000) { creation.state.value.runtime.ready && creation.state.value.catalogLoaded && !creation.state.value.loading }
@@ -373,7 +383,15 @@ class NativeCompanionCreationDeviceTest {
         SystemClock.sleep(250)
         fixture.capture(name)
     }
-    private fun awaitNode(tag: String) { compose.waitUntil(20_000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes(false).isNotEmpty() }; compose.waitForIdle() }
+    private fun awaitNode(tag: String) {
+        try {
+            compose.waitUntil(20_000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes(false).isNotEmpty() }
+            compose.waitForIdle()
+        } catch (failure: ComposeTimeoutException) {
+            fixture.capture("creation-missing-$tag")
+            throw failure
+        }
+    }
     private fun pressAndroidBack() { instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); compose.waitForIdle() }
     private fun done() { compose.onNodeWithText(context.getString(R.string.native_companion_creation_apply)).performScrollTo().performClick() }
     private fun back() { compose.onNodeWithContentDescription(context.getString(R.string.native_companion_back)).performClick() }

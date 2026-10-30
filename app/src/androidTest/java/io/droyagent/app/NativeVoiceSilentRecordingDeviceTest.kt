@@ -2,6 +2,7 @@ package io.droyagent.app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -16,6 +17,7 @@ import io.droyagent.app.nativeui.voiceinput.NativeVoiceInputViewModel
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.UUID
+import java.util.Locale
 import java.security.MessageDigest
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
@@ -102,6 +104,8 @@ class NativeVoiceSilentRecordingDeviceTest {
             assertTrue("Released original must enter the timeline before ASR/send completes", operation in immediateBubbles)
             assertTrue("Silent release must automatically send original: ${voice.state.value}", operation in accepted)
             assertNull(voice.state.value.operationId)
+            compose.onNodeWithTag("native-root-navigation").assertIsDisplayed()
+            compose.onNodeWithTag("native-tab-workbench").assertIsSelected()
             val original = requireNotNull(originals[operation])
             assertTrue(original.size > 44)
             // Emulator fallback input before/after injection can contain generated samples. Require
@@ -137,6 +141,17 @@ class NativeVoiceSilentRecordingDeviceTest {
                     .fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithContentDescription(context.getString(R.string.native_work_pause)).performClick()
+            // A raw recording can have no text from which to generate a title. Opening
+            // its details must show a product label rather than the internal UUID.
+            compose.waitUntil(15_000) { work.state.value.sessions.any { it.id == session } }
+            assertTrue(work.state.value.sessions.single { it.id == session }.title.isBlank())
+            compose.onNodeWithTag("native-space-switch").performClick()
+            compose.onNodeWithTag("native-spaces-chats").performScrollToNode(hasTestTag("native-space-session:$session"))
+            compose.onNodeWithTag("native-space-session:$session").performClick()
+            val localized = context.createConfigurationContext(Configuration(context.resources.configuration).apply {
+                setLocale(Locale.forLanguageTag(work.state.value.runtime.locale))
+            })
+            compose.onNodeWithTag("native-workbench-title").assertTextContains(localized.getString(R.string.native_new_session))
             val calls = File(fixture.home, "native-fixture-calls.jsonl").readLines().filter(String::isNotBlank).map(::JSONObject)
             assertEquals(1, calls.count { !it.optBoolean("title") && it.optString("sessionId") == session })
             compose.onNodeWithTag("native-inline-voice").assertDoesNotExist()

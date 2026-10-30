@@ -167,7 +167,9 @@ public final class RuntimeService extends Service {
         if (active == null) return;
         new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
             if (instance != active || !ready || active.stopping
-                    || !active.getSharedPreferences("product", MODE_PRIVATE).getBoolean("returnToDroyOnCompletion", false)) return;
+                    || !active.getSharedPreferences("product", MODE_PRIVATE).getBoolean("returnToDroyOnCompletion", true)) return;
+            // Completion returns from other screens; a visible conversation already owns its result.
+            if (NativeRuntimeHost.isConversationVisible(taskId)) return;
             JSONObject progress = ToolProgress.current(active);
             // A new task can begin while the completion notification waits for the UI thread.
             if (taskId.equals(progress.optString("taskId")) && !progress.optBoolean("active")

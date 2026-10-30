@@ -42,7 +42,7 @@ public final class NativeProductSettingsHost {
                 .put("browserEncryptedDns", preferences.getBoolean("browserEncryptedDns", false))
                 .put("automationScreenDisplay", preferences.getBoolean("automationScreenDisplay", true))
                 .put("automationScreenDisplayReady", io.droyagent.androiduse.DroyAccessibilityService.isConnected(context) || Settings.canDrawOverlays(context))
-                .put("returnToDroyOnCompletion", preferences.getBoolean("returnToDroyOnCompletion", false));
+                .put("returnToDroyOnCompletion", preferences.getBoolean("returnToDroyOnCompletion", true));
             case "notifications" -> NotificationManagement.get(context).state(true);
             case "proactive" -> ProactiveNotifications.get(context).status(true);
             case "pet" -> new JSONObject().put("petEnabled", preferences.getBoolean("petEnabled", true))

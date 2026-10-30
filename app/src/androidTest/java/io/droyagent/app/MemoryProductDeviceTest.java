@@ -43,7 +43,8 @@ public final class MemoryProductDeviceTest {
         ownsState=true;
         for(String name:PRESERVE)journal.preserve(name);
         assertTrue(new File(context.getFilesDir(),"dsh-home").mkdirs());
-        assertTrue(context.getSharedPreferences("droy_memory",Context.MODE_PRIVATE).edit().clear().commit());
+        assertTrue(context.getSharedPreferences("droy_memory",Context.MODE_PRIVATE).edit().clear()
+            .putBoolean("enabled",false).putBoolean("automaticExtraction",false).commit());
         assertTrue(ProductPermissions.preferences(context).edit().putBoolean("allowRoot",false).commit());
         progress("fixture_prepared");
         activity=(MainActivity)instrumentation.startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));

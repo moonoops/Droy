@@ -45,6 +45,30 @@ public final class RootlessMemoryLifecycleDeviceTest {
             .putBoolean(ProductPermissions.STOPPED, false).commit());
     }
 
+    @Test public void defaultsEnableMemoryAndOrganizationWhileSavedOffChoicesAndReadinessAreKept() throws Exception {
+        assertTrue(runtime.settings().getBoolean("enabled"));
+        assertTrue(runtime.settings().getBoolean("automaticExtraction"));
+        assertFalse(runtime.settings().getBoolean("privacyEverActivated"));
+        assertFalse(runtime.status().getJSONObject("execution").getBoolean("ready"));
+        runtime.prepareRuntimeStart();
+        runtime.runtimeStarted();
+        expect("MEMORY_EXECUTION_NOT_READY", () -> settings(true));
+        expect("MEMORY_EXECUTION_NOT_READY", () -> request("initialization.prepare"));
+        runtime.request(new JSONObject().put("operation", "settings").put("patch", new JSONObject()
+            .put("enabled", false).put("automaticExtraction", false)));
+        runtime.runtimeStopped();
+        runtime.prepareRuntimeStart();
+        runtime.runtimeStarted();
+        runtime.request(new JSONObject().put("operation", "settings").put("patch", new JSONObject()));
+        assertFalse(runtime.settings().getBoolean("enabled"));
+        assertFalse(runtime.settings().getBoolean("automaticExtraction"));
+        assertFalse(runtime.settings().getBoolean("privacyEverActivated"));
+        assertFalse(runtime.status().getJSONObject("execution").getBoolean("ready"));
+        JSONObject sources = runtime.historyRequest(new JSONObject().put("operation", "status")).getJSONObject("configuration");
+        for (String key : new String[]{"enabled", "activityEnabled", "pageTextEnabled", "deviceStateEnabled", "locationEnabled"})
+            assertFalse("Memory defaults cannot grant a source: " + key, sources.getBoolean(key));
+    }
+
     @Test public void firstActivationAndLegacyRestartWorkWithoutRootAndKeepNativeGuards() throws Exception {
         runtime.prepareRuntimeStart();
         runtime.runtimeStarted();

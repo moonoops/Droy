@@ -21,7 +21,6 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Shape
 import io.droyagent.app.nativeui.ui.DroySettingsSectionTitle
 import androidx.compose.ui.res.stringResource
@@ -93,9 +92,7 @@ fun NativePermissionsScreen(
         }
     }
     BackHandler(enabled = page != null || state.queue.active || state.pendingRequests.isNotEmpty() || state.batchIndependent.isNotEmpty(), onBack = back)
-    LaunchedEffect(state.fresh, state.queue.active, state.root.running, state.batchIndependent, confirmation) {
-        if (idle && confirmation == null && state.batchIndependent.isNotEmpty()) confirmation = state.batchIndependent.first()
-    }
+    val batchConfirmation = state.batchIndependent.firstOrNull()?.takeIf { idle && confirmation == null }
     Scaffold(modifier.fillMaxSize().testTag("native-permissions"), containerColor = MaterialTheme.colorScheme.surface,
         contentWindowInsets = WindowInsets(0, 0, 0, 0), topBar = {
             if (!embedded || page != null) Surface(color = MaterialTheme.colorScheme.surface) {
@@ -147,32 +144,28 @@ fun NativePermissionsScreen(
             item(key = "policy") {
                 Column {
                     DroySettingsSectionTitle(stringResource(R.string.native_permissions_authorization))
-                    BoxWithConstraints(Modifier.fillMaxWidth()) {
-                        val stacked = maxWidth < 320.dp || LocalDensity.current.fontScale > 1.3f
-                        val width = if (stacked) maxWidth else (maxWidth - 8.dp) / 2
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { confirmation = "batch" }, enabled = idle,
-                                modifier = Modifier.width(width).heightIn(min = 48.dp).testTag("native-permissions-set-up-all")
-                                    .semantics { selected = state.policy == NativeAuthorizationPolicy.BATCH }) {
-                                if (state.policy == NativeAuthorizationPolicy.BATCH) {
-                                    DroyIcon(R.drawable.native_ui_check, null, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                }
-                                Text(stringResource(R.string.native_permissions_set_up_all))
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { confirmation = "batch" }, enabled = idle,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("native-permissions-set-up-all")
+                                .semantics { selected = state.policy == NativeAuthorizationPolicy.BATCH }) {
+                            if (state.policy == NativeAuthorizationPolicy.BATCH) {
+                                DroyIcon(R.drawable.native_ui_check, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
                             }
-                            val firstUse = state.policy == NativeAuthorizationPolicy.ON_FIRST_USE
-                            FilledTonalButton(onClick = { onAction(NativePermissionAction.SelectPolicy(NativeAuthorizationPolicy.ON_FIRST_USE)) }, enabled = idle,
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = if (firstUse) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
-                                    contentColor = if (firstUse) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer),
-                                modifier = Modifier.width(width).heightIn(min = 48.dp).testTag("native-permissions-first-use")
-                                    .semantics { selected = firstUse }) {
-                                if (firstUse) {
-                                    DroyIcon(R.drawable.native_ui_check, null, Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                }
-                                Text(stringResource(R.string.native_permissions_ask_first_use))
+                            Text(stringResource(R.string.native_permissions_set_up_all))
+                        }
+                        val firstUse = state.policy == NativeAuthorizationPolicy.ON_FIRST_USE
+                        FilledTonalButton(onClick = { onAction(NativePermissionAction.SelectPolicy(NativeAuthorizationPolicy.ON_FIRST_USE)) }, enabled = idle,
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = if (firstUse) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = if (firstUse) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("native-permissions-first-use")
+                                .semantics { selected = firstUse }) {
+                            if (firstUse) {
+                                DroyIcon(R.drawable.native_ui_check, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
                             }
+                            Text(stringResource(R.string.native_permissions_ask_first_use))
                         }
                     }
                 }
@@ -323,7 +316,7 @@ fun NativePermissionsScreen(
         }
         }
     }
-    confirmation?.let { kind ->
+    (confirmation ?: batchConfirmation)?.let { kind ->
         val title = when (kind) {
             "batch" -> R.string.native_permissions_confirm_batch
             "accessibility" -> R.string.native_permissions_confirm_accessibility
@@ -332,7 +325,7 @@ fun NativePermissionsScreen(
             "battery" -> R.string.native_permissions_battery
             else -> R.string.native_permissions_confirm_background
         }
-        AlertDialog(onDismissRequest = { if (kind in state.batchIndependent) onAction(NativePermissionAction.SkipIndependent(kind)); confirmation = null }, title = { Text(stringResource(title)) },
+        AlertDialog(onDismissRequest = { if (batchConfirmation != null) onAction(NativePermissionAction.SkipIndependent(kind)); confirmation = null }, title = { Text(stringResource(title)) },
             confirmButton = { TextButton(onClick = {
                 val action = when (kind) {
                     "batch" -> NativePermissionAction.SetUpOrdinary
@@ -342,9 +335,10 @@ fun NativePermissionsScreen(
                     "battery" -> NativePermissionAction.OpenEnergySettings
                     else -> NativePermissionAction.SetBackgroundEnabled(true)
                 }
-                confirmation = null; onAction(action)
+                confirmation = null
+                onAction(if (batchConfirmation != null) NativePermissionAction.ConfirmIndependent(kind) else action)
             }, modifier = Modifier.testTag("native-permissions-confirm:$kind")) { Text(stringResource(R.string.native_permissions_continue)) } },
-            dismissButton = { TextButton(onClick = { if (kind in state.batchIndependent) onAction(NativePermissionAction.SkipIndependent(kind)); confirmation = null }) { Text(stringResource(R.string.native_permissions_cancel)) } })
+            dismissButton = { TextButton(onClick = { if (batchConfirmation != null) onAction(NativePermissionAction.SkipIndependent(kind)); confirmation = null }) { Text(stringResource(R.string.native_permissions_cancel)) } })
     }
 }
 

@@ -208,10 +208,13 @@ fun NativeAppShell(
         keyboard?.hide()
         if (route == "permissions") permissionAction(NativePermissionAction.CancelQueue)
         if (!restoreScene) navigation.clearBackStack(page)
+        val start = navigation.graph.findStartDestination()
         navigation.navigate(page) {
-            popUpTo(navigation.graph.findStartDestination().id) { saveState = restoreScene }
+            popUpTo(start.id) { saveState = restoreScene }
             launchSingleTop = true
-            restoreState = restoreScene
+            // The start entry is retained by popUpTo. Its saved-state alias can
+            // point at the tab just popped, so restoring it would reopen that tab.
+            restoreState = restoreScene && page != start.route
         }
     }
     fun openCompanion(id: String) { companionModel.selectCompanion(id); open("chat/${Uri.encode(id)}") }
@@ -236,7 +239,7 @@ fun NativeAppShell(
             externalNavigation.accept(NativeExternalNavigationTarget.EngineSession(id))
             return
         }
-        workModel.selectSession(NativeSession(row.id, row.title ?: row.id, row.running, row.workspaceId, row.readOnly, row.id in catalog.archivedSessionIds))
+        workModel.selectSession(NativeSession(row.id, row.title.orEmpty(), row.running, row.workspaceId, row.readOnly, row.id in catalog.archivedSessionIds))
         workModel.refresh()
         open("work-session/${Uri.encode(id)}")
     }
@@ -299,10 +302,24 @@ fun NativeAppShell(
         val sent = voiceInputModel.state.value
         voiceInputModel.onAction(action)
         if (action == NativeVoiceInputAction.Done && sent.accepted && sent.visible && showingVoiceOwner(sent.target)) {
-            if (route == "voice-recovery") navigation.popBackStack()
-            when {
-                sent.target?.companionId != null -> openCompanion(sent.target.companionId)
-                sent.resultSessionId != null -> openWork(sent.resultSessionId)
+            // Inline capture already belongs to the visible conversation. Only recovery
+            // needs to reveal its owner after retiring the recording.
+            if (route == "voice-recovery") {
+                navigation.popBackStack()
+                val destination = navigation.currentBackStackEntry
+                when {
+                    sent.target?.companionId != null -> {
+                        val id = sent.target.companionId
+                        if (destination?.destination?.route != "chat/{id}" || destination?.arguments?.getString("id") != id)
+                            openCompanion(id)
+                    }
+                    sent.resultSessionId != null -> {
+                        val id = sent.resultSessionId
+                        val ownerVisible = destination?.destination?.route == "workbench" && workModel.state.value.selectedSessionId == id
+                            || destination?.destination?.route == "work-session/{id}" && destination?.arguments?.getString("id") == id
+                        if (!ownerVisible) openWork(id)
+                    }
+                }
             }
         }
     }
@@ -389,14 +406,14 @@ fun NativeAppShell(
                     transcriptModel.open(row.parentSessionId!!, row.id, null)
                     open("transcript/${Uri.encode(row.parentSessionId)}/${Uri.encode(row.id)}")
                 } else {
-                    workModel.selectSession(NativeSession(row.id, work.sessions.firstOrNull { it.id == row.id }?.title ?: row.id,
+                    workModel.selectSession(NativeSession(row.id, work.sessions.firstOrNull { it.id == row.id }?.title.orEmpty(),
                         false, row.workspaceId, row.readOnly, row.archived))
                     open("work-session/${Uri.encode(row.id)}")
                 }
             }
             is NativeExternalResolvedTarget.CompanionTask -> {
                 val row = target.session
-                workModel.selectSession(NativeSession(row.id, work.sessions.firstOrNull { it.id == row.id }?.title ?: row.id,
+                workModel.selectSession(NativeSession(row.id, work.sessions.firstOrNull { it.id == row.id }?.title.orEmpty(),
                     false, row.workspaceId, true, row.archived))
                 open("work-session/${Uri.encode(row.id)}")
             }
@@ -729,6 +746,7 @@ fun NativeAppShell(
             composable("engine/{section}", arguments = listOf(navArgument("section") { type = NavType.StringType })) { current ->
                 val section = if (current.arguments!!.getString("section") == "permissions") NativeEngineSettingsSection.PERMISSIONS else NativeEngineSettingsSection.PRESETS
                 val state by engineModel.state.collectAsStateWithLifecycle()
+                val ungroupedLabel = stringResource(R.string.native_ungrouped)
                 NativeEngineSettingsScreen(state, engineModel::onAction, onBack = ::back, section = section,
                     onCreatePreset = { preset ->
                         if (!workModel.state.value.sending && workModel.state.value.pendingRequestId == null) {
@@ -739,7 +757,7 @@ fun NativeAppShell(
                             if (target.selectedSessionId == null && (target.draft.isNotBlank() || target.draftAttachments.isNotEmpty())) {
                                 presetDraftId = target.draftId
                                 presetSpaceName = target.workspaces.firstOrNull { it.id == target.selectedWorkspaceId }?.title
-                                    ?: context.getString(R.string.native_ungrouped)
+                                    ?: ungroupedLabel
                                 presetToCreate = preset
                             } else createPresetDraft(preset, target.draftId)
                         }
@@ -761,7 +779,7 @@ fun NativeAppShell(
                 val target = voiceInput.target
                 val title = if (target?.companionId != null) companions.companions.firstOrNull { it.id == target.companionId }?.name
                     ?: stringResource(R.string.native_media_owner_unavailable)
-                else target?.workbench?.sessionId?.let { id -> work.sessions.firstOrNull { it.id == id }?.title }
+                else target?.workbench?.sessionId?.let { id -> work.sessions.firstOrNull { it.id == id }?.title?.takeIf(String::isNotBlank) }
                     ?: stringResource(R.string.native_workbench)
                 Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0), topBar = {
                     Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -804,15 +822,17 @@ fun NativeAppShell(
             }
             composable("schedules") {
                 ObserveSchedulePage(schedulesModel)
+                val reviewRequest = stringResource(R.string.native_review_schedule_request)
+                val failureMessage = stringResource(R.string.native_error_generic)
                 NativeSchedulesScreen(schedules, schedulesModel, onBack = ::back, onOpenSession = ::openWork,
                     onCreateConversation = {
                         shellScope.launch {
                             try {
-                                if (workModel.openScheduledTaskDraft(context.getString(R.string.native_review_schedule_request)))
+                                if (workModel.openScheduledTaskDraft(reviewRequest))
                                     root("workbench", restoreScene = false)
                             } catch (error: Exception) {
                                 if (error is kotlinx.coroutines.CancellationException) throw error
-                                snackbar.showSnackbar(context.getString(R.string.native_error_generic))
+                                snackbar.showSnackbar(failureMessage)
                             }
                         }
                     })
@@ -906,7 +926,7 @@ fun NativeAppShell(
         }
     }
     if (pendingPermission != null && route != "permissions") NativePermissionRequestSheet(permissions, pendingPermission, permissionAction,
-        sourceLabel = work.sessions.firstOrNull { it.id == pendingPermission.taskId }?.title
+        sourceLabel = work.sessions.firstOrNull { it.id == pendingPermission.taskId }?.title?.takeIf(String::isNotBlank)
             ?: companions.companions.firstOrNull { it.chatSessionId == pendingPermission.taskId }?.name)
     if (authorizeVoice || authorizeStandardVoice) AlertDialog(onDismissRequest = { authorizeVoice = false; authorizeStandardVoice = false; authorizeStandardWake = null },
         modifier = Modifier.testTag("native-voice-access-confirmation"),

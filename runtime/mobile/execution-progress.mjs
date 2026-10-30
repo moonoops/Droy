@@ -57,8 +57,8 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
       if (active && task.publicPhase === 'waiting') phase = 'waiting';
       if (phase === 'thinking' && task.recovery) phase = task.recovery.phase;
       summary = task.publicSummary ?? task.recovery?.summary ?? summaries[phase];
-      if (!task.publicSummary && (task.recovery ? task.recovery.summaryKind === 'working' : workingPhases.has(phase)))
-        summaryKind = 'working';
+      if (!task.publicSummary)
+        summaryKind = task.recovery ? task.recovery.summaryKind : workingPhases.has(phase) ? 'working' : undefined;
     }
     if (!active) { clearRequest(task); task.waiting = null; task.publicSummary = undefined; task.publicPhase = undefined; task.recovery = undefined; summary = summaries[phase]; summaryKind = undefined; }
     const activityKind = summaryKind === 'slow' ? 'thinking'
@@ -124,7 +124,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
           const task = taskFor(session.id);
           clearRequest(task);
           task.publicSummary = undefined; task.publicPhase = undefined;
-          task.recovery = { phase: 'thinking', summary: '模型请求失败，正在等待重试，可停止任务' };
+          task.recovery = { phase: 'thinking', summary: '模型请求失败，正在等待重试，可停止任务', summaryKind: 'error' };
           report(session.id, 'thinking', true);
           break;
         }

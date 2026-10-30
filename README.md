@@ -107,7 +107,7 @@ Notification organization applies only to apps you select. By default it keeps t
 
 When needed, Droy appears on your screen as the character you select. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
 
-Choose the built-in black cat, marmot or alpaca in **Settings → Pet**, without configuring an image model. Tap the on-screen companion and choose **Play actions** in its bubble to play kneading, the marmot's scream, or the alpaca's neck stretch and spit animations. Task answers and approvals take priority. **Pet studio** lets you preview every action before applying a character.
+Choose the built-in black cat, marmot or alpaca in **Settings → Pet**, without configuring an image model. Tap the on-screen companion to play an animation; double-tap to open its compact frosted-glass panel and choose **Play actions** for kneading, the marmot's scream, or the alpaca's neck stretch and spit animations. A pending question can still be opened with one tap. Ordinary task hints appear at least 30 seconds apart, at most three times per task; errors and questions appear promptly. Background blur follows device support and power-saving state. **Pet studio** lets you preview every action before applying a character.
 
 <details>
 <summary><strong>View companion task updates and handoff</strong></summary>
@@ -150,7 +150,7 @@ Following DSH's “everything is a plugin” philosophy, mobile adaptation, voic
 - Task context, page text, screenshots and attachments may be sent to your selected model. Provider terms and charges apply.
 - Voice recognition runs locally; recognized text goes to the conversation model. Readout uses your selected speech engine.
 - Notification organization sends selected notification text and your rules to the default model. Recognized verification-code and redacted notifications stay on the device; viewing or editing rules does not send notification history to the model.
-- Personal memory is off by default. Sources are enabled separately; model processing requires authorization for the endpoint, data category and purpose.
+- Personal memory and automatic organization are on by default. Activity, page, device-state and location sources are enabled separately; model processing requires authorization for the endpoint, data category and purpose.
 - Companion memory is private to each companion and uses local MemOS storage/retrieval with on-device multilingual embeddings. Removing a companion retains its memory on the device; request permanent deletion or restoration explicitly in Tasks. Memory records are not exposed as a browsing interface. Cloud synchronization is not enabled.
 
 You can stop tasks and change capabilities in settings. Background work depends on Android process availability. Before uninstalling, turn off notification management normally so it can restore settings it changed.

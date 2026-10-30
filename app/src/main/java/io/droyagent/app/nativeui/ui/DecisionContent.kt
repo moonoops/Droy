@@ -14,7 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -42,7 +42,8 @@ fun DecisionContent(
             items(decisions, key = { it.id }) { item ->
                 ListItem(
                     headlineContent = { Text(stringResource(if (item.kind == "approval") R.string.native_approval else R.string.native_question)) },
-                    supportingContent = { Text(sessions.firstOrNull { it.id == item.sessionId }?.title ?: item.sessionId) },
+                    supportingContent = { Text(sessions.firstOrNull { it.id == item.sessionId }?.title?.takeIf(String::isNotBlank)
+                        ?: stringResource(R.string.native_new_session)) },
                     modifier = Modifier.clickable { selectedId = item.id }.heightIn(min = 64.dp),
                     colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                 )
@@ -56,7 +57,7 @@ fun DecisionContent(
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding().navigationBarsPadding()
         .padding(horizontal = 24.dp).testTag("native-decision"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text(stringResource(if (decision.kind == "approval") R.string.native_approval else R.string.native_question), style = MaterialTheme.typography.headlineSmall)
-        Text(sessions.firstOrNull { it.id == decision.sessionId }?.title ?: decision.sessionId,
+        Text(sessions.firstOrNull { it.id == decision.sessionId }?.title?.takeIf(String::isNotBlank) ?: stringResource(R.string.native_new_session),
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (decision.kind == "approval") {
             ApprovalContent(decision, busy, onApproval)
@@ -73,7 +74,7 @@ fun DecisionContent(
 
 @Composable
 private fun ApprovalContent(decision: NativeDecision, busy: Boolean, answer: (String, Boolean) -> Unit) {
-    val language = LocalContext.current.resources.configuration.locales[0].language
+    val language = LocalConfiguration.current.locales[0].language
     val reason = (if (language == "zh") decision.displayReasonZh else decision.displayReasonEn) ?: decision.reason
     decision.toolName?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
     if (!reason.isNullOrBlank()) SelectionContainer { Text(reason, style = MaterialTheme.typography.bodyLarge) }

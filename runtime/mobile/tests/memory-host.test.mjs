@@ -9,7 +9,7 @@ import { createMobileMemoryHost } from '../memory-host.mjs';
 async function fixture(t, options = {}) {
   const directory = options.directory ?? await mkdtemp(join(tmpdir(), 'droy-memory-host-'));
   const calls = [], opened = [];
-  const state = { settings: { enabled: options.enabled ?? false, recallEnabled: true, automaticExtraction: false, privacyEverActivated: options.active ?? true },
+  const state = { settings: { enabled: options.enabled ?? false, recallEnabled: true, automaticExtraction: options.automaticExtraction ?? false, privacyEverActivated: options.active ?? true },
     root: { authorized: false, checkedAt: 0 }, execution: { ready: false, epoch: 'native-epoch', reason: 'unqualified' },
     activation: { pendingEnable: options.pending ?? false, cleanupReady: true } };
   let initialized = options.existingStore ?? false, broken = false, invalidations = 0;
@@ -55,13 +55,29 @@ async function fixture(t, options = {}) {
     get invalidations() { return invalidations; } };
 }
 
-test('inactive installation stays off, creates no store and never probes Root on startup', async t => {
+test('saved off choice stays off, creates no store and never probes Root on startup', async t => {
   const f = await fixture(t, { active: false });
   await f.service.start();
   assert.equal((await f.service.memoryHost.getSettings()).enabled, false);
+  assert.equal((await f.service.memoryHost.getSettings()).automaticExtraction, false);
   assert.equal((await f.service.privacyHost.status()).active, false);
+  assert.ok(!f.calls.includes('activation.prepare'));
+  assert.ok(!f.calls.includes('initialization.prepare'));
   assert.ok(!f.calls.includes('root-check'));
   await assert.rejects(f.service.memoryHost.store(), { code: 'MEMORY_NOT_INITIALIZED' });
+});
+
+test('enabled fresh installation initializes both stores before ready without granting sources or endpoints', async t => {
+  const f = await fixture(t, { active: false, enabled: true, automaticExtraction: true });
+  await f.service.start();
+  assert.deepEqual(await f.service.memoryHost.getSettings(), { enabled: true, recallEnabled: true, automaticExtraction: true });
+  assert.equal((await f.service.memoryHost.executionStatus()).ready, true);
+  assert.equal(f.state.settings.privacyEverActivated, true);
+  assert.ok(f.calls.indexOf('initialization.prepare') < f.calls.indexOf('host-ready'));
+  assert.equal(f.calls.filter(value => value === 'settings').length, 0);
+  assert.ok(!f.calls.includes('history:configure'));
+  assert.ok(!f.calls.includes('root-check'));
+  assert.deepEqual(await (await f.service.privacyHost.store()).listGrants(), []);
 });
 
 test('activation persists both stores before native host-ready and enables only pending user intent', async t => {

@@ -13,6 +13,7 @@ import io.droyagent.app.nativeui.companion.data.NativeCompanionViewModel
 import io.droyagent.app.nativeui.permissions.NativeAuthorizationPolicy
 import io.droyagent.app.nativeui.settings.NativeSettingsViewModel
 import io.droyagent.app.nativeui.setup.NativeOnboardingViewModel
+import io.droyagent.app.nativeui.data.NativeWorkbenchViewModel
 import java.io.File
 import java.util.Locale
 import java.util.UUID
@@ -22,15 +23,28 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 
 /** Later wizard pages are inspected separately: this fixture has no configurable provider. */
 @RunWith(AndroidJUnit4::class)
 class NativeBatchEightGalleryDeviceTest {
     @get:Rule(order = 0) val compose = createEmptyComposeRule()
     @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture("settings", allowRoot = false)
+    @get:Rule(order = 2) val failureEvidence = object : TestWatcher() {
+        override fun failed(failure: Throwable, description: Description) {
+            val name = "native-batch8-failed-$language-${description.methodName}"
+            try { fixture.capture(name) } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+            try {
+                File(fixture.context.getExternalFilesDir(null), "native-isolated-evidence/$name.txt")
+                    .writeText(compose.onRoot(useUnmergedTree = true).printToString())
+            } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+        }
+    }
     private lateinit var settings: NativeSettingsViewModel
     private lateinit var setup: NativeOnboardingViewModel
     private lateinit var companions: NativeCompanionViewModel
+    private lateinit var work: NativeWorkbenchViewModel
     private var language = "en"
 
     @Test fun englishPagesAndSavedIdentity() = inspectBatch("en")
@@ -41,7 +55,8 @@ class NativeBatchEightGalleryDeviceTest {
         bind()
         compose.waitUntil(30_000) { settings.state.value.loaded && settings.state.value.writable && !settings.state.value.loading && settings.state.value.runtime.ready }
         fixture.scenario.onActivity { settings.setLanguage(locale) }
-        compose.waitUntil(20_000) { NativeLocale.active() == locale && settings.state.value.locale == locale && !settings.state.value.saving }
+        compose.waitUntil(20_000) { NativeLocale.active() == locale && settings.state.value.locale == locale &&
+            work.state.value.runtime.locale == locale && !settings.state.value.saving }
         assertTrue(fixture.context.getSharedPreferences("product", 0).edit().putString("appearanceMode", "light").commit())
         inspectBackground()
         startWizard()
@@ -90,20 +105,24 @@ class NativeBatchEightGalleryDeviceTest {
         next(5)
         awaitTag("native-permissions-first-use")
         compose.onNodeWithTag("native-setup-finish").assertIsNotEnabled()
-        compose.onNodeWithText(localized(R.string.native_permissions_system_permissions)).performScrollTo().performClick()
+        openSystemPermissions()
         awaitTag("native-permissions-system:camera")
         compose.onNodeWithTag("native-setup-back").assertDoesNotExist()
         compose.onNodeWithTag("native-setup-finish").assertDoesNotExist()
         compose.onNodeWithTag("native-permissions-back").assertIsDisplayed()
         capture("05-permissions-child")
         compose.onNodeWithTag("native-permissions-back").performClick()
-        awaitTag("native-permissions-first-use")
+        awaitTag("native-permissions-content")
+        compose.onNodeWithTag("native-permissions-content").performScrollToNode(hasTestTag("native-permissions-first-use"))
+        compose.onNodeWithTag("native-permissions-first-use").assertIsDisplayed()
         assertEquals(5, setup.state.value.route?.step)
         // Hardware back must close the same child rather than leaving the wizard step.
-        compose.onNodeWithText(localized(R.string.native_permissions_system_permissions)).performScrollTo().performClick()
+        openSystemPermissions()
         awaitTag("native-permissions-system:camera")
         back()
-        awaitTag("native-permissions-first-use")
+        awaitTag("native-permissions-content")
+        compose.onNodeWithTag("native-permissions-content").performScrollToNode(hasTestTag("native-permissions-first-use"))
+        compose.onNodeWithTag("native-permissions-first-use").assertIsDisplayed()
         assertEquals(5, setup.state.value.route?.step)
         compose.onNodeWithTag("native-permissions-content").performScrollToNode(hasTestTag("native-permissions-first-use"))
         compose.onNodeWithTag("native-permissions-first-use").performClick()
@@ -174,9 +193,20 @@ class NativeBatchEightGalleryDeviceTest {
             settings = models[NativeSettingsViewModel::class.java]
             setup = models[NativeOnboardingViewModel::class.java]
             companions = models[NativeCompanionViewModel::class.java]
+            work = models[NativeWorkbenchViewModel::class.java]
         }
     }
     private fun next(step: Int) { compose.onNodeWithTag("native-setup-next").assertIsEnabled().performClick(); awaitStep(step) }
+    private fun openSystemPermissions() {
+        val label = localized(R.string.native_permissions_system_permissions)
+        // This link is a late LazyColumn item. Ask the list to compose and reveal it
+        // before resolving the real localized navigation control.
+        compose.onNodeWithTag("native-permissions-content").performScrollToNode(hasText(label))
+        compose.onNode(hasText(label) and hasClickAction()).assertIsDisplayed().assertIsEnabled().performClick()
+        awaitTag("native-permissions-back")
+        compose.onNodeWithTag("native-permissions-content").performScrollToNode(hasTestTag("native-permissions-system:camera"))
+        compose.onNodeWithTag("native-permissions-system:camera").assertIsDisplayed()
+    }
     private fun awaitStep(step: Int) { compose.waitUntil(20_000) { setup.state.value.route?.step == step && !setup.state.value.busy }; settle() }
     private fun hideKeyboard() {
         fixture.scenario.onActivity { activity ->

@@ -10,6 +10,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Rect;
 import android.os.Handler;
+import android.os.Bundle;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Base64;
@@ -516,7 +517,16 @@ public class AndroidUseDeviceTest {
         // Some Android vendors freeze a background instrumentation process while it
         // waits for a service. Bring our own fixture forward before any polling.
         Intent intent = new Intent(context, TestPageActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        activity = (TestPageActivity) instrumentation.startActivitySync(intent);
+        UiAutomation automation = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
+        automation.adoptShellPermissionIdentity("android.permission.START_ACTIVITIES_FROM_BACKGROUND");
+        try {
+            activity = (TestPageActivity) instrumentation.startActivitySync(intent);
+        } finally {
+            automation.dropShellPermissionIdentity();
+            Bundle status = new Bundle();
+            status.putString("stream", "\nDROY_ANDROID_USE_LAUNCH temporary_background_launch_identity=dropped\n");
+            instrumentation.sendStatus(2, status);
+        }
         instrumentation.waitForIdleSync();
         io.droyagent.androiduse.AccessibilityRecovery.get(context).onAppOpened(false);
         long deadline = SystemClock.elapsedRealtime() + 15000;

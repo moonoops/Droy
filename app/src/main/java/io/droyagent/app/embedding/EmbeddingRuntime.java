@@ -1,6 +1,7 @@
 package io.droyagent.app.embedding;
 
 import android.content.Context;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -91,7 +92,10 @@ public final class EmbeddingRuntime {
     private synchronized JSONObject modelManifest() throws Exception {
         if (manifest != null) return manifest;
         try (InputStream stream = context.getAssets().open("embedding/e5-small/manifest.json")) {
-            JSONObject value = new JSONObject(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096]; int count;
+            while ((count = stream.read(buffer)) != -1) bytes.write(buffer, 0, count);
+            JSONObject value = new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
             if (!MODEL.equals(value.getString("id")) || value.getInt("dimensions") != DIMENSIONS
                 || value.getInt("maxTokens") != 512 || !value.getString("fingerprint").matches("[a-f0-9]{64}"))
                 throw new IllegalStateException("EMBEDDING_MODEL_INVALID");

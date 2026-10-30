@@ -124,7 +124,10 @@ public final class ProactiveNotificationSettingsDeviceTest {
     }
 
     @Test public void channelsAndTargetsPersistWhilePluginCanBeDisabledAndReenabled() throws Exception {
-        assertFalse("An absent completion preference must default off", checked(RETURN));
+        assertTrue("An absent completion preference must default on", checked(RETURN));
+        setPreference(RETURN, "returnToDroyOnCompletion", false);
+        closeAndReopenGeneral();
+        assertFalse("The explicitly disabled completion preference was lost", checked(RETURN));
         setPreference(RETURN, "returnToDroyOnCompletion", true);
         closeAndReopenGeneral();
         assertTrue("The explicitly enabled completion preference was lost", checked(RETURN));

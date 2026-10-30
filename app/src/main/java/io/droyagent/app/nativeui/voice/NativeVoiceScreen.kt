@@ -24,6 +24,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -122,6 +123,7 @@ fun NativeVoiceScreen(state: NativeVoiceState, onAction: (NativeVoiceAction) -> 
 @Composable
 private fun Readout(state: NativeVoiceState, enabled: Boolean, onAction: (NativeVoiceAction) -> Unit, credential: String, onCredential: (String) -> Unit) {
     val draft = state.ttsDraft ?: return
+    val displayLocale = LocalConfiguration.current.locales[0]
     var clear by remember { mutableStateOf(false) }
     val resource = state.snapshot?.resources?.firstOrNull { it.provider == draft.provider }?.progress
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -159,7 +161,7 @@ private fun Readout(state: NativeVoiceState, enabled: Boolean, onAction: (Native
             val voices = state.snapshot?.voices.orEmpty().filter { it.provider == draft.provider }
             val options = (if (voices.size == 1) emptyList() else listOf("" to stringResource(R.string.native_voice_default_voice))) + voices.map { row ->
                 val locale = row.language?.let(java.util.Locale::forLanguageTag)
-                val language = locale?.getDisplayLanguage(java.util.Locale.getDefault()).orEmpty()
+                val language = locale?.getDisplayLanguage(displayLocale).orEmpty()
                 val duplicate = voices.count { it.name == row.name } > 1
                 row.voiceId to listOfNotNull(row.name, language.takeIf { it.isNotBlank() }, row.voiceId.takeIf { duplicate },
                     stringResource(R.string.native_voice_network_voice).takeIf { row.networkRequired == true }).distinct().joinToString(" · ")

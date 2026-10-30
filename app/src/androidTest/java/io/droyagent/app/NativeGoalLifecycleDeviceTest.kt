@@ -3,6 +3,8 @@ package io.droyagent.app
 import android.content.Intent
 import android.content.res.Configuration
 import android.view.KeyEvent
+import android.view.WindowInsets
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.Lifecycle
@@ -21,12 +23,24 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 
 /** Actual SDK goal rounds and native controls; only the isolated, local provider is used. */
 @RunWith(AndroidJUnit4::class)
 class NativeGoalLifecycleDeviceTest {
     @get:Rule(order = 0) val compose = createEmptyComposeRule()
     @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture()
+    @get:Rule(order = 2) val failureEvidence = object : TestWatcher() {
+        override fun failed(failure: Throwable, description: Description) {
+            val name = "native-goal-failed-${description.methodName}"
+            try { fixture.capture(name) } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+            try {
+                File(fixture.context.getExternalFilesDir(null), "native-isolated-evidence/$name.txt")
+                    .writeText(compose.onRoot(useUnmergedTree = true).printToString())
+            } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+        }
+    }
     private lateinit var work: NativeWorkbenchViewModel
     private lateinit var engine: NativeEngineViewModel
     private lateinit var settings: NativeSettingsViewModel
@@ -179,8 +193,30 @@ class NativeGoalLifecycleDeviceTest {
         compose.onNodeWithText(text(R.string.native_goal_title)).assertIsDisplayed()
     }
     private fun closeGoal() {
+        if (imeVisible()) {
+            back()
+            compose.waitUntil(10_000) { !imeVisible() }
+        }
+        if (!goalSheetVisible()) return
+        val canCollapse = sheetHasAction(SemanticsMatcher.keyIsDefined(SemanticsActions.Collapse))
         back()
-        compose.waitUntil(10_000) { compose.onAllNodesWithText(text(R.string.native_goal_title)).fetchSemanticsNodes(false).isEmpty() }
+        if (canCollapse) {
+            // Material 3 Back collapses an expanded sheet before dismissing it.
+            // Only issue the second Back after observing that actual state transition.
+            compose.waitUntil(10_000) { !goalSheetVisible() || sheetHasAction(SemanticsMatcher.keyIsDefined(SemanticsActions.Expand)) }
+            if (goalSheetVisible()) back()
+        }
+        compose.waitUntil(10_000) { !goalSheetVisible() }
+        compose.onNodeWithTag("native-composer").assertIsDisplayed()
+    }
+    private fun goalSheetVisible() = compose.onAllNodes(hasText(text(R.string.native_goal_title)) and hasAnyAncestor(isDialog()))
+        .fetchSemanticsNodes(false).isNotEmpty()
+    private fun sheetHasAction(action: SemanticsMatcher) = compose.onAllNodes(action and hasAnyAncestor(isDialog()))
+        .fetchSemanticsNodes(false).isNotEmpty()
+    private fun imeVisible(): Boolean {
+        var visible = false
+        fixture.scenario.onActivity { visible = it.window.decorView.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true }
+        return visible
     }
     private fun back() = InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
     private fun awaitGoal(phase: String, activation: String) {

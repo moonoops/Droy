@@ -32,20 +32,22 @@ private data class ParsedText(val source: String, val document: RichDocument)
 /** Links are callbacks only. The session owner decides authorization and navigation; this renderer has no network or URI handler. */
 @Composable
 fun NativeRichText(text: String, onCopy: (String) -> Unit, onOpenLink: (String) -> Unit, modifier: Modifier = Modifier) {
-    val parsed by produceState<ParsedText?>(null, text) {
+    // A restored message must have its formatted layout on the first frame. Remember
+    // only the initial tree so streamed revisions still parse off the main thread.
+    val initial = remember { ParsedText(text, RichTextParser.parse(text)) }
+    val parsed by produceState(initial, text) {
+        if (value.source == text) return@produceState
         val document = withContext(Dispatchers.Default) { RichTextParser.parse(text) }
         coroutineContext.ensureActive()
         value = ParsedText(text, document)
     }
     // Keep the last parsed tree until the next revision is ready. Falling back to raw
     // Markdown on every streamed delta alternated layouts and visibly flashed.
-    val document = parsed?.document
-    val limit = document?.limited ?: (text.length > RichTextParser.MAX_CHARACTERS)
+    val document = parsed.document
     SelectionContainer(modifier.testTag("native-rich-text")) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (document == null) Text(text.take(RichTextParser.MAX_CHARACTERS), style = MaterialTheme.typography.bodyLarge)
-            else RichBlocks(document.blocks, onCopy, onOpenLink)
-            if (limit) {
+            RichBlocks(document.blocks, onCopy, onOpenLink)
+            if (document.limited) {
                 DisableSelection {
                     Text(stringResource(R.string.native_rich_text_limited), style = MaterialTheme.typography.bodySmall)
                     TextButton(onClick = { onCopy(text) }, modifier = Modifier.testTag("native-rich-text-copy-full")) { Text(stringResource(R.string.native_rich_text_copy_full)) }

@@ -59,7 +59,7 @@ final class ToolProgress {
         if (!(rawActive instanceof Boolean)) throw new IllegalArgumentException("active must be a boolean");
         String text = request.has("summary") ? boundedText(request, "summary", 120, true) : "";
         String kind = request.has("summaryKind") ? boundedText(request, "summaryKind", 16, true) : "";
-        if (!kind.isEmpty() && !kind.equals("working") && !kind.equals("slow")) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("宠物消息类型无效", "Invalid companion message type"));
+        if (!kind.isEmpty() && !kind.equals("working") && !kind.equals("slow") && !kind.equals("error")) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("宠物消息类型无效", "Invalid companion message type"));
         String activity = request.has("activityKind") ? boundedText(request, "activityKind", 16, true) : "";
         if (!Set.of("", "started", "thinking", "observing", "controlling", "working").contains(activity))
             throw new IllegalArgumentException(NativeLocale.text("伙伴进度类型无效", "Invalid companion activity type"));

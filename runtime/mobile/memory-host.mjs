@@ -320,7 +320,9 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       startup ??= (async () => {
         extraction = extractionAdapter; createArchives = archiveConstructor;
         await refresh();
-        if (active) { try { await activate(); } catch (error) { reportError(error.code ?? 'MEMORY_ACTIVATION_FAILED'); } }
+        if (active || snapshot.settings.enabled && featureAvailable()) {
+          try { await activate(); } catch (error) { reportError(error.code ?? 'MEMORY_ACTIVATION_FAILED'); }
+        }
         if (closed) return;
         maintenance = createMemoryMaintenance({ store, existingStore: () => memory ?? null,
         executionStatus: status, settings: getSettings, privacy: { forgetSources: refs => privacy().forgetSources(refs) },

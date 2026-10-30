@@ -23,12 +23,24 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 
 /** Real authenticated Host operations; prompts are answered only by the fixture's local provider. */
 @RunWith(AndroidJUnit4::class)
 class NativeWorkspacesDeviceTest {
     @get:Rule(order = 0) val compose = createEmptyComposeRule()
     @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture()
+    @get:Rule(order = 2) val failureEvidence = object : TestWatcher() {
+        override fun failed(failure: Throwable, description: Description) {
+            val name = "native-spaces-failed-${description.methodName}"
+            try { fixture.capture(name) } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+            try {
+                File(fixture.context.getExternalFilesDir(null), "native-isolated-evidence/$name.txt")
+                    .writeText(compose.onRoot(useUnmergedTree = true).printToString())
+            } catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+        }
+    }
     private lateinit var work: NativeWorkbenchViewModel
     private lateinit var spaces: NativeWorkspacesViewModel
     private lateinit var settings: NativeSettingsViewModel
@@ -93,8 +105,7 @@ class NativeWorkspacesDeviceTest {
             compose.waitUntil(30_000) { work.state.value.running && work.state.value.messages.any { it.role == "assistant" && it.text.contains("Local hold started") } }
             compose.onNodeWithTag("native-new-session").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { work.state.value.selectedSessionId == null }
-            compose.onNodeWithText(text(R.string.native_spaces_chats)).performClick()
-            awaitSpaces()
+            openSpacesDirectly()
             sessionMenu(child, R.string.native_workspaces_archive)
             compose.waitUntil(20_000) { spaces.state.value.archiveActiveSessionId == child && !spaces.state.value.busy }
             assertFalse(child in spaces.state.value.catalog!!.archivedSessionIds)
@@ -103,12 +114,12 @@ class NativeWorkspacesDeviceTest {
             compose.onNodeWithTag("native-workspaces-confirm-stop-archive").performClick()
             compose.waitUntil(30_000) { child in spaces.state.value.catalog!!.archivedSessionIds && !spaces.state.value.busy }
             compose.waitUntil(20_000) { File(fixture.home, "native-fixture-hold-aborted.json").jsonOrNull()?.optString("sessionId") == child }
-            scrollTo("native-workspaces-archived"); compose.onNodeWithTag("native-workspaces-archived").performClick()
+            toggleArchived()
             compose.waitUntil(10_000) { spaces.state.value.showArchived }
             scrollTo("native-session-restore:$child")
             compose.onNodeWithTag("native-session-restore:$child").assertIsDisplayed().performClick()
             compose.waitUntil(20_000) { child !in spaces.state.value.catalog!!.archivedSessionIds && !spaces.state.value.busy }
-            scrollTo("native-workspaces-archived"); compose.onNodeWithTag("native-workspaces-archived").performClick()
+            toggleArchived()
             scrollTo("native-space-session:$child")
             compose.onNodeWithTag("native-space-session:$child").performClick()
             awaitHistory(child, marker)
@@ -424,7 +435,7 @@ class NativeWorkspacesDeviceTest {
             fixtureCalls().count { !it.optBoolean("title") && it.optString("sessionId") == session })
         fixture.capture("native-spaces-returned-archived-session-is-read-only")
         openSpacesDirectly()
-        scrollTo("native-workspaces-archived"); compose.onNodeWithTag("native-workspaces-archived").performClick()
+        toggleArchived()
         compose.waitUntil(10_000) { spaces.state.value.showArchived }
         scrollTo("native-session-restore:$session")
         compose.onNodeWithTag("native-session-restore:$session").performClick()
@@ -499,13 +510,17 @@ class NativeWorkspacesDeviceTest {
             compose.onNodeWithTag("native-new-session").assertIsEnabled().performClick()
             compose.waitUntil(10_000) { work.state.value.selectedSessionId == null }
         }
-        compose.onNodeWithText(text(R.string.native_spaces_chats)).assertIsDisplayed().performClick()
-        awaitSpaces()
+        openSpacesDirectly()
     }
     private fun openSpacesDirectly() {
-        compose.onNodeWithTag("native-history").performScrollToNode(hasText(text(R.string.native_spaces_chats)))
-        compose.onNodeWithText(text(R.string.native_spaces_chats)).assertIsDisplayed().performClick()
+        compose.onNodeWithTag("native-space-switch").assertIsDisplayed().assertIsEnabled()
+            .assert(hasContentDescription(text(R.string.native_spaces_chats))).performClick()
         awaitSpaces()
+    }
+    private fun toggleArchived() {
+        compose.onNode(hasContentDescription(text(R.string.native_workbench_menu)) and hasAnyAncestor(hasTestTag("native-workspaces")))
+            .assertIsDisplayed().assertIsEnabled().performClick()
+        compose.onNodeWithTag("native-workspaces-archived").assertIsDisplayed().assertIsEnabled().performClick()
     }
     private fun awaitSpaces() {
         compose.waitUntil(20_000) { compose.onAllNodesWithTag("native-workspaces").fetchSemanticsNodes(false).isNotEmpty()

@@ -223,25 +223,25 @@ public final class PetSettingsDeviceTest {
                 () -> !ui.truth("!!document.querySelector('[data-droy-settings-panel]')"));
     }
 
-    @Test public void completionReturnPreferenceIsDefaultOffAndEditableWithPetOff() throws Exception {
+    @Test public void completionReturnPreferenceIsDefaultOnAndEditableWithPetOff() throws Exception {
         String row = "[data-droy-general=returnToDroyOnCompletion]";
         String toggle = row + " [role=switch]";
         assertTrue(modeSelected("petExternalDisplay", "off") && modeSelected("petInternalDisplay", "off"));
-        assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='false'"));
-        assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(row) + ").textContent.includes('任务完成后总是返回DroyAPP')"));
-        ui.tap(toggle);
-        DeviceUi.await("Completion return switch did not save the enabled preference", 5000,
-            () -> preferences.getBoolean("returnToDroyOnCompletion", false)
-                && ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='true'"));
-        ui.tap("[data-droy-settings-back]");
-        DeviceUi.await("The settings Back touch did not return to the conversation", 5000,
-            () -> !ui.truth("!!document.querySelector('[data-droy-settings-panel]')||!!document.querySelector('[data-droy-drawer-open=true]')"));
-        openGeneral();
         assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='true'"));
+        assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(row) + ").textContent.includes('任务完成后总是返回DroyAPP')"));
         ui.tap(toggle);
         DeviceUi.await("Completion return switch did not save the disabled preference", 5000,
             () -> !preferences.getBoolean("returnToDroyOnCompletion", true)
                 && ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='false'"));
+        ui.tap("[data-droy-settings-back]");
+        DeviceUi.await("The settings Back touch did not return to the conversation", 5000,
+            () -> !ui.truth("!!document.querySelector('[data-droy-settings-panel]')||!!document.querySelector('[data-droy-drawer-open=true]')"));
+        openGeneral();
+        assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='false'"));
+        ui.tap(toggle);
+        DeviceUi.await("Completion return switch did not save the enabled preference", 5000,
+            () -> preferences.getBoolean("returnToDroyOnCompletion", false)
+                && ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='true'"));
         assertTrue("The completion-return setting must not enable the pet", modeSelected("petExternalDisplay", "off") && modeSelected("petInternalDisplay", "off"));
         ui.evaluate("document.querySelector(" + JSONObject.quote(row) + ").scrollIntoView({block:'center',behavior:'instant'})");
         capture("completion-return-settings");

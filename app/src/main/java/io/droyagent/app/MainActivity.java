@@ -994,7 +994,7 @@ public final class MainActivity extends Activity {
             .put("automationScreenDisplay", preferences.getBoolean("automationScreenDisplay", true))
             .put("automationScreenDisplayReady", io.droyagent.androiduse.DroyAccessibilityService.isConnected(this) || Settings.canDrawOverlays(this))
             .put("automationScreenDisplayError", AutomationScreenOverlay.error())
-            .put("returnToDroyOnCompletion", preferences.getBoolean("returnToDroyOnCompletion", false))
+            .put("returnToDroyOnCompletion", preferences.getBoolean("returnToDroyOnCompletion", true))
             .put("browserEncryptedDns", preferences.getBoolean("browserEncryptedDns", false))
             .put("groups", groups).put("capabilities", capabilities).put("systemPermissions", system)
             .put("fileGrants", new io.droyagent.androiduse.FileGrantStore(this).listGrants())

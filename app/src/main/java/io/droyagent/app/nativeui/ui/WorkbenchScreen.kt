@@ -19,7 +19,8 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -138,8 +139,9 @@ fun WorkbenchScreen(state: NativeWorkbenchState, model: NativeWorkbenchViewModel
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             WorkbenchBar(
-                title = state.sessions.firstOrNull { onBack != null && it.id == state.selectedSessionId }
-                    ?.title?.takeIf(String::isNotBlank) ?: presentation?.workbenchTitleOverride ?: stringResource(R.string.native_workbench),
+                title = if (onBack != null) state.sessions.firstOrNull { it.id == state.selectedSessionId }
+                    ?.title?.takeIf(String::isNotBlank) ?: stringResource(R.string.native_new_session)
+                    else presentation?.workbenchTitleOverride ?: stringResource(R.string.native_workbench),
                 workspaceTitle = if (!state.workspaceResolved) stringResource(R.string.native_workspace_resolving)
                     else state.workspaces.firstOrNull { it.id == state.selectedWorkspaceId }?.title
                     ?: stringResource(if (state.runtime.ready && state.workspaces.isNotEmpty() && state.selectedWorkspaceId == null)
@@ -341,6 +343,7 @@ private fun WorkbenchBar(title: String, workspaceTitle: String, ready: Boolean, 
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WorkbenchComposer(state: NativeWorkbenchState, onDraft: (String) -> Unit, onSend: () -> Unit, onStop: () -> Unit, onModel: () -> Unit,
     onAttachments: (() -> Unit)?, onVoice: (() -> Unit)?, removeAttachment: (String) -> Unit,
@@ -349,6 +352,25 @@ private fun WorkbenchComposer(state: NativeWorkbenchState, onDraft: (String) -> 
     permissionControl: (@Composable () -> Unit)? = null,
     voiceButton: (@Composable () -> Unit)? = null, voiceStatus: (@Composable () -> Unit)? = null,
 ) {
+    val modelControl: @Composable (Modifier) -> Unit = { modifier ->
+        TextButton(onClick = onModel, enabled = state.runtime.ready && !state.modelChanging && !state.readOnly,
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+            contentPadding = PaddingValues(horizontal = 8.dp), modifier = modifier.height(32.dp).testTag("native-model")) {
+            DroyIcon(R.drawable.native_ui_model, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(state.selectedModel?.name ?: stringResource(R.string.native_choose_model), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    val reasoningControl: @Composable () -> Unit = {
+        TextButton(onClick = onReasoning, enabled = state.runtime.ready && !state.readOnly && !state.modelChanging && state.selectedModel?.reasoningEfforts?.isNotEmpty() == true,
+            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+            contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.height(32.dp).testTag("native-reasoning")) {
+            DroyIcon(R.drawable.native_settings_neurology, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(workbenchEffortLabel(state.selectedModel?.let { it.reasoningEffort ?: it.defaultReasoningEffort }), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
     Surface(color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
             .padding(horizontal = 8.dp, vertical = 4.dp)) {
@@ -358,31 +380,31 @@ private fun WorkbenchComposer(state: NativeWorkbenchState, onDraft: (String) -> 
                 NativeDraftAttachments(state.draftAttachments, !state.readOnly && !state.sending && state.pendingRequestId == null, removeAttachment, loadAttachment)
             }
             voiceStatus?.invoke()
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onModel, enabled = state.runtime.ready && !state.modelChanging && !state.readOnly,
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
-                    contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.weight(1f).height(32.dp).testTag("native-model")) {
-                    DroyIcon(R.drawable.native_ui_model, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(state.selectedModel?.name ?: stringResource(R.string.native_choose_model), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                // Fixed-width execution controls otherwise consume the model label's entire
+                // weighted remainder on narrow screens with enlarged system text.
+                val wrapControls = maxWidth < 300.dp * LocalDensity.current.fontScale
+                Column {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        modelControl(Modifier.weight(1f))
+                        if (!wrapControls) {
+                            reasoningControl()
+                            permissionControl?.invoke()
+                        }
+                        WorkbenchContextRing(context, onContext)
+                    }
+                    if (wrapControls) Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        reasoningControl()
+                        permissionControl?.invoke()
+                    }
                 }
-                TextButton(onClick = onReasoning, enabled = state.runtime.ready && !state.readOnly && !state.modelChanging && state.selectedModel?.reasoningEfforts?.isNotEmpty() == true,
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
-                    contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.height(32.dp).testTag("native-reasoning")) {
-                    DroyIcon(R.drawable.native_settings_neurology, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(workbenchEffortLabel(state.selectedModel?.let { it.reasoningEffort ?: it.defaultReasoningEffort }), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                permissionControl?.invoke()
-                WorkbenchContextRing(context, onContext)
             }
             val hasContent = state.draft.isNotBlank() || state.draftAttachments.isNotEmpty()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(0.dp), verticalAlignment = Alignment.CenterVertically) {
                 onAttachments?.let { DroyIconAction(R.drawable.native_schedule_add, stringResource(R.string.native_companion_attachments), it,
                     modifier = Modifier.testTag("native-composer-attachments"), enabled = !state.readOnly && !state.sending) }
                 TextField(value = state.draft, onValueChange = onDraft, enabled = !state.readOnly,
-                    modifier = Modifier.weight(1f).heightIn(min = 56.dp, max = 144.dp).testTag("native-composer"),
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag("native-composer"),
                     placeholder = { Text(stringResource(R.string.native_enter_task)) }, shape = MaterialTheme.shapes.extraLarge,
                     maxLines = 4, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                     colors = TextFieldDefaults.colors(focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -444,17 +466,17 @@ private fun WorkbenchHistory(
         (item.key as? String)?.let { key -> NativeReadingPosition(
             currentState.messages.firstOrNull { it.itemIdentity() == key }?.id ?: key, list.firstVisibleItemScrollOffset, followingTail) }
     }
-    LaunchedEffect(state.loading, visibleMessages.isNotEmpty(), restored) {
-        if (!restored && !state.loading && visibleMessages.isNotEmpty()) {
+    if (!restored && !state.loading && visibleMessages.isNotEmpty()) {
+        SideEffect {
             val position = state.readingPosition
             followingTail = position?.followingTail ?: true
-            if (position != null && !followingTail) {
+            val index = if (!followingTail && position != null) {
                 val message = visibleMessages.indexOfFirst { it.id == position.key }
-                val prefix = (if (!state.runtime.ready && !state.runtime.active) 1 else 0) + (if (state.hasMore) 1 else 0)
-                val index = if (message >= 0) prefix + message else if (position.key == "earlier" && state.hasMore) prefix - 1 else 0
-                positioning = true
-                try { list.scrollToItem(index, position.offset) } finally { positioning = false }
-            }
+                if (message >= 0) prefixCount + message else if (position.key == "earlier" && state.hasMore) prefixCount - 1 else 0
+            } else visibleMessages.size + prefixCount + if (pendingVoiceId != null && pendingVoiceBubble != null) 1 else 0
+            // Nav restores an old lazy-list index. Override it before the first
+            // measure so background replies cannot expose the old tail for a frame.
+            list.requestScrollToItem(index, position?.takeUnless { followingTail }?.offset ?: 0)
             restored = true
         }
     }
@@ -708,7 +730,7 @@ private fun ExpandableMessage(message: NativeMessage, onOpenAttachment: ((Native
 
 @Composable
 private fun UsageContent(usage: NativeUsage?, loading: Boolean, onClose: () -> Unit, extra: (@Composable () -> Unit)? = null) {
-    val locale = LocalContext.current.resources.configuration.locales[0]
+    val locale = LocalConfiguration.current.locales[0]
     val number = remember(locale) { NumberFormat.getIntegerInstance(locale) }
     val decimal = remember(locale) { NumberFormat.getNumberInstance(locale).apply { minimumFractionDigits = 1; maximumFractionDigits = 1 } }
     val unavailable = stringResource(R.string.native_not_reported)

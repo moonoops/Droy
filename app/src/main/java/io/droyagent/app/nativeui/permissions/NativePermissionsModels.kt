@@ -80,6 +80,7 @@ sealed interface NativePermissionAction {
     data class ApprovePending(val id: String) : NativePermissionAction
     data class DeclinePending(val id: String) : NativePermissionAction
     data object SetUpOrdinary : NativePermissionAction
+    data class ConfirmIndependent(val id: String) : NativePermissionAction
     data class SkipIndependent(val id: String) : NativePermissionAction
     data class SetCapabilityGroup(val preferences: Set<String>, val enabled: Boolean) : NativePermissionAction
     data class SetCapability(val preference: String, val enabled: Boolean) : NativePermissionAction

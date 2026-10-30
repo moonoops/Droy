@@ -13,6 +13,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.ui.DroyIconAction
+import kotlinx.coroutines.flow.first
 import io.droyagent.app.nativeui.ui.DroySwitch as Switch
 
 @Composable
@@ -23,9 +24,13 @@ fun NativeApprovedPluginScreen(
     require(id in setOf("agent-team", "session-titles", "persistent-terminal"))
     val plugin = state.approvedPlugins.singleOrNull { it.id == id }
     var requested by remember(id) { mutableStateOf(false) }
-    LaunchedEffect(id, state.ready, state.busy) {
+    LaunchedEffect(id, state.ready) {
         if (!state.ready) requested = false
-        else if (!state.busy && !requested) { requested = true; model.loadApprovedPlugins() }
+        else if (!requested) {
+            // The composition snapshot can precede the observer's initial refresh.
+            model.state.first { it.ready && !it.busy }
+            requested = model.loadApprovedPlugins()
+        }
     }
     BackHandler(onBack = onBack)
     val title = stringResource(when (id) {
@@ -61,7 +66,7 @@ fun NativeApprovedPluginScreen(
             }
             state.error?.let {
                 Text(stringResource(if (it == "settings/conflict") R.string.native_advanced_conflict else R.string.native_advanced_failed), color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = model::loadApprovedPlugins, enabled = !state.busy) { Text(stringResource(R.string.native_advanced_refresh)) }
+                TextButton(onClick = { model.loadApprovedPlugins() }, enabled = !state.busy) { Text(stringResource(R.string.native_advanced_refresh)) }
             }
             state.receipt?.let {
                 if (it != "applied") Text(stringResource(when (it) {

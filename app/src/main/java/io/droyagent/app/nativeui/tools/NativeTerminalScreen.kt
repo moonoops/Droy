@@ -30,8 +30,8 @@ internal fun NativeTerminalScreen(state: NativeToolsState, model: NativeToolsVie
     val colors = MaterialTheme.colorScheme
     var control by remember { mutableStateOf(false) }
     var alt by remember { mutableStateOf(false) }
+    val terminalDescription = stringResource(R.string.native_tools_terminal_screen)
     DisposableEffect(view) {
-        view.contentDescription = context.getString(R.string.native_tools_terminal_screen)
         view.setListener(object : RemoteTerminalView.Listener {
             override fun onInput(epoch: Long, utf8: ByteArray) { model.terminalInput(epoch, utf8) }
             override fun onResize(epoch: Long, cols: Int, rows: Int, cellWidth: Int, cellHeight: Int) { model.terminalResize(epoch, cols, rows) }
@@ -63,7 +63,11 @@ internal fun NativeTerminalScreen(state: NativeToolsState, model: NativeToolsVie
             is NativeTerminalRenderEvent.Detached -> view.setWritable(frame.epoch, false)
         } }
     }
-    SideEffect { view.setTerminalColors(colors.onSurface.toArgb(), colors.surface.toArgb(), colors.primary.toArgb()); view.setModifiers(control, alt) }
+    SideEffect {
+        view.contentDescription = terminalDescription
+        view.setTerminalColors(colors.onSurface.toArgb(), colors.surface.toArgb(), colors.primary.toArgb())
+        view.setModifiers(control, alt)
+    }
     Column(modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(connection.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))

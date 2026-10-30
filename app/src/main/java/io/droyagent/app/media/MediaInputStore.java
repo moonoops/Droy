@@ -91,9 +91,15 @@ public final class MediaInputStore {
                     || original.length() <= 44 || original.length() > 20L * 1024 * 1024)
                 throw new IOException(io.droyagent.app.NativeLocale.text("完整录音不可用", "The complete recording is unavailable"));
             try (InputStream input = Files.newInputStream(original.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                byte[] header = input.readNBytes(44);
+                byte[] header = new byte[44];
+                int length = 0;
+                while (length < header.length) {
+                    int count = input.read(header, length, header.length - length);
+                    if (count == -1) break;
+                    length += count;
+                }
                 java.nio.ByteBuffer bytes = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN);
-                if (header.length != 44 || !new String(header, 0, 4, StandardCharsets.US_ASCII).equals("RIFF")
+                if (length != header.length || !new String(header, 0, 4, StandardCharsets.US_ASCII).equals("RIFF")
                         || !new String(header, 8, 8, StandardCharsets.US_ASCII).equals("WAVEfmt ")
                         || bytes.getInt(16) != 16 || bytes.getShort(20) != 1 || bytes.getShort(22) != 1
                         || bytes.getInt(24) != 48000 || bytes.getShort(34) != 16

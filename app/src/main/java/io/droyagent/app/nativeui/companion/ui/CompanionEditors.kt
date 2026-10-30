@@ -291,9 +291,9 @@ internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoa
                 }
             }
             item("choices-heading") {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.native_companion_background_options), Modifier.weight(1f),
+                FlowRow(Modifier.fillMaxWidth(), itemVerticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.native_companion_background_options),
                         style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     FilledTonalButton(onClick = { onChoose?.invoke { result -> select(companionUploadedBackground(result)) } },
                         enabled = enabled && onChoose != null, shapes = ButtonDefaults.shapes(),

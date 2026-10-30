@@ -325,7 +325,7 @@ final class ProactiveNotifications {
                 .put(channel("system", system, !tasks ? NativeLocale.text("任务通知已关闭", "Task notifications are off")
                     : NativeLocale.text("系统通知权限或渠道未开启", "System notification permission or channel is disabled")))
                 .put(channel("pet", active && pet.optBoolean("petAvailable"), NativeLocale.text("当前无法显示宠物", "The pet cannot be shown now"))))
-            .put("context", pet.put("returnOnCompletion", preferences.getBoolean("returnToDroyOnCompletion", false)));
+            .put("context", pet.put("returnOnCompletion", preferences.getBoolean("returnToDroyOnCompletion", true)));
     }
 
     private static JSONObject channel(String id, boolean available, String reason) throws Exception {

@@ -138,7 +138,8 @@ public final class MemoryUiDeviceTest {
             } else preserved.put(current, null);
         }
         assertTrue(new File(context.getFilesDir(), "dsh-home").mkdirs());
-        assertTrue(context.getSharedPreferences("droy_memory", Context.MODE_PRIVATE).edit().clear().commit());
+        assertTrue(context.getSharedPreferences("droy_memory", Context.MODE_PRIVATE).edit().clear()
+            .putBoolean("enabled", false).putBoolean("automaticExtraction", false).commit());
         assertTrue(context.getSharedPreferences("history_capture", Context.MODE_PRIVATE).edit().clear().commit());
         assertTrue(context.getSharedPreferences("product", Context.MODE_PRIVATE).edit()
             .putBoolean("petEnabled", false).putString("petInternalDisplay", "off").putString("petExternalDisplay", "off")

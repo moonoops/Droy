@@ -197,14 +197,14 @@ final class ChatExperienceChecks {
         startSamples("[data-chat-perf-scroll]");
         try {
             for (int index = 0; index < 8; index++) {
-                boolean previous = ProductPermissions.preferences(context).getBoolean("returnToDroyOnCompletion", false);
+                boolean previous = ProductPermissions.preferences(context).getBoolean("returnToDroyOnCompletion", true);
                 watchChange(selector, "aria-checked", "pointerup");
                 long began=SystemClock.elapsedRealtimeNanos();
                 try {ui.tap(selector);awaitInteraction();}
                 finally {operationWindows.put(new JSONObject().put("kind","setting-tap").put("index",index)
                     .put("startElapsedRealtimeNs",began).put("endElapsedRealtimeNs",SystemClock.elapsedRealtimeNanos()));}
                 DeviceUi.await("The visible setting was not persisted", 5000,
-                    () -> ProductPermissions.preferences(context).getBoolean("returnToDroyOnCompletion", false) != previous);
+                    () -> ProductPermissions.preferences(context).getBoolean("returnToDroyOnCompletion", true) != previous);
             }
         } finally { finishSamples("settings-toggle", false); }
     }
