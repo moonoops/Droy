@@ -5,26 +5,8 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 import static org.junit.Assume.*;
 
-/** Explicit synthetic probe only; never activates protection or recording settings. */
+/** Optional Root execution backend probes; personal memory does not use this backend. */
 public final class MemoryExecutionQualificationDeviceTest {
-    @Test public void unsupportedPreflightDoesNotLatchProtectionOrEnableRecording() throws Exception {
-        assumeTrue("Requires explicit unsupported-kernel fixture", "true".equals(InstrumentationRegistry.getArguments().getString("assertUnavailablePreflight")));
-        android.content.Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assumeTrue(ProductPermissions.allowed(ProductPermissions.preferences(context),"allowRoot"));
-        android.content.SharedPreferences prefs=context.getSharedPreferences("droy_memory",android.content.Context.MODE_PRIVATE);
-        assumeFalse(prefs.getBoolean("privacyEverActivated",false));
-        assumeFalse(prefs.getBoolean("enabled",false));
-        String failure=null;
-        try { MemoryExecutionQualification.run(context); }
-        catch(IllegalStateException unavailable){failure=unavailable.getMessage();}
-        assumeTrue("This check applies only to a proven unsupported namespace",failure!=null&&failure.startsWith("MEMORY_EXECUTION_NAMESPACE_UNAVAILABLE"));
-        java.util.Map<String,?> before=new java.util.HashMap<>(prefs.getAll());
-        try { MemoryRuntime.get(context).request(new org.json.JSONObject().put("operation","activation.prepare")); fail("Unsupported kernel unexpectedly activated"); }
-        catch(IllegalStateException expected){assertTrue(expected.getMessage().startsWith("MEMORY_EXECUTION_NAMESPACE_UNAVAILABLE"));}
-        assertTrue("Preflight failure changed persistent memory choices",before.equals(prefs.getAll()));
-        assertFalse(MemoryRuntime.get(context).settings().getBoolean("privacyEverActivated"));
-        assertFalse(MemoryRuntime.get(context).settings().getBoolean("enabled"));
-    }
     @Test public void packagedHelperQualifiesSyntheticWorkspace() throws Exception {
         assumeTrue("Run only with explicit native qualification argument", "true".equals(InstrumentationRegistry.getArguments().getString("allowNativeQualification")));
         assertTrue(MemoryExecutionQualification.checkRoot().authorized());

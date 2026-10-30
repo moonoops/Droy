@@ -167,10 +167,10 @@ test('an activated but unready host exposes its diagnostic status without openin
   assert.deepEqual(await f.service.status(), { active: true, ready: false, reason: 'PRIVACY_EXECUTION_UNVERIFIED' });
   const chinese = await f.send(f.request());
   failed(chinese, 'PRIVACY_NOT_INITIALIZED');
-  assert.match(chinese.at(-1).reason.failure.message, /正在初始化.*Root/);
+  assert.match(chinese.at(-1).reason.failure.message, /记忆服务正在初始化.*刷新/);
   f.setLocale('en');
   const english = (await f.send(f.request())).at(-1).reason.failure;
-  assert.equal(english.code, 'PRIVACY_NOT_INITIALIZED'); assert.match(english.message, /initializing.*Root permission/);
+  assert.equal(english.code, 'PRIVACY_NOT_INITIALIZED'); assert.match(english.message, /Memory is initializing.*Refresh Memory settings/);
   assert.equal(f.receipts.length, 0);
 });
 
@@ -293,7 +293,7 @@ test('actual DSH error chunks preserve privacy codes and follow live Chinese/Eng
   await expect('subject', 'PRIVACY_ENDPOINT_NOT_AUTHORIZED', /记忆访问请求/, /memory access request/);
   await f.service.grantEndpoint(route, { categories: ['memory'] });
   f.setReady(false);
-  await expect('subject', 'PRIVACY_EXECUTION_UNVERIFIED', /Root.*保护状态/, /Root permission.*protection status/);
+  await expect('subject', 'PRIVACY_EXECUTION_UNVERIFIED', /记忆服务尚未就绪.*刷新/, /Memory is not ready.*Refresh Memory settings/);
   f.setReady(true); await f.service.forgetSources(['synthetic-source']);
   await expect('subject', 'PRIVACY_SESSION_FORGOTTEN', /新建对话/, /forgotten information.*new conversation/);
   f.setLocale(undefined);
@@ -433,6 +433,131 @@ test('new session proof and fork inheritance are durable while unknown resume st
   const child = Session.create('child', undefined, { ...fresh.header, id: 'child', parentSession: 'fresh' });
   await f.service.onAgentCreated({ agent: { session: child }, source: 'startup' });
   assert.equal((await f.store.sessionState('child')).state, 'protected');
+});
+
+test('a conversation created before first activation keeps running and still requires memory endpoint consent', async t => {
+  const f = await fixture(t, { active: false, ready: false, unavailableStore: true });
+  const plugins = await Promise.all(['@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-projection',
+    '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop'].map(load));
+  for (let index = 0; index < plugins.length; index++) await f.ctx.plugin(plugins[index].default,
+    index === plugins.length - 1 ? { agents: [] } : undefined);
+  f.ctx.on('agent/created', payload => f.service.onAgentCreated(payload));
+  const handle = await f.ctx.agents.create({ sessionId: 'before-memory', agentOptions: { provider: 'synthetic', model: 'synthetic' } });
+  const agent = handle.agent;
+  const sendMessage = async () => {
+    agent.followup(f.llm.createUserMessage({ content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' } }));
+    await agent.whenIdle();
+  };
+  await sendMessage();
+  assert.equal(f.receipts.length, 1);
+  assert.ok(agent.session.snapshotEvents().length > 0);
+  assert.equal((await f.store.sessionState(agent.id)).state, 'unknown');
+  f.setStoreError(undefined); f.setReady(true); f.setActive(true);
+  assert.deepEqual(await f.service.authorizeExecution(agent), { state: 'known-clean' });
+  await sendMessage();
+  assert.equal(f.receipts.length, 2);
+  const route = await f.service.routeForAgent(agent);
+  await assert.rejects(f.service.beforeDisclosure({ sessionId: agent.id, categories: ['memory'],
+    sourceRefs: ['memory-record:first-activation'], route }), { code: 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' });
+  assert.equal(f.receipts.length, 2);
+  await assert.rejects(f.service.authorizeExecution(agent), { code: 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' });
+  await f.service.grantEndpoint(route, { categories: ['memory'] });
+  await f.service.beforeDisclosure({ sessionId: agent.id, categories: ['memory'], sourceRefs: ['memory-record:first-activation'], route });
+  assert.deepEqual(await f.service.authorizeExecution(agent), { state: 'protected' });
+  await sendMessage();
+  assert.equal(f.receipts.length, 3);
+  await f.service.revokeEndpoint(route);
+  failed(await f.send(f.request(agent.id)), 'PRIVACY_ENDPOINT_NOT_AUTHORIZED');
+  assert.equal(f.receipts.length, 3);
+  await handle.dispose();
+});
+
+test('pre-activation provenance preserves forks and never cleans imported, protected or forgotten history', async t => {
+  const f = await fixture(t, { active: false, ready: false, unavailableStore: true });
+  const { Session } = await load('@deepseek-ai/dsh-session');
+  const created = async (id, meta = {}, source = 'startup') => {
+    const session = Session.create(id, meta.isSeeded ? [] : undefined,
+      { ...Session.create(id).header, ...meta }, meta.isSeeded ? 0 : undefined);
+    await f.service.onAgentCreated({ agent: { session }, source });
+    return session;
+  };
+  await created('fresh-before-memory');
+  await created('child-before-memory', { parentSession: 'fresh-before-memory', isSeeded: true });
+  await created('grandchild-before-memory', { parentSession: 'child-before-memory', isSeeded: true });
+  await created('imported-before-memory', { isSeeded: true });
+  await created('resumed-before-memory', {}, 'resume');
+  await created('unknown-parent-child', { parentSession: 'legacy-unknown', isSeeded: true });
+  await created('previously-protected');
+  await created('previously-forgotten');
+  await f.store.protectSession('previously-protected', { categories: ['memory'], sourceRefs: ['prior-protected'] });
+  await f.store.protectSession('previously-forgotten', { categories: ['memory'], sourceRefs: ['prior-forgotten'] });
+  await f.store.forgetSources(['prior-forgotten']);
+  await created('protected-child', { parentSession: 'previously-protected', isSeeded: true });
+  await created('forgotten-child', { parentSession: 'previously-forgotten', isSeeded: true });
+  f.setStoreError(undefined); f.setReady(true); f.setActive(true);
+  await Promise.all([f.service.status(), f.service.status(), f.service.authorizeExecution({ session: { id: 'grandchild-before-memory' } })]);
+  for (const id of ['fresh-before-memory', 'child-before-memory', 'grandchild-before-memory']) {
+    assert.equal((await f.store.sessionState(id)).state, 'known-clean', id);
+  }
+  for (const id of ['imported-before-memory', 'resumed-before-memory', 'unknown-parent-child', 'legacy-unknown']) {
+    assert.equal((await f.store.sessionState(id)).state, 'unknown', id);
+    failed(await f.send(f.request(id)), 'PRIVACY_SESSION_UNKNOWN');
+  }
+  for (const id of ['previously-protected', 'protected-child']) assert.equal((await f.store.sessionState(id)).state, 'protected', id);
+  for (const id of ['previously-forgotten', 'forgotten-child']) assert.equal((await f.store.sessionState(id)).state, 'forgotten', id);
+  assert.equal(f.receipts.length, 0);
+});
+
+test('first activation preserves a real resumed local conversation while seeded history remains unknown', async t => {
+  const first = await fixture(t, { active: false, ready: false, unavailableStore: true });
+  const resumed = await fixture(t, { active: false, ready: false, unavailableStore: true });
+  const history = await mkdtemp(join(tmpdir(), 'droy-before-memory-resume-'));
+  t.after(() => rm(history, { recursive: true, force: true }));
+  const [Jsonl, ...plugins] = await Promise.all(['@deepseek-ai/dsh-session-persistence-jsonl', '@deepseek-ai/dsh-session',
+    '@deepseek-ai/dsh-session-projection', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools',
+    '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop'].map(load));
+  const mount = async f => {
+    for (let index = 0; index < plugins.length; index++) await f.ctx.plugin(plugins[index].default,
+      index === plugins.length - 1 ? { agents: [] } : undefined);
+    await f.ctx.plugin(Jsonl, { root: history, compression: 'none' });
+    f.ctx.on('agent/created', payload => f.service.onAgentCreated(payload));
+  };
+  const chat = async (f, agent) => {
+    agent.followup(f.llm.createUserMessage({ content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' } }));
+    await agent.whenIdle();
+  };
+  const agentOptions = { provider: 'synthetic', model: 'synthetic' };
+  await mount(first);
+  const original = await first.ctx.agents.create({ sessionId: 'ordinary-local-history', agentOptions });
+  await chat(first, original.agent);
+  assert.equal(first.receipts.length, 1);
+  const imported = await first.ctx.agents.create({ sessionId: 'imported-seed-history', agentOptions,
+    seed: [], meta: { isSeeded: true }, inheritedEventCount: 0 });
+  await first.ctx.sessionPersistence.flush();
+  await imported.dispose(); await original.dispose(); first.service.dispose();
+
+  await mount(resumed);
+  const sources = [];
+  resumed.ctx.on('agent/created', ({ source }) => { sources.push(source); });
+  const restored = await resumed.ctx.agents.resume({ resumeSessionId: 'ordinary-local-history', agentOptions });
+  const restoredImport = await resumed.ctx.agents.resume({ resumeSessionId: 'imported-seed-history', agentOptions });
+  assert.deepEqual(sources, ['resume', 'resume']);
+  assert.equal(restored.agent.session.header.isSeeded, false);
+  assert.ok(restored.agent.session.snapshotEvents().length > 0);
+  resumed.setStoreError(undefined); resumed.setReady(true); resumed.setActive(true);
+  assert.deepEqual(await resumed.service.authorizeExecution(restored.agent), { state: 'known-clean' });
+  await chat(resumed, restored.agent);
+  assert.equal(resumed.receipts.length, 1);
+  failed(await resumed.send(resumed.request(restoredImport.agent.id)), 'PRIVACY_SESSION_UNKNOWN');
+  assert.equal(resumed.receipts.length, 1);
+  const route = await resumed.service.routeForAgent(restored.agent);
+  await assert.rejects(resumed.service.beforeDisclosure({ sessionId: restored.agent.id, categories: ['memory'], route }),
+    { code: 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' });
+  await resumed.service.grantEndpoint(route, { categories: ['memory'] });
+  assert.deepEqual(await resumed.service.authorizeExecution(restored.agent), { state: 'protected' });
+  await chat(resumed, restored.agent);
+  assert.equal(resumed.receipts.length, 2);
+  await restoredImport.dispose(); await restored.dispose();
 });
 
 test('route metadata is immutable, config/provider changes are distinct and proxy identity invalidates old capability', async t => {

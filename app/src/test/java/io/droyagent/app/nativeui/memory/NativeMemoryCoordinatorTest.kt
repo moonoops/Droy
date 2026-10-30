@@ -57,6 +57,17 @@ class NativeMemoryCoordinatorTest {
         assertTrue(patch.getBoolean("enabled")); assertFalse(patch.getBoolean("paused"))
         assertFalse(patch.has("allApplications"))
     }
+    @Test fun memoryCanBeEnabledAndSavedWithoutRootAuthorization() = runBlocking {
+        val repo = Repository().apply { currentStatus = currentStatus.copy(rootAuthorized = false, settings = currentStatus.settings.copy(enabled = false), available = false) }
+        val model = NativeMemoryCoordinator(repo, this); ready(model)
+        model.settings("enabled", true)?.join()
+        repo.currentStatus = repo.currentStatus.copy(available = true)
+        model.refresh(false).join(); model.create(); model.draft(model.state.value.editor!!.copy(text = "Fictional non-root memory"))
+        model.save()?.join()
+        assertEquals(listOf("settings", "record"), repo.writes.map { it.operation })
+        assertEquals(false, model.state.value.status?.rootAuthorized)
+        assertTrue(repo.rows.any { it.text == "Fictional non-root memory" })
+    }
     @Test fun explicitlyAcceptingAllApplicationsClearsLegacyScopeAndUnpauses() = runBlocking {
         val repo = Repository(); val model = NativeMemoryCoordinator(repo, this); ready(model)
         model.enableAllApplicationCapture()?.join()

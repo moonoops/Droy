@@ -198,8 +198,6 @@ internal fun memoryMessage(code: String): String = stringResource(when (code) {
     "MEMORY_CURSOR_STALE", "MEMORY_INVALID_CURSOR" -> R.string.native_memory_cursor_stale
     "MEMORY_NOT_FOUND" -> R.string.native_memory_missing
     "MEMORY_READ_ONLY" -> R.string.native_memory_read_only
-    "MEMORY_ROOT_PERMISSION_REQUIRED", "MEMORY_ROOT_REQUIRED" -> R.string.native_memory_root_required
-    "MEMORY_RESTART_REQUIRED" -> R.string.native_memory_restart_required
     "MEMORY_FEATURE_UNAVAILABLE" -> R.string.native_memory_feature_unavailable
     "MEMORY_PROTECTION_NOT_READY", "MEMORY_EXECUTION_NOT_READY", "MEMORY_HOST_CONTRACT_MISSING", "HISTORY_EXECUTION_NOT_READY", "MEMORY_REQUIRED_PLUGIN_MISSING", "MEMORY_NOT_INITIALIZED" -> R.string.native_memory_protection_wait
     "MEMORY_CAPACITY_REACHED", "MEMORY_CAPACITY", "MEMORY_STORAGE_LIMIT", "HISTORY_STORAGE_LIMIT" -> R.string.native_memory_storage_limited

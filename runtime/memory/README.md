@@ -21,7 +21,9 @@ Queries use literal Unicode matching, bounded pages and explicit coverage/trunca
 
 [plugin.mjs](plugin.mjs) and [adapter.mjs](adapter.mjs) expose bounded model tools. The store itself is a trusted-host service and must not be exposed directly as a model tool.
 
-Before disclosing private content, persist [session protection](../privacy/README.md) and validate the actual model endpoint, data categories and purpose. The Android host must establish [protected execution](../execution/README.md) before collection. Disabling collection does not remove protection from existing conversations.
+Before disclosing private content, persist [session protection](../privacy/README.md) and validate the actual model endpoint, data categories and purpose. Personal memory uses ordinary Android App-private storage and works without Root. Collection requires a ready memory service and independent source consent. Disabling collection does not remove processing restrictions from existing conversations.
+
+Scripts and plugins running under the App identity are trusted with that identity's data access. Memory activation does not place file, Shell or MCP operations in a separate Root sandbox or impose script-network isolation.
 
 [INTEGRATION.md](INTEGRATION.md) identifies host entry points and activation requirements.
 

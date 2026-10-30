@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:http';
 import { companionState } from './fixtures/companion-state.mjs';
 
-// Real packaged profile; the bridge rejects before any host path or Root action.
+// Real packaged profile; an unavailable native host must not initialize private stores.
 const runtime = fileURLToPath(new URL('../../generated/dsh/', import.meta.url));
 const home = await mkdtemp(join(tmpdir(), 'droy-memory-active-profile-'));
 const token = 'fictional-active-profile-token-1234567890';
@@ -16,7 +16,7 @@ const port = reservation.address().port; await new Promise(resolve => reservatio
 const calls = []; let prepared;
 const preparation = new Promise(resolve => { prepared = resolve; });
 const memoryState = { settings: { enabled: false, recallEnabled: true, automaticExtraction: false, privacyEverActivated: true },
-  root: { authorized: true, checkedAt: 1 }, execution: { ready: false, epoch: 'synthetic-epoch', reason: 'EXECUTION_NOT_READY' },
+  root: { authorized: false, checkedAt: 0 }, execution: { ready: false, epoch: 'synthetic-epoch', reason: 'EXECUTION_NOT_READY' },
   activation: { pendingEnable: true, cleanupReady: true } };
 const nativeBridge = createServer(async (req, res) => {
   assert.equal(req.headers.authorization, `Bearer ${token}`);
@@ -24,7 +24,7 @@ const nativeBridge = createServer(async (req, res) => {
   const input = JSON.parse(body); calls.push({ path: req.url, operation: input.operation });
   if (req.url === '/memory' && input.operation === 'activation.prepare') {
     prepared(); res.writeHead(409, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: false, error: { code: 'SYNTHETIC_STOP_BEFORE_ROOT', message: 'Synthetic boundary reached; no Root action is performed.' } }));
+    res.end(JSON.stringify({ ok: false, error: { code: 'SYNTHETIC_NATIVE_HOST_UNAVAILABLE', message: 'Synthetic native host is unavailable.' } }));
     return;
   }
   if (req.url === '/memory' && input.operation === 'settings') Object.assign(memoryState.settings, input.patch);
@@ -59,7 +59,7 @@ try {
       .map(fiber => ({ name: fiber.name, uid: fiber.uid, state: fiber.state, inject: Object.keys(fiber.inject) })) }));
   assert.ok(!calls.some(call => ['protection-activate', 'initialization.prepare', 'host-ready'].includes(call.operation)));
   assert.equal((await ctx.get('droyPrivacy').status()).ready, false);
-  console.log('PASS: active packaged profile reaches activation.prepare before any Root, store initialization or collection readiness');
+  console.log('PASS: active rootless profile reaches the native handshake and preserves unavailable-host checks');
 } finally {
   clearTimeout(watchdog);
   await profile?.shutdown.shutdown(0);

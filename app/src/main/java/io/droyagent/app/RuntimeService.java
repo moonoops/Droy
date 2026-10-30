@@ -28,7 +28,6 @@ public final class RuntimeService extends Service {
     private static volatile String lastDiagnostics = NativeLocale.text("引擎未运行", "Engine is not running");
     private static boolean historyMaintenance;
     private static ProductBridge statusBridge;
-    private static final java.util.concurrent.atomic.AtomicBoolean memoryRestarting = new java.util.concurrent.atomic.AtomicBoolean();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ArrayDeque<String> log = new ArrayDeque<>();
     private volatile Process process;
@@ -220,7 +219,7 @@ public final class RuntimeService extends Service {
             memoryHost.prepareRuntimeStart();
             RuntimeInstaller.installCertificate(this);
             File terminfo = RuntimeInstaller.installTerminfo(this);
-            File runtime = RuntimeInstaller.install(this, memoryHost.protectionRequired());
+            File runtime = RuntimeInstaller.install(this);
             RuntimeRelease release = RuntimeInstaller.release(this);
             runningRelease = release;
             if (stopping || Thread.currentThread().isInterrupted()) return;
@@ -501,7 +500,7 @@ public final class RuntimeService extends Service {
         }
     }
     static void memoryPermissionsChanged(Context context) {
-        MemoryRuntime.get(context).rootPermissionChanged();
+        MemoryRuntime.get(context).operationsChanged();
         android.content.SharedPreferences choices = ProductPermissions.preferences(context);
         io.droyagent.androiduse.ProcessMemoryTools.get(context).onPermissionsChanged(
             ProductPermissions.allowed(choices, "allowApps"),
@@ -533,27 +532,6 @@ public final class RuntimeService extends Service {
     static void requestStop() {
         RuntimeService active = instance;
         if (active != null) requestStop(active);
-    }
-
-    static void restartForMemoryProtection(Context context) {
-        if (!memoryRestarting.compareAndSet(false,true)) return;
-        Context app = context.getApplicationContext();
-        // Reply to the old authenticated request before retiring its token/server.
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            RuntimeService previous = instance;
-            if (previous != null) previous.stopGracefully();
-            new Thread(() -> {
-                try {
-                    long deadline = android.os.SystemClock.elapsedRealtime()+15000;
-                    while (previous != null && (instance == previous || !previous.worker.isTerminated())) {
-                        if (android.os.SystemClock.elapsedRealtime() >= deadline) throw new IllegalStateException("MEMORY_RESTART_STOP_UNCONFIRMED");
-                        Thread.sleep(100);
-                    }
-                    app.startForegroundService(new Intent(app,RuntimeService.class));
-                } catch (Exception failed) { MemoryRuntime.get(app).startupFailed(); }
-                finally { memoryRestarting.set(false); }
-            },"droy-memory-restart").start();
-        },300);
     }
 
     static void requestStop(Context context) {

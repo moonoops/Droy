@@ -147,7 +147,7 @@ public final class LanguageUiDeviceTest {
         capture(instrumentation, context, ui, language + "-permissions-last");
         ui.tap("[data-droy-settings-section=droy-memory]");
         DeviceUi.await("Memory settings did not open", 10000,
-            () -> ui.truth("!!document.querySelector('[data-droy-memory-root]')"));
+            () -> ui.truth("!!document.querySelector('[data-droy-memory]')"));
         ui.evaluate("document.querySelector('[data-droy-memory]').scrollIntoView({block:'start',behavior:'instant'})");
         capture(instrumentation, context, ui, language + "-memory");
         assertTrue("Only the memory settings page should be exposed", ui.truth("!document.querySelector('[data-droy-memory-tab]')&&!!document.querySelector('.droy-memory-settings')"));

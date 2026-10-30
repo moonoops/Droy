@@ -32,12 +32,12 @@ const DISPATCH_MESSAGES = Object.freeze({
     en: 'This model is not authorized to read this memory. Review the memory access request when you retry.',
   },
   PRIVACY_EXECUTION_UNVERIFIED: {
-    zh: '私人信息保护尚未就绪，请检查 Root 授权和记忆设置中的保护状态后重试。',
-    en: 'Private information protection is not ready. Check Root permission and the protection status in Memory settings, then try again.',
+    zh: '记忆服务尚未就绪，请稍后刷新记忆设置并重试。',
+    en: 'Memory is not ready. Refresh Memory settings in a moment and try again.',
   },
   PRIVACY_NOT_INITIALIZED: {
-    zh: '私人信息保护正在初始化，请检查 Root 授权和记忆设置中的保护状态后重试。',
-    en: 'Private information protection is initializing. Check Root permission and the protection status in Memory settings, then try again.',
+    zh: '记忆服务正在初始化，请稍后刷新记忆设置并重试。',
+    en: 'Memory is initializing. Refresh Memory settings in a moment and try again.',
   },
 });
 function dispatchError(error, ctx) {
@@ -60,6 +60,8 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
   const invalidationListeners = new Set();
   const pendingProtection = new Map();
   const pendingAccess = new Map();
+  const pendingSessions = new Map();
+  let sessionWrites = Promise.resolve();
   let accessEpoch = 0;
   let protectionEpoch = 0;
   let disposed = false;
@@ -73,7 +75,24 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
       if (error?.code === 'PRIVACY_NOT_INITIALIZED') storePromise = undefined;
       throw error;
     });
-    return storePromise;
+    const value = await storePromise;
+    if (pendingSessions.size) {
+      const written = sessionWrites.then(async () => {
+        for (const [sessionId, parentId] of pendingSessions) {
+          const current = await value.sessionState(sessionId);
+          if (current.state === 'unknown') {
+            if (parentId) {
+              const parent = await value.sessionState(parentId);
+              if (parent.state !== 'unknown') await value.inheritSession(parentId, sessionId);
+            } else await value.registerCleanSession(sessionId);
+          }
+          pendingSessions.delete(sessionId);
+        }
+      });
+      sessionWrites = written.catch(() => {});
+      await written;
+    }
+    return value;
   }
 
   async function status() {
@@ -270,7 +289,22 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
       signal?.throwIfAborted();
       return;
     }
-    if (!host || !(await status()).active) return;
+    if (!host || disposed) return;
+    if (!(await status()).active) {
+      const session = agent?.session, header = session?.header;
+      if (!header || header.id !== session.id) return;
+      const sessionId = sessionIdentity(session.id);
+      const localResume = source === 'resume' && !header.isSeeded && !header.parentSession
+        && ctx.get('sessionPersistence') && ctx.get('agents')?.get(sessionId) === agent
+        && ctx.get('sessions')?.get(sessionId) === session;
+      if (source !== 'startup' && !localResume) return;
+      signal?.throwIfAborted();
+      // Before first activation, DSH's own unseeded local history is ordinary
+      // conversation data. Imported seeds still need their original lineage.
+      if (header.parentSession) pendingSessions.set(sessionId, sessionIdentity(header.parentSession));
+      else if (!header.isSeeded && (localResume || session.snapshotEvents().length === 0)) pendingSessions.set(sessionId, null);
+      return;
+    }
     const current = await (await getStore()).sessionState(sessionIdentity(agent?.session?.id));
     if (current.state !== 'unknown') return;
     const header = agent.session.header;
@@ -391,6 +425,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
   }
   function dispose() {
     disposed = true;
+    pendingSessions.clear();
     cancelEndpointAccess();
     abortCalls(() => true);
     notifyInvalidated(); invalidationListeners.clear();

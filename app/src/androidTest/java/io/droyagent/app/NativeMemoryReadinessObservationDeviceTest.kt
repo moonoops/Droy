@@ -35,7 +35,7 @@ class NativeMemoryReadinessObservationDeviceTest {
         assertFalse(rootAfter.getBoolean("running"))
         assertEquals(memoryRootBefore.getLong("checkedAt"), memoryRootAfter.getLong("checkedAt"))
         assertEquals(memoryRootBefore.getBoolean("authorized"), memoryRootAfter.getBoolean("authorized"))
-        if (state.rootAuthorized == false) assertFalse("Root-dependent memory cannot report a ready execution gate", state.gateReady)
+        assertFalse("Personal memory must not require Root", memoryRootAfter.getBoolean("required"))
         val receipt = JSONObject().put("available", state.available).put("gateReady", state.gateReady)
             .put("gateReason", state.gateReason).put("rootAuthorized", state.rootAuthorized ?: JSONObject.NULL)
             .put("enabled", state.settings.enabled).put("managementAvailable", state.managementAvailable)

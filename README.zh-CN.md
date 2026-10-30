@@ -54,7 +54,7 @@ Redmi K90 Ultra 上的真实界面。点击图片查看原图。
 
 - Android 11 / API 30 及以上的 ARM64 手机，保持系统 WebView 更新。
 - Droy 界面仅支持竖屏模式。
-- 非 Root 环境可通过无障碍服务执行基础手机操作，部分扩展操作可使用已授权的 Shizuku；Root 环境可开启增强能力。实际可用功能以应用内的权限与能力检查为准，个人记忆需要 Root 与执行隔离资格。
+- 非 Root 环境可通过无障碍服务执行基础手机操作，部分扩展操作可使用已授权的 Shizuku；Root 环境可开启增强能力。实际可用功能以应用内的权限与能力检查为准，个人记忆无需 Root，采集来源和模型处理分别授权。
 - 支持视觉模型与纯文本模型，也可配置 DeepSeek Flash 等兼容服务。纯文本模型通过页面文字和控件结构操作；截图理解需要所选模型及接口支持图像输入，并在配置中声明。模型能力以[服务方当前说明](https://api-docs.deepseek.com/guides/vision/)和实际配置为准。
 
 遇到兼容性问题，可以让 Agent 协助定位、修改源码并验证，通过 [Issue](https://github.com/moonoops/Droy/issues) 提供复现信息，或提交 [Pull Request](https://github.com/moonoops/Droy/pulls) 分享修复。

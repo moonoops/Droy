@@ -17,7 +17,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.rules.ExternalResource
 
 /** Compose's rule must wrap this rule; the shared marker also blocks legacy fixture overlap. */
-class NativeIsolatedRuntimeFixture(private val destination: String = "workbench") : ExternalResource() {
+class NativeIsolatedRuntimeFixture(private val destination: String = "workbench", private val allowRoot: Boolean? = null) : ExternalResource() {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     val context: Context get() = instrumentation.targetContext
     val runtimeTransport = NativeLocalTransport()
@@ -83,8 +83,10 @@ class NativeIsolatedRuntimeFixture(private val destination: String = "workbench"
             changedPreferences = true
             preferences.keys.forEach { assertTrue(context.getSharedPreferences(it, 0).edit().clear().commit()) }
             assertTrue(context.getSharedPreferences("installation", 0).edit().putBoolean("completed", true).commit())
-            assertTrue(context.getSharedPreferences("product", 0).edit().putString("languagePreference", "en")
-                .putBoolean(BackgroundRuntime.STOPPED, true).putBoolean("petEnabled", false).commit())
+            val product = context.getSharedPreferences("product", 0).edit().putString("languagePreference", "en")
+                .putBoolean(BackgroundRuntime.STOPPED, true).putBoolean("petEnabled", false)
+            allowRoot?.let { product.putBoolean("allowRoot", it) }
+            assertTrue(product.commit())
             marker.writeText(record("running").toString())
             launch(destination)
             // Native foreground entry now starts the engine. Never depend on the retired

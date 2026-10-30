@@ -6,7 +6,7 @@ const source = await readFile(new URL('../client.js', import.meta.url), 'utf8');
 let exports;
 vm.runInNewContext(source, { window: { __ModuleLoader__: { load({ factory }) { exports = factory(() => ({})); } } } });
 const { createMemoryController, saveMemoryArchive } = exports;
-const enabled = () => ({ available: true, managementAvailable: true, gate: { ready: true, rootAuthorized: true }, settings: { enabled: true, recallEnabled: true, automaticExtraction: false } });
+const enabled = () => ({ available: true, managementAvailable: true, gate: { ready: true }, settings: { enabled: true, recallEnabled: true, automaticExtraction: false } });
 const plain = value => JSON.parse(JSON.stringify(value));
 const result = items => ({ items, total: items.length, nextCursor: null, coverage: {} });
 
@@ -88,17 +88,17 @@ test('only one mutation can be admitted while an earlier mutation is pending', a
   assert.equal(mutations, 1); release({}); await pending; assert.equal(controller.getSnapshot().busy, false);
 });
 
-test('a rejected enable refreshes actual Root status without retrying the mutation', async () => {
+test('a rejected enable refreshes actual service status without retrying the mutation', async () => {
   let attempts = 0;
   const controller = createMemoryController(async operation => {
-    if (operation === 'settings') { attempts++; throw Object.assign(new Error('Denied'), { code: 'MEMORY_ROOT_REQUIRED' }); }
+    if (operation === 'settings') { attempts++; throw Object.assign(new Error('Unavailable'), { code: 'MEMORY_EXECUTION_NOT_READY' }); }
     if (operation === 'query') return result([]);
-    return { ...enabled(), available: false, managementAvailable: false, gate: { ready: false, rootAuthorized: false },
+    return { ...enabled(), available: false, managementAvailable: false, gate: { ready: false },
       settings: { ...enabled().settings, enabled: false } };
   }, () => 'id');
   await controller.mutate('settings', { enabled: true }, 'enabled');
-  assert.equal(attempts, 1); assert.equal(controller.getSnapshot().status.gate.rootAuthorized, false);
-  assert.equal(controller.getSnapshot().status.settings.enabled, false); assert.match(controller.getSnapshot().error, /Root/);
+  assert.equal(attempts, 1); assert.equal(controller.getSnapshot().status.gate.ready, false);
+  assert.equal(controller.getSnapshot().status.settings.enabled, false); assert.match(controller.getSnapshot().error, /记忆服务尚未就绪/);
 });
 
 test('client sends local-time selections with explicit offset conversion and the correct category filter', async () => {
@@ -124,6 +124,7 @@ test('client exposes the required Droy memory entry and main switch without embe
   assert.equal(source.split('/* DROY_MEMORY_STYLES */').length, 2);
   assert.match(source, /label: \(\) => tr\("Droy 记忆"\)/);
   assert.match(source, /title: tr\("Droy记忆"\)/);
+  assert.doesNotMatch(source, /Root|rootAuthorized|data-droy-memory-root|执行保护/);
   assert.ok(!source.includes('dangerouslySetInnerHTML'));
 });
 

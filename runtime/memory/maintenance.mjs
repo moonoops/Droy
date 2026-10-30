@@ -287,7 +287,7 @@ export function createMemoryMaintenance({ store, existingStore, executionStatus,
     const signal = activeController.signal;
     try { await check({ ...options, signal }); return await run(signal); }
     catch (error) {
-      const code = signal.aborted ? 'MEMORY_MAINTENANCE_CANCELLED' : error.code ?? 'MEMORY_MAINTENANCE_FAILED';
+      const code = signal.aborted ? signal.reason?.code ?? 'MEMORY_MAINTENANCE_CANCELLED' : error.code ?? 'MEMORY_MAINTENANCE_FAILED';
       lastCode = code; reportError(code);
       return { status: 'blocked', action, code };
     } finally { activeController = undefined; busy = false; }

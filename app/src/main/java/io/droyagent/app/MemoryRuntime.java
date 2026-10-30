@@ -28,12 +28,10 @@ final class MemoryRuntime {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final HistoryCapture history;
     private final Object lock = new Object();
-    private volatile boolean runtimeActive, qualified, hostReady, cleanupReady, rootAuthorized;
-    private volatile String runtimeEpoch = UUID.randomUUID().toString(), reason = "MEMORY_RUNTIME_STOPPED", rootVersion = "", rootReason = "MEMORY_ROOT_NOT_CHECKED";
-    private volatile long rootCheckedAt, rootCheckedElapsed;
-    private String challenge = "", qualificationId = "";
+    private volatile boolean runtimeActive, activated, hostReady;
+    private volatile String runtimeEpoch = UUID.randomUUID().toString(), reason = "MEMORY_RUNTIME_STOPPED";
+    private String challenge = "";
     private long challengeExpiresAt;
-    private long activationIntentEpoch;
     private WeakReference<Activity> resumedActivity = new WeakReference<>(null);
 
     static synchronized MemoryRuntime get(Context context) {
@@ -63,8 +61,7 @@ final class MemoryRuntime {
     private boolean captureReady() {
         return executionReady() && preferences.getBoolean("enabled",false) && !ProductPermissions.stopped(context);
     }
-    private boolean executionReady() { return runtimeActive && qualified && hostReady && cleanupReady && rootAuthorized
-        && ProductPermissions.allowed(ProductPermissions.preferences(context),"allowRoot"); }
+    private boolean executionReady() { return runtimeActive && activated && hostReady; }
     JSONObject settings() throws Exception {
         return new JSONObject().put("enabled", preferences.getBoolean("enabled", false))
             .put("recallEnabled", true)
@@ -77,13 +74,13 @@ final class MemoryRuntime {
             .put("execution", new JSONObject().put("ready", executionReady())
                 .put("epoch", runtimeEpoch).put("reason", executionReady() ? "ready" : reason)
                 .put("host", hostConfiguration()))
-            .put("activation", new JSONObject().put("restartRequired", !protectionRequired() || !cleanupReady)
-                .put("cleanupReady", cleanupReady).put("pendingEnable", preferences.getBoolean("pendingEnable", false)))
+            .put("activation", new JSONObject().put("restartRequired", false)
+                .put("pendingEnable", preferences.getBoolean("pendingEnable", false)))
             .put("capture", historyStatus());
     }
     private JSONObject rootStatus() throws Exception {
-        return new JSONObject().put("authorized", rootAuthorized).put("checkedAt", rootCheckedAt)
-            .put("version", rootVersion).put("reason",rootReason)
+        return new JSONObject().put("required", false).put("authorized", false).put("checkedAt", 0)
+            .put("version", "").put("reason", "not_required")
             .put("productAllowed",ProductPermissions.allowed(ProductPermissions.preferences(context),"allowRoot"));
     }
     private static void fields(JSONObject value, String... allowed) {
@@ -100,11 +97,11 @@ final class MemoryRuntime {
         switch (operation) {
             case "status": fields(input, "operation"); return status();
             case "settings": fields(input, "operation", "patch"); return saveSettings(input.getJSONObject("patch"));
-            case "root-check": fields(input, "operation"); return checkRoot();
+            case "root-check": fields(input, "operation"); return rootStatus();
             case "activation.prepare":
                 fields(input, "operation");
                 try { return prepareActivation(); }
-                catch (Exception failure) { invalidate("MEMORY_QUALIFICATION_FAILED"); throw failure; }
+                catch (Exception failure) { invalidate("MEMORY_ACTIVATION_FAILED"); throw failure; }
             case "protection-activate":
                 fields(input, "operation", "challenge", "runtimeEpoch", "qualificationId"); return activate(input);
             case "host-ready": fields(input, "operation", "runtimeEpoch"); return hostReady(input.getString("runtimeEpoch"));
@@ -125,85 +122,48 @@ final class MemoryRuntime {
         boolean enabling = bool(patch, "enabled", preferences.getBoolean("enabled", false));
         boolean recall = true;
         boolean extraction = bool(patch, "automaticExtraction", preferences.getBoolean("automaticExtraction", false));
-        if (patch.has("enabled") && enabling) checkRoot();
         synchronized (lock) {
-            if (patch.has("enabled") && enabling && (!runtimeActive || !qualified || !hostReady || !rootAuthorized)) throw new IllegalStateException("MEMORY_EXECUTION_NOT_READY");
+            if (patch.has("enabled") && enabling && !executionReady()) throw new IllegalStateException("MEMORY_EXECUTION_NOT_READY");
             SharedPreferences.Editor edit=preferences.edit().putBoolean("enabled",enabling).putBoolean("recallEnabled",recall).putBoolean("automaticExtraction",extraction);
-            if(patch.has("enabled")){edit.putBoolean("pendingEnable",false);if(!enabling)activationIntentEpoch++;}
+            if(patch.has("enabled")){edit.putBoolean("pendingEnable",false);if(!enabling)challenge="";}
             if (!edit.commit()) throw new IllegalStateException("MEMORY_SETTINGS_WRITE_FAILED");
         }
         refreshCapture(); return settings();
     }
-    private JSONObject checkRoot() throws Exception {
-        boolean productAllowed = ProductPermissions.allowed(ProductPermissions.preferences(context),"allowRoot");
-        MemoryExecutionQualification.RootResult result = productAllowed ? MemoryExecutionQualification.checkRoot() : new MemoryExecutionQualification.RootResult(false,"");
-        synchronized (lock) {
-            rootAuthorized = result.authorized(); rootVersion = result.version();
-            rootReason = !productAllowed ? "MEMORY_ROOT_PERMISSION_REQUIRED" : rootAuthorized ? "ready" : "MEMORY_ROOT_REQUIRED";
-            rootCheckedAt = System.currentTimeMillis(); rootCheckedElapsed = SystemClock.elapsedRealtime();
-            if (!rootAuthorized) { qualified = false; challenge = ""; reason = rootReason; }
-        }
-        history.refreshAuthorization(); return rootStatus();
-    }
     private JSONObject prepareActivation() throws Exception {
-        final long intent; final String requestedEpoch;
-        synchronized(lock){intent=activationIntentEpoch;requestedEpoch=runtimeEpoch;}
-        if (!protectionRequired()) {
-            checkRoot();
-            if (!rootAuthorized) throw new IllegalStateException(rootReason);
-            // Unsupported kernels must leave ordinary DSH usable. This probe is
-            // repeated after legacy cleanup and token rotation before activation.
-            MemoryExecutionQualification.run(context);
-            synchronized (lock) {
-                if(!runtimeActive || !rootAuthorized || !requestedEpoch.equals(runtimeEpoch) || intent!=activationIntentEpoch)
-                    throw new IllegalStateException("MEMORY_ACTIVATION_CANCELLED");
-                if (!preferences.edit().putBoolean("privacyEverActivated", true).putBoolean("pendingEnable", true).commit()) throw new IllegalStateException("MEMORY_SETTINGS_WRITE_FAILED");
-                qualified = false; hostReady = false; reason = "MEMORY_RESTART_REQUIRED";
-            }
-            history.stop("protection_restart");
-            RuntimeService.restartForMemoryProtection(context);
-            return new JSONObject().put("restartRequired", true).put("reason", "MEMORY_RESTART_REQUIRED");
-        }
-        String epoch = runtimeEpoch;
-        if (!runtimeActive) throw new IllegalStateException("MEMORY_RUNTIME_STOPPED");
-        if (!cleanupReady) throw new IllegalStateException("MEMORY_PROTECTED_RESTART_REQUIRED");
-        checkRoot();
-        if (!rootAuthorized) throw new IllegalStateException(rootReason);
-        MemoryExecutionQualification.Result result = MemoryExecutionQualification.run(context);
         synchronized (lock) {
-            if (!runtimeActive || !epoch.equals(runtimeEpoch) || !rootAuthorized || intent!=activationIntentEpoch) throw new IllegalStateException("MEMORY_RUNTIME_CHANGED");
-            challenge = RuntimeService.randomToken(); qualificationId = result.reportHash();
+            if (!runtimeActive) throw new IllegalStateException("MEMORY_RUNTIME_STOPPED");
+            challenge = RuntimeService.randomToken();
             challengeExpiresAt = SystemClock.elapsedRealtime() + 30000;
             return new JSONObject().put("restartRequired", false).put("challenge", challenge).put("runtimeEpoch", runtimeEpoch)
-                .put("expiresInMs", 30000).put("nativeQualificationId", qualificationId).put("host", hostConfiguration());
+                .put("expiresInMs", 30000).put("nativeQualificationId", "app-sandbox").put("host", hostConfiguration());
         }
     }
     private JSONObject activate(JSONObject input) throws Exception {
         String supplied = input.getString("challenge"), hostQualification = input.getString("qualificationId");
         if (!hostQualification.matches("[a-f0-9]{64}")) throw new IllegalArgumentException("MEMORY_INVALID_QUALIFICATION");
         synchronized (lock) {
-            if (!runtimeActive || !rootAuthorized || !runtimeEpoch.equals(input.getString("runtimeEpoch"))
+            if (!runtimeActive || !runtimeEpoch.equals(input.getString("runtimeEpoch"))
                 || SystemClock.elapsedRealtime() >= challengeExpiresAt || challenge.isEmpty()
                 || !MessageDigest.isEqual(challenge.getBytes(StandardCharsets.UTF_8), supplied.getBytes(StandardCharsets.UTF_8))) {
                 challenge = ""; throw new IllegalStateException("MEMORY_ACTIVATION_EXPIRED");
             }
             challenge = "";
-            if (SystemClock.elapsedRealtime() - rootCheckedElapsed > 60000 || qualificationId.isEmpty()) throw new IllegalStateException("MEMORY_ROOT_CHECK_EXPIRED");
             if (!preferences.edit().putBoolean("privacyEverActivated", true).commit()) throw new IllegalStateException("MEMORY_SETTINGS_WRITE_FAILED");
-            qualified = true; hostReady = false; reason = "MEMORY_HOST_INITIALIZING";
+            activated = true; hostReady = false; reason = "MEMORY_HOST_INITIALIZING";
         }
         history.refreshAuthorization(); return status();
     }
     private JSONObject hostReady(String epoch) throws Exception {
         synchronized (lock) {
-            if (!runtimeActive || !qualified || !cleanupReady || !rootAuthorized || !runtimeEpoch.equals(epoch)) throw new IllegalStateException("MEMORY_EXECUTION_NOT_READY");
+            if (!runtimeActive || !activated || !runtimeEpoch.equals(epoch)) throw new IllegalStateException("MEMORY_EXECUTION_NOT_READY");
             hostReady = true; reason = "ready";
         }
         refreshCapture(); return status();
     }
     private JSONObject prepareInitialization() throws Exception {
         synchronized (lock) {
-            if (!runtimeActive || !qualified || !rootAuthorized) throw new IllegalStateException("MEMORY_EXECUTION_NOT_READY");
+            if (!runtimeActive || !activated) throw new IllegalStateException("MEMORY_EXECUTION_NOT_READY");
             boolean initialize = !preferences.getBoolean("memoryStoreInitializedIntent", false);
             if (initialize) {
                 for (String name : new String[]{"droy-memory", "droy-memory.identity.json", "droy-privacy", "droy-privacy.identity.json"})
@@ -214,7 +174,8 @@ final class MemoryRuntime {
         }
     }
     private JSONObject hostConfiguration() throws Exception {
-        return new JSONObject().put("filesDir", MemoryExecutionQualification.filesDirectory(context))
+        // Keep Android's per-user path; canonical user-0 paths can resolve to the /data/data alias.
+        return new JSONObject().put("filesDir", context.getFilesDir().getAbsolutePath())
             .put("nativeDir", context.getApplicationInfo().nativeLibraryDir).put("appUid", android.os.Process.myUid())
             .put("memoryDirectory", new File(context.getFilesDir(), "droy-memory").getAbsolutePath())
             .put("privacyDirectory", new File(context.getFilesDir(), "droy-privacy").getAbsolutePath())
@@ -222,36 +183,24 @@ final class MemoryRuntime {
     }
     boolean protectionRequired() { return preferences.getBoolean("privacyEverActivated",false); }
     void prepareRuntimeStart() throws Exception {
-        cleanupReady = false; hostReady = false;
-        if (protectionRequired()) {
-            if(MemoryExecutionQualification.hasActiveProcesses())throw new IllegalStateException("MEMORY_NATIVE_JOBS_STILL_STOPPING");
-            if (!ProductPermissions.allowed(ProductPermissions.preferences(context),"allowRoot")) throw new IllegalStateException("MEMORY_ROOT_PERMISSION_REQUIRED");
-            MemoryExecutionQualification.cleanup(context); cleanupReady = true;
-        }
+        synchronized (lock) { activated = false; hostReady = false; challenge = ""; }
     }
     void runtimeStarted() {
-        synchronized (lock) { runtimeEpoch = UUID.randomUUID().toString(); runtimeActive = true; qualified = false; hostReady = false;
-            rootAuthorized = false; challenge = ""; qualificationId = ""; reason = "MEMORY_EXECUTION_NOT_READY"; }
+        synchronized (lock) { runtimeEpoch = UUID.randomUUID().toString(); runtimeActive = true; activated = false; hostReady = false;
+            challenge = ""; reason = "MEMORY_EXECUTION_NOT_READY"; }
         refreshCapture();
     }
     void runtimeStopped() {
-        MemoryExecutionQualification.cancelAll();
-        synchronized (lock) { runtimeActive = false; cleanupReady = false; hostReady = false; runtimeEpoch = UUID.randomUUID().toString(); }
+        synchronized (lock) { runtimeActive = false; hostReady = false; runtimeEpoch = UUID.randomUUID().toString(); }
         invalidate("MEMORY_RUNTIME_STOPPED");
     }
     private void invalidate(String code) {
-        synchronized (lock) { qualified = false; hostReady = false; challenge = ""; qualificationId = ""; reason = code;
+        synchronized (lock) { activated = false; hostReady = false; challenge = ""; reason = code;
             if (!code.equals("MEMORY_RUNTIME_STOPPED") && !code.equals("MEMORY_HOST_STOPPED") && preferences.getBoolean("pendingEnable",false))
                 preferences.edit().putBoolean("pendingEnable",false).commit(); }
         history.stop("execution_unavailable"); history.refreshAuthorization();
     }
-    void operationsChanged() { rootPermissionChanged(); refreshCapture(); }
-    void rootPermissionChanged() {
-        if (!ProductPermissions.allowed(ProductPermissions.preferences(context),"allowRoot")) {
-            rootAuthorized = false; rootReason = "MEMORY_ROOT_PERMISSION_REQUIRED"; invalidate(rootReason);
-        }
-        history.refreshAuthorization();
-    }
+    void operationsChanged() { refreshCapture(); }
     private void refreshCapture() {
         if (captureReady()) history.start(); else history.stop("memory_ineligible");
         history.refreshAuthorization();

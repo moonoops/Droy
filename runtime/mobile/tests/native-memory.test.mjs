@@ -13,7 +13,7 @@ async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'droy-native-memory-'));
   const store = await MemoryStore.open({ directory: join(directory, 'store'), initialize: true });
   const settings = { enabled: true, recallEnabled: true, automaticExtraction: false };
-  const gate = { ready: true, rootAuthorized: true, reason: 'ready' };
+  const gate = { ready: true, rootAuthorized: false, reason: 'ready' };
   const calls = [], forgotten = [], route = { id: 'fixture-route' };
   let managementReady = true, available = true;
   const host = {

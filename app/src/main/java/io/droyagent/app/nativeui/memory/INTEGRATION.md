@@ -28,10 +28,12 @@ the user refreshes the version. Refreshing a version retains only the fields
 the user changed and adopts current values for the other fields.
 
 Endpoint permissions remain separate from external sharing. Revocation,
-disabling and pausing remain accessible when protection is unavailable. The
+disabling and pausing remain accessible when the memory service is unavailable. The
 record manager hides saved content after an observed management gate failure;
 it retains an unsaved draft for recovery. Source references, attribution,
 inference, retention and location qualification remain visible in details.
 
-Archive import/export is not enabled by this screen.
-Unit and loopback tests use fictional temporary data.
+Archive import/export is not enabled by this screen. Personal memory works
+without Root and uses the ordinary App security model. Source permissions
+and endpoint consent remain separate. Unit and loopback tests use fictional
+temporary data.

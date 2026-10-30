@@ -15,7 +15,7 @@ internal object NativeMemoryFixtures {
         .put("privacy", JSONObject().put("categories", JSONArray(listOf("memory")))).put("validFrom", JSONObject.NULL).put("validUntil", JSONObject.NULL)
     fun record(id: String = "record-a", text: String = "Fictional note", revision: String = "revision-a") = NativeMemoryJson.record(recordValue(id, text, revision))
     fun statusValue() = JSONObject().put("available", true).put("managementAvailable", true)
-        .put("gate", JSONObject().put("ready", true).put("reason", "ready").put("rootAuthorized", true))
+        .put("gate", JSONObject().put("ready", true).put("reason", "ready"))
         .put("settings", JSONObject().put("enabled", true).put("recallEnabled", true).put("automaticExtraction", false))
         .put("maintenanceAvailable", false).put("store", JSONObject().put("counts", JSONObject().put("active", 1)).put("storage", JSONObject().put("limited", false).put("bytes", 4096)))
     fun status() = NativeMemoryJson.status(statusValue())
@@ -48,6 +48,14 @@ class NativeMemoryJsonTest {
         malformed { NativeMemoryJson.status(NativeMemoryFixtures.statusValue().put("available", "true")) }
         malformed { NativeMemoryJson.status(NativeMemoryFixtures.statusValue().apply { remove("store") }) }
         malformed { NativeMemoryJson.status(NativeMemoryFixtures.statusValue().put("capture", "bad")) }
+    }
+    @Test fun memoryReadinessDoesNotDependOnRootAuthorization() {
+        for (root in listOf(false, JSONObject.NULL)) {
+            val value = NativeMemoryFixtures.statusValue().apply { getJSONObject("gate").put("rootAuthorized", root) }
+            val status = NativeMemoryJson.status(value)
+            assertTrue(status.available); assertTrue(status.managementAvailable); assertTrue(status.gateReady)
+        }
+        assertTrue(NativeMemoryJson.status(NativeMemoryFixtures.statusValue()).available)
     }
     @Test fun unavailableManagementDoesNotInventStoreCountsOrRootAuthorization() {
         val value = NativeMemoryFixtures.statusValue().put("managementAvailable", false).put("available", false).apply {

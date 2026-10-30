@@ -63,7 +63,7 @@ The [capability catalogue](assets/droy-capabilities.json) owns phone tool schema
 - User plugins and configuration persist outside the replaceable runtime. Package management uses the bundled pnpm and the profile's own dependency directory.
 - DSH's saved language and theme settings drive both WebView and native presentation.
 - Android Use pause controls phone tools; stopping the entire engine also stops independent DSH work.
-- Shell and third-party extensions retain their own DSH permission checks. Activated personal-data protection routes reviewed operations through [protected execution](../execution/README.md).
+- Shell and third-party extensions retain their own DSH permission checks. Personal memory uses the ordinary App execution model without Root; memory recall does not switch file, Shell, PTC or MCP backends. Model-processing authorization remains separate.
 - Browser pages use a separate WebView process and storage. The compute tool runs in its own restricted Android process.
 - Schedules depend on runtime availability. Third-party native modules must be compatible with Android.
 

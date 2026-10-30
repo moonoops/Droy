@@ -70,6 +70,7 @@ export function deferredHandle(spec, start) {
 /** Host-owned policy and execution context; it is never exposed as a tool. */
 export function createExecutionBoundary({ ctx, host, providersInstalled = () => false, rpcPath = fileURLToPath(new URL('./fs-rpc.mjs', import.meta.url)) }) {
   const local = new AsyncLocalStorage();
+  const isolationRequired = host.isolationRequired !== false;
   const processes = new Set();
   const revisions = new Map();
   let everActive = false;
@@ -90,6 +91,7 @@ export function createExecutionBoundary({ ctx, host, providersInstalled = () => 
     const current = local.getStore();
     let record = { state: 'known-clean' };
     if (current) record = await privacy.authorizeExecution(current.agent, current.signal);
+    if (!isolationRequired) return { active: false, state: record.state, workspaceId: '' };
     const availability = await host.status();
     if (!availability.ready) fail('EXECUTION_ISOLATION_UNAVAILABLE');
     return { active: true, state: record.state, sessionId: current?.agent?.session?.id,
@@ -170,6 +172,8 @@ export function createExecutionBoundary({ ctx, host, providersInstalled = () => 
     }
   }
   async function beforeDisclosure(sessionId) {
+    // App execution keeps its existing process and workspace when memory is recalled.
+    if (!isolationRequired) return;
     revisions.set(sessionId, (revisions.get(sessionId) ?? 0) + 1);
     const stale = [...processes].filter(record => record.sessionId === sessionId && record.workspaceId !== workspaceId(sessionId));
     for (const record of stale) Promise.resolve(record.handle.terminate()).catch(() => {});
@@ -179,6 +183,7 @@ export function createExecutionBoundary({ ctx, host, providersInstalled = () => 
     }
   }
   async function quiesceLegacy() {
+    if (!isolationRequired) return;
     const stale = [...processes].filter(record => !record.active);
     for (const record of stale) Promise.resolve(record.handle.terminate()).catch(() => {});
     for (const record of stale) {
@@ -199,8 +204,7 @@ export function createExecutionBoundary({ ctx, host, providersInstalled = () => 
     if (companions?.ownsSession(exec.agent?.session?.id) === true
       && companions.isRestrictedAgent?.(exec.agent) === true) {
       // The product's scoped registry and monotonic guards have already run.
-      // This does not relax scope(): filesystem/process access still uses the
-      // existing execution policy, including its Root readiness requirements.
+      // Filesystem and subprocess requests still pass through scope().
       exec.signal?.throwIfAborted();
       return local.run({ agent: exec.agent, signal: exec.signal, workspaceId: '' }, next);
     }
@@ -209,10 +213,10 @@ export function createExecutionBoundary({ ctx, host, providersInstalled = () => 
     if (!status.active) return local.run({ agent: exec.agent, signal: exec.signal, workspaceId: '' }, next);
     if (!middlewareInstalled || !providersInstalled()) fail('EXECUTION_REQUIRED_PROVIDER_MISSING');
     const record = await privacy.authorizeExecution(exec.agent, exec.signal);
-    const allowed = SAFE_TOOLS.has(exec.name) || await host.authorizeTool?.(exec, record);
+    const allowed = !isolationRequired || SAFE_TOOLS.has(exec.name) || await host.authorizeTool?.(exec, record);
     if (!allowed) fail('EXECUTION_TOOL_NOT_REVIEWED');
     return local.run({ agent: exec.agent, signal: exec.signal,
-      workspaceId: record.state === 'protected' ? workspaceId(exec.agent.session.id) : '' }, next);
+      workspaceId: isolationRequired && record.state === 'protected' ? workspaceId(exec.agent.session.id) : '' }, next);
   }
   function checkTarget(detail, current) {
     if (!detail || detail.workspaceId !== current.workspaceId) fail('EXECUTION_FS_TARGET_SCOPE');
@@ -271,7 +275,7 @@ export function createExecutionBoundary({ ctx, host, providersInstalled = () => 
   return Object.freeze({ scope, around, rpc, fileCall, checkTarget, checkPath, canonicalPath, process, terminal, beforeDisclosure, quiesceLegacy, createMcpTransport, close,
     currentWorkspaceId: () => local.getStore()?.workspaceId ?? '',
     installed: () => middlewareInstalled && providersInstalled(),
-    isActive: () => everActive, guestEnv,
+    isActive: () => isolationRequired && everActive, guestEnv,
     install() {
       ctx.on('tools/execute', (exec, next) => around(exec, next));
       middlewareInstalled = true;
