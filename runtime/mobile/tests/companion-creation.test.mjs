@@ -353,7 +353,7 @@ test('avatar changes cannot borrow another companion, another draft, or the user
   for (const patch of [{ avatar: created.profile.avatar }, { avatarUrl: created.profile.avatar }, { avatar: userUpload.url }])
     assert.equal((await api('/' + other.id, 'PATCH', patch)).value.error, 'COMPANION_ATTACHMENT_SCOPE');
   await assert.rejects(f.store.updateProfile(other.id, { avatar: 'https://fixture.invalid/new-avatar.png' }), code('COMPANION_ATTACHMENT_SCOPE'));
-  assert.equal((await f.store.getProfile(other.id)).avatar, '/droy/companions/assets/kaka.png');
+  assert.equal((await f.store.getProfile(other.id)).avatar, other.avatar);
 });
 
 test('legacy avatar values survive unrelated edits while both PATCH spellings enforce new ownership', async t => {
@@ -369,7 +369,7 @@ test('templates and creation errors use current paired language copy and success
     const f = await fixture(child, { locale }), { api, request } = await f.serve();
     assert.equal((await request('', 'POST', {}, { headers: {} })).status, 401);
     const templates = await api('/templates'); assert.equal(templates.status, 200);
-    assert.deepEqual(templates.value.templates.map(row => row.templateId), ['kaka', 'maimai']);
+    assert.deepEqual(templates.value.templates.map(row => row.templateId), ['kaka', 'maimai', 'dafeiyu', 'claude']);
     assert.equal(templates.value.templates[0].suggestedName, locale === 'zh' ? '咔咔 1' : 'Kaka 1');
     assert.equal('id' in templates.value.templates[0], false);
     const input = create('model-retry', 'Saved model', { model: { provider: 'saved-provider', model: 'saved-model' } });

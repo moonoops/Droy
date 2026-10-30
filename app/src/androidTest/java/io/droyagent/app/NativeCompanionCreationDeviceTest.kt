@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.MediaStore
@@ -21,6 +22,7 @@ import io.droyagent.app.nativeui.companion.creation.NativeCreationJson
 import io.droyagent.app.nativeui.companion.creation.NativeCreationPage
 import io.droyagent.app.nativeui.companion.creation.NativeCreationPreferences
 import io.droyagent.app.nativeui.companion.data.NativeCompanionViewModel
+import io.droyagent.app.nativeui.companion.ui.cachedCompanionImageSize
 import io.droyagent.app.nativeui.data.NativeApiException
 import java.io.ByteArrayOutputStream
 import java.util.UUID
@@ -95,6 +97,97 @@ class NativeCompanionCreationDeviceTest {
         assertEquals("Listen before offering advice.", saved.getString("behaviorStyle"))
         assertEquals("Dry humor and short replies.", saved.getString("replyStyle"))
         assertTrue(saved.getJSONObject("settings").getBoolean("proactiveEnabled"))
+    }
+
+    @Test fun fourPresetCatalogPreviewsAndCreatesIndependentCompanionsInSavedLanguage() {
+        val locale = InstrumentationRegistry.getArguments().getString("nativeFixtureLocale", "en")
+        val names = if (locale == "zh") linkedMapOf("kaka" to "咔咔", "maimai" to "麦麦", "dafeiyu" to "大肥鱼", "claude" to "Claude 大小姐")
+            else linkedMapOf("kaka" to "Kaka", "maimai" to "Maimai", "dafeiyu" to "Dafeiyu", "claude" to "Lady Claude")
+        val seed = profiles().single()
+        assertEquals("kaka", seed.getString("templateId"))
+        assertEquals(names.getValue("kaka"), seed.getString("name"))
+        assertTrue(instancePattern.matches(seed.getString("id")))
+        val templates = request("/templates").getJSONArray("templates").let { values ->
+            (0 until values.length()).map(values::getJSONObject)
+        }
+        assertEquals(names.keys.toList(), templates.map { it.getString("templateId") })
+        assertEquals(4, templates.map { it.getString("avatarUrl") }.distinct().size)
+        assertEquals(4, templates.map { it.getString("personality") }.distinct().size)
+        val created = linkedMapOf<String, String>()
+        openCreation()
+        for ((index, template) in templates.withIndex()) {
+            val id = template.getString("templateId")
+            val tag = "native-creation-template-$id"
+            compose.onNodeWithTag("native-creation-templates").performScrollToNode(hasTestTag(tag))
+            compose.onNodeWithTag(tag).assertIsDisplayed().assertTextContains(names.getValue(id), substring = true)
+            val avatar = template.getString("avatarUrl")
+            compose.waitUntil(15_000) { cachedCompanionImageSize(avatar) != null }
+            val dimensions = requireNotNull(cachedCompanionImageSize(avatar))
+            assertEquals("The selected square avatar must decode in the template UI", dimensions.first, dimensions.second)
+            val image = runBlocking { creation.loadImage(avatar) }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(image, 0, image.size, bounds)
+            assertTrue("Template avatar must be a decodable image", bounds.outWidth > 0)
+            assertEquals(bounds.outWidth, bounds.outHeight)
+            if (id == "kaka" || id == "claude") settleAndCapture("four-presets-$locale-catalog-$id")
+            compose.onNodeWithTag(tag).performClick()
+            awaitNode("native-creation-name")
+            assertEquals(id, creation.state.value.editor!!.template.id)
+            assertEquals(template.getString("suggestedName"), creation.state.value.editor!!.name)
+            compose.onNodeWithTag("native-creation-personality").performScrollTo().performClick()
+            awaitNode("native-companion-personality-input")
+            compose.onNodeWithTag("native-companion-personality-input").assertTextContains(template.getString("personality"))
+            settleAndCapture("four-presets-$locale-$id-identity")
+            compose.onNodeWithTag("native-companion-behavior-input").performScrollTo().assertTextContains(template.getString("behaviorStyle"))
+            compose.onNodeWithTag("native-companion-reply-style-input").performScrollTo().assertTextContains(template.getString("replyStyle"))
+            settleAndCapture("four-presets-$locale-$id-styles")
+            pressAndroidBack()
+            awaitNode("native-creation-name")
+            if (id == "kaka") {
+                pressAndroidBack()
+                awaitNode("native-creation-templates")
+                assertEquals(1, profiles().size)
+            } else {
+                val name = creation.state.value.editor!!.name
+                compose.waitUntil(20_000) { creation.state.value.canCreate }
+                compose.onNodeWithTag("native-creation-create").performClick()
+                compose.waitUntil(20_000) { companions.state.value.companions.any { it.name == name } }
+                awaitNode("native-companion-composer")
+                val saved = profiles().single { it.getString("name") == name }
+                val instance = saved.getString("id")
+                assertTrue(instancePattern.matches(instance))
+                assertNotEquals(seed.getString("id"), instance)
+                assertEquals(id, saved.getString("templateId"))
+                for (field in listOf("personality", "behaviorStyle", "replyStyle")) assertEquals(field, template.getString(field), saved.getString(field))
+                for (field in listOf("personalityOverride", "behaviorStyleOverride", "replyStyleOverride")) assertEquals(field, "", saved.getString(field))
+                assertEquals(avatar, saved.getString("avatarUrl"))
+                assertTrue(saved.getBoolean("modelInherited"))
+                assertEquals(instance, companions.state.value.selectedCompanionId)
+                created[id] = instance
+                settleAndCapture("four-presets-$locale-$id-created")
+                if (index < templates.lastIndex) {
+                    pressAndroidBack()
+                    awaitNode("native-add-companion")
+                    openCreation()
+                }
+            }
+        }
+        assertEquals(3, created.values.distinct().size)
+        assertEquals(4, profiles().size)
+        stopRuntime()
+        fixture.startRuntime()
+        fixture.recreate()
+        bindModels()
+        compose.waitUntil(20_000) { companions.state.value.runtime.ready && companions.state.value.companions.size == 4 }
+        val restored = profiles()
+        assertEquals(seed.getString("id"), restored.single { it.getString("templateId") == "kaka" }.getString("id"))
+        for (template in templates.filter { it.getString("templateId") != "kaka" }) {
+            val id = template.getString("templateId")
+            val saved = restored.single { it.getString("id") == created.getValue(id) }
+            assertTrue(saved.getString("name").startsWith(names.getValue(id)))
+            for (field in listOf("personality", "behaviorStyle", "replyStyle")) assertEquals(field, template.getString(field), saved.getString(field))
+        }
+        settleAndCapture("four-presets-$locale-restored")
     }
 
     @Test fun expandedStickerTrayScrollsAndSendsLastSticker() {
@@ -281,6 +374,7 @@ class NativeCompanionCreationDeviceTest {
         fixture.capture(name)
     }
     private fun awaitNode(tag: String) { compose.waitUntil(20_000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes(false).isNotEmpty() }; compose.waitForIdle() }
+    private fun pressAndroidBack() { instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK); compose.waitForIdle() }
     private fun done() { compose.onNodeWithText(context.getString(R.string.native_companion_creation_apply)).performScrollTo().performClick() }
     private fun back() { compose.onNodeWithContentDescription(context.getString(R.string.native_companion_back)).performClick() }
     private fun toggle(resource: Int) { compose.onNodeWithText(context.getString(resource)).performScrollTo().performClick(); compose.waitForIdle() }

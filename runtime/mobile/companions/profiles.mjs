@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
-export const COMPANION_TEMPLATE_IDS = Object.freeze(['kaka', 'maimai']);
+export const COMPANION_TEMPLATE_IDS = Object.freeze(['kaka', 'maimai', 'dafeiyu', 'claude']);
+export const COMPANION_TEMPLATE_VERSION = 2;
 
 // Retained solely to upgrade unchanged shipped profiles without replacing user edits.
 export const LEGACY_COMPANION_PERSONAS = Object.freeze({
@@ -35,30 +36,17 @@ export const LEGACY_COMPANION_PERSONAS = Object.freeze({
   },
 });
 
-const upstreamPersona = JSON.parse(readFileSync(new URL('./maibot/persona-source.json', import.meta.url), 'utf8'));
-export const COMPANION_PERSONAS = Object.freeze({
-  kaka: {
-    ...structuredClone(LEGACY_COMPANION_PERSONAS.kaka),
-    personality: {
-      zh: '你是咔咔，一个以黑猫为形象、机灵、温和、略俏皮的伙伴。亲近但不过分热情，有自己的想法，认真倾听，也记得双方一起聊过的话题。',
-      en: 'You are Kaka, a quick-minded, warm, slightly playful companion with a black-cat appearance. Be close without overwhelming enthusiasm, have views of your own, listen carefully, and remember the topics you have shared.',
-    },
+const previousKaka = {
+  ...LEGACY_COMPANION_PERSONAS.kaka,
+  personality: {
+    zh: '你是咔咔，一个以黑猫为形象、机灵、温和、略俏皮的伙伴。亲近但不过分热情，有自己的想法，认真倾听，也记得双方一起聊过的话题。',
+    en: 'You are Kaka, a quick-minded, warm, slightly playful companion with a black-cat appearance. Be close without overwhelming enthusiasm, have views of your own, listen carefully, and remember the topics you have shared.',
   },
-  maimai: {
-    personality: {
-      zh: upstreamPersona.personality,
-      en: 'A female university student, currently chatting online. Generally not tolerant and kind, but sometimes acts out of character, showing a sharp, aggressive side. Good at thinking about problems from a human perspective; her conversation is quite everyday.',
-    },
-    behaviorStyle: {
-      zh: upstreamPersona.behavior_style,
-      en: 'A female university student, currently chatting online. Generally not tolerant and kind, but sometimes acts out of character, showing a sharp, aggressive side. Good at thinking about problems from a human perspective; her conversation is quite everyday. Does not force a topic when there is none, has sufficient autonomy, and gathers information herself to understand things.',
-    },
-    replyStyle: {
-      zh: upstreamPersona.reply_style,
-      en: 'Your style is plain and brief; you can refer to the reply style on Tieba. Do not overuse metaphors or stiff sentences. Omit subjects or invert the word order when appropriate; keep the style fairly casual.',
-    },
-  },
-});
+};
+const templates = Object.fromEntries(COMPANION_TEMPLATE_IDS.map(id =>
+  [id, JSON.parse(readFileSync(new URL(`./presets/${id}.json`, import.meta.url), 'utf8'))]));
+export const COMPANION_PERSONAS = Object.freeze(Object.fromEntries(COMPANION_TEMPLATE_IDS.map(id =>
+  [id, Object.fromEntries(['personality', 'behaviorStyle', 'replyStyle'].map(field => [field, templates[id][field]]))])));
 
 export function assertCompanionId(id) {
   if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/u.test(id))
@@ -77,13 +65,13 @@ export function profileFromTemplate(templateId, { id = 'companion-' + randomUUID
     templateId,
     name,
     nameCustomized: name !== null,
-    displayName: { zh: templateId === 'kaka' ? '咔咔' : '麦麦', en: templateId === 'kaka' ? 'Kaka' : 'Maimai' },
-    avatar: `/droy/companions/assets/${templateId}.png`,
+    displayName: structuredClone(templates[templateId].displayName),
+    avatar: `/droy/companions/assets/${templates[templateId].avatar}`,
     ...structuredClone(COMPANION_PERSONAS[templateId]),
     personalityOverride: '',
     behaviorStyleOverride: '',
     replyStyleOverride: '',
-    templateVersion: 1,
+    templateVersion: COMPANION_TEMPLATE_VERSION,
     personaRevision: 1,
     chatBackground: { type: 'default' },
     model: structuredClone(model),
@@ -94,11 +82,40 @@ export function profileFromTemplate(templateId, { id = 'companion-' + randomUUID
     updatedAt: now,
   };
 }
-/** Schema-1 snapshots for migrations and explicit legacy fixtures, not an instance catalog. */
+export function companionTemplates(options = {}) {
+  return COMPANION_TEMPLATE_IDS.map(templateId => profileFromTemplate(templateId, { ...options, id: templateId }));
+}
+/** The original two identities for legacy fixtures; never an installation seed. */
 export function defaultProfiles({ model = null, now = new Date().toISOString() } = {}) {
-  return COMPANION_TEMPLATE_IDS.map(templateId => ({ ...profileFromTemplate(templateId,
-    { id: templateId, name: templateId === 'kaka' ? '咔咔' : '麦麦', model, now }), nameCustomized: false,
+  return ['kaka', 'maimai'].map(templateId => ({ ...profileFromTemplate(templateId,
+    { id: templateId, name: templates[templateId].displayName.zh, model, now }), nameCustomized: false,
       settings: { ...profileFromTemplate(templateId).settings, proactiveEnabled: false } }));
+}
+
+export function upgradeCompanionPreset(profile, { legacySchema = false } = {}) {
+  const template = templates[profile.templateId];
+  if (!template || !legacySchema && profile.templateVersion >= COMPANION_TEMPLATE_VERSION) return profile;
+  const next = structuredClone(profile);
+  let changed = next.templateVersion !== COMPANION_TEMPLATE_VERSION;
+  for (const field of ['personality', 'behaviorStyle', 'replyStyle']) for (const locale of ['zh', 'en']) {
+    const previous = [LEGACY_COMPANION_PERSONAS[profile.templateId]?.[field]?.[locale],
+      profile.templateId === 'kaka' ? previousKaka[field][locale] : undefined].filter(value => typeof value === 'string');
+    if (previous.includes(next[field]?.[locale]) && next[field][locale] !== template[field][locale]) {
+      next[field][locale] = template[field][locale]; changed = true;
+    }
+  }
+  if (next.avatar === `/droy/companions/assets/${profile.templateId}.png`) {
+    const avatar = `/droy/companions/assets/${template.avatar}`;
+    if (next.avatar !== avatar) { next.avatar = avatar; changed = true; }
+  }
+  if (!changed) return profile;
+  // Older creation receipts used a different proactive default before this metadata existed.
+  if (profile.templateVersion === undefined) next.legacyProactiveDefault = true;
+  next.templateVersion = COMPANION_TEMPLATE_VERSION;
+  // Keep old learned expressions stored, but stop selecting them for a changed identity.
+  if (['zh', 'en'].some(locale => JSON.stringify(resolvePersona(profile, locale)) !== JSON.stringify(resolvePersona(next, locale))))
+    next.personaRevision = (profile.personaRevision ?? 1) + 1;
+  return next;
 }
 export function profileName(profile, locale = 'zh') {
   const language = locale === 'en' ? 'en' : 'zh';
@@ -114,7 +131,7 @@ export function normalizedName(value) {
 }
 export function profileNameKeys(profile) {
   const automatic = profile.name == null || (!profile.nameCustomized && Object.values(profile.displayName ?? {}).includes(profile.name));
-  const values = automatic ? [...Object.values(profile.displayName ?? {}), ...Object.values(defaultProfiles().find(row => row.templateId === profile.templateId)?.displayName ?? {})]
+  const values = automatic ? [...Object.values(profile.displayName ?? {}), ...Object.values(templates[profile.templateId]?.displayName ?? {})]
     : [profile.name];
   return [...new Set(values.map(normalizedName))];
 }

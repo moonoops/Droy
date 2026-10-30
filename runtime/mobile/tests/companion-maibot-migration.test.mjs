@@ -68,6 +68,7 @@ test('old stock personas upgrade without changing identity, configuration, sessi
   for (const [id, previous] of before) {
     const expected = { ...previous.profile };
     for (const field of personaFields) expected[field] = defaults.get(id)[field];
+    expected.personaRevision = (previous.profile.personaRevision ?? 1) + 1;
     assert.deepEqual(await f.store.getProfile(id), expected);
     assert.deepEqual(await f.store.getState(id), previous.state);
     assert.deepEqual(await f.store.listMessages(id), previous.messages);

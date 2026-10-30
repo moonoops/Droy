@@ -3,8 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, chmod } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import { assertCompanionId, assertTemplateId, COMPANION_TEMPLATE_IDS, defaultProfiles, profileFromTemplate,
-  normalizedName, profileNameKeys, LEGACY_COMPANION_PERSONAS } from './profiles.mjs';
+import { assertCompanionId, assertTemplateId, COMPANION_TEMPLATE_IDS, companionTemplates, profileFromTemplate,
+  normalizedName, profileNameKeys, upgradeCompanionPreset } from './profiles.mjs';
 
 const APPLICATION_ID = 1146241872;
 const BASE_SCHEMA_SQL = `
@@ -244,13 +244,11 @@ export class CompanionStore {
           const profile = profileFromTemplate('kaka');
           db.prepare('INSERT INTO profiles VALUES(?,?)').run(profile.id, JSON.stringify(profile));
         }
-        const presets = new Map(defaultProfiles().map(profile => [profile.templateId, profile]));
         for (const row of db.prepare('SELECT id,data FROM profiles ORDER BY rowid').all()) {
           const saved = JSON.parse(row.data);
           if (saved.id !== row.id) fail('COMPANION_FORMAT_UNSUPPORTED');
           let upgraded = false;
           if (!Object.hasOwn(saved, 'templateId')) { saved.templateId = COMPANION_TEMPLATE_IDS.includes(saved.id) ? saved.id : null; upgraded = true; }
-          const profile = presets.get(saved.templateId);
           for (const field of ['personalityOverride', 'chatBackground']) if (!Object.hasOwn(saved, field)) {
             saved[field] = field === 'personalityOverride' ? '' : { type: 'default' }; upgraded = true;
           }
@@ -261,17 +259,6 @@ export class CompanionStore {
             saved.settings.quietHours = { ...DEFAULT_QUIET_HOURS, enabled: false }; upgraded = true;
           } else if (!Object.hasOwn(saved.settings.quietHours, 'enabled')) {
             saved.settings.quietHours = { ...saved.settings.quietHours, enabled: true }; upgraded = true;
-          }
-          // Each translation can be customized independently. Only replace the
-          // exact previous preset; profile identity and private data stay intact.
-          for (const field of ['personality', 'behaviorStyle', 'replyStyle']) {
-            for (const locale of ['zh', 'en']) {
-              const previous = LEGACY_COMPANION_PERSONAS[saved.templateId]?.[field]?.[locale];
-              if (version === 1 && profile && typeof previous === 'string' && saved[field]?.[locale] === previous && previous !== profile[field][locale]) {
-                saved[field][locale] = profile[field][locale];
-                upgraded = true;
-              }
-            }
           }
           if (upgraded) db.prepare('UPDATE profiles SET data=? WHERE id=?').run(JSON.stringify(saved), saved.id);
           db.prepare('INSERT OR IGNORE INTO read_positions VALUES(?,0)').run(saved.id);
@@ -295,6 +282,12 @@ export class CompanionStore {
       });
       if (version < 3) store.#transaction(() => {
         db.exec(COMPANION_STORE_MAINTENANCE_SQL + 'PRAGMA user_version=3;');
+      });
+      store.#transaction(() => {
+        for (const row of db.prepare('SELECT id,data FROM profiles ORDER BY rowid').all()) {
+          const saved = JSON.parse(row.data), updated = upgradeCompanionPreset(saved, { legacySchema: version === 1 });
+          if (updated !== saved) db.prepare('UPDATE profiles SET data=? WHERE id=?').run(JSON.stringify(updated), row.id);
+        }
       });
       return store;
     } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); db.close(); throw error; }
@@ -328,7 +321,7 @@ export class CompanionStore {
   async getProfile(companionId) { return this.#profile(companionId); }
   async suggestName(templateId, locale = 'zh') {
     this.#ready(); assertTemplateId(templateId);
-    const base = defaultProfiles().find(profile => profile.templateId === templateId).displayName[locale === 'en' ? 'en' : 'zh'];
+    const base = companionTemplates().find(profile => profile.templateId === templateId).displayName[locale === 'en' ? 'en' : 'zh'];
     for (let suffix = 1; ; suffix++) {
       const name = `${base} ${suffix}`;
       if (!this.#db.prepare('SELECT 1 FROM name_claims WHERE name_key=?').get(normalizedName(name))) return name;
@@ -417,7 +410,7 @@ export class CompanionStore {
       if (receipt) {
         const existing = this.#profile(receipt.companion_id);
         // Requests committed before proactive defaults changed must replay exactly.
-        const legacyFingerprint = existing.templateVersion === undefined && input.settings?.proactiveEnabled === undefined
+        const legacyFingerprint = (existing.templateVersion === undefined || existing.legacyProactiveDefault === true) && input.settings?.proactiveEnabled === undefined
           ? createHash('sha256').update(canonical({ ...content, settings: { ...content.settings, proactiveEnabled: false } })).digest('hex') : null;
         if (receipt.fingerprint !== fingerprint && receipt.fingerprint !== legacyFingerprint) fail('COMPANION_CREATION_CONFLICT');
         return { requestId: input.requestId, replayed: true, profile: existing };
@@ -582,7 +575,7 @@ export class CompanionStore {
       patch[key] !== undefined && JSON.stringify(patch[key]) !== JSON.stringify(current[key] ?? '')))
       next.personaRevision = (current.personaRevision ?? 1) + 1;
     if (patch.avatar !== undefined && patch.avatar !== current.avatar && patch.avatar !== null
-      && !defaultProfiles().some(profile => profile.avatar === next.avatar)) {
+      && !companionTemplates().some(profile => profile.avatar === next.avatar)) {
       const uploadId = String(next.avatar).split('/').at(-1);
       const row = this.#db.prepare('SELECT data FROM companion_uploads WHERE companion_id=? AND upload_id=?').get(companionId, uploadId);
       const upload = row ? JSON.parse(row.data) : null;

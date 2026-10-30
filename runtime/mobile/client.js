@@ -1521,7 +1521,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         return h('div', { className: 'droy-row droy-pet-settings', 'data-droy-general': 'pet' },
           h('div', { className: 'droy-pet-header' }, h('div', { className: 'droy-row-copy' },
             h('span', { className: 'droy-row-title' }, droyText("宠物")),
-            h('p', { className: 'droy-description' }, droyText("设置宠物名字、动态形象和显示方式。这些设置不会修改消息里的咔咔或麦麦。")))),
+            h('p', { className: 'droy-description' }, droyText("设置宠物名字、动态形象和显示方式。这些设置不会修改消息里的聊天伙伴。")))),
           display('petExternalDisplay', droyText("在其他应用和桌面显示"), [['always', droyText("始终显示")], ['adaptive', droyText("自适应")], ['off', droyText("关闭")]],
             snapshot.state?.petEnabled === false ? 'off' : 'always'),
           display('petInternalDisplay', droyText("在 Droy 内显示"), [['off', droyText("关闭")], ['adaptive', droyText("自适应")], ['always', droyText("始终显示")]], 'off'),

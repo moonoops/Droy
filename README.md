@@ -92,6 +92,7 @@ After setup, try:
 | Phone interaction | Open apps, observe pages, take screenshots, tap, swipe and enter text. |
 | Voice | Hold to talk, local speech recognition, voice conversations and optional readout. |
 | Companion | An animated character with configurable appearance, personality and task updates. |
+| Chat companion presets | Choose Kaka, Maimai, Dafeiyu or Lady Claude. A fresh installation starts with one Kaka; add other companions from the preset picker. Each keeps its own persona, conversations and memory, with an independently configurable model. |
 | Companion chat stickers | Import static ZIP packs into a shared local library and choose enabled packs for each companion. [Usage](runtime/mobile/companions/STICKERS.md). |
 | Notifications | Content rules, model-assisted analysis and reminders. |
 | Personal memory | Optional local records and retrieval, with separate source and processing controls. |

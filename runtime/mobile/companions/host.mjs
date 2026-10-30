@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CompanionStore } from './store.mjs';
 import { CompanionRuntime } from './runtime.mjs';
-import { localizedProfile, defaultProfiles } from './profiles.mjs';
+import { localizedProfile, companionTemplates } from './profiles.mjs';
 import { dialoguePrompts } from './dialogue-prompts.mjs';
 import { requireMobileSession } from '../auth.mjs';
 import { resolveMobileLocale } from '../locale.mjs';
@@ -16,7 +16,7 @@ import { createCompanionEmbedder } from './embedding.mjs';
 
 const base='/droy/companions';
 export const stickerIds=stickerCatalog().map(sticker=>sticker.id);
-const assetNames=new Set(['kaka.png','maimai.png','user-default.png',...['01','02','03','04','05','06','07','08'].flatMap(id=>['wallpaper-'+id+'.webp','wallpaper-'+id+'-thumb.webp']),...stickerIds.map(id=>id+'.png')]);
+const assetNames=new Set(['kaka.png','maimai.png','user-default.png',...companionTemplates().map(template=>template.avatar.split('/').at(-1)),...['01','02','03','04','05','06','07','08'].flatMap(id=>['wallpaper-'+id+'.webp','wallpaper-'+id+'-thumb.webp']),...stickerIds.map(id=>id+'.png')]);
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 async function body(req,limit=262144) {
   const chunks=[]; let bytes=0;
@@ -92,7 +92,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
       }
       if(path[0]==='templates'&&path.length===1&&req.method==='GET') {
         const locale=resolveMobileLocale(ctx),templates=[];
-        for(const template of defaultProfiles()) {
+        for(const template of companionTemplates()) {
           const view=localizedProfile(template,locale);
           templates.push({templateId:template.templateId,name:view.name,avatarUrl:template.avatar,personality:view.personality,
             behaviorStyle:view.behaviorStyle,replyStyle:view.replyStyle,customPersonaDefaults:view.customPersonaDefaults,settings:{...structuredClone(template.settings),proactiveEnabled:true},

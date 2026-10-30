@@ -66,7 +66,8 @@ test('Maimai defaults retain all three exact original Chinese persona fields', (
   assert.equal(COMPANION_PERSONAS.maimai.replyStyle.zh, original.reply_style);
   assert.match(COMPANION_PERSONAS.maimai.personality.zh, /一般不包容且善良/);
   assert.notEqual(COMPANION_PERSONAS.maimai.personality.zh, LEGACY_COMPANION_PERSONAS.maimai.personality.zh);
-  assert.match(COMPANION_PERSONAS.kaka.personality.zh, /黑猫/);
+  assert.match(COMPANION_PERSONAS.kaka.personality.zh, /男性上班族/);
+  assert.doesNotMatch(COMPANION_PERSONAS.kaka.personality.zh, /黑猫/);
   for (const persona of Object.values(COMPANION_PERSONAS)) for (const field of ['personality', 'behaviorStyle', 'replyStyle']) {
     assert.ok(persona[field].zh); assert.ok(persona[field].en);
   }
