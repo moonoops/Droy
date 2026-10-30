@@ -1,0 +1,10 @@
+<resources>
+    <string name="native_external_invalid">无法打开此目标</string>
+    <string name="native_external_storage">打开请求未能保存，请重试</string>
+    <string name="native_external_missing">此内容已不存在</string>
+    <string name="native_external_ended">此请求已结束</string>
+    <string name="native_external_denied">无法访问此会话</string>
+    <string name="native_external_unsupported">暂不支持打开此目标</string>
+    <string name="native_external_waiting">内容尚未就绪，请稍后重试</string>
+    <string name="native_external_failed">暂时无法打开，请重试</string>
+</resources>

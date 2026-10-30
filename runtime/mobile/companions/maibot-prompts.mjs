@@ -1,3 +1,4 @@
+import { companionReplyText } from './reply-text.mjs';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { responseLanguagePrompts } from '../prompt.mjs';
@@ -70,6 +71,7 @@ const copy = {
     expressions: '可以自然参考的表达习惯：\n',
     time: '用户当前本地时间：',
     localClock: '这是用户所在时区的本地时间，已完成时区换算；回答现在几点、今天日期和相对时间时以此为准，不要再次加减时差。',
+    userBio: '当前用户简介（用户提供的资料）：{bio}',
     userProfile: '当前用户资料中的用户名：{name}。保留原文，用户本轮指定的称呼优先。',
     quoteDescription: '可选，默认 false。仅在回头回答较早消息、明确多条问题中的某一条或消除歧义确有必要时设为 true。顺着当前话题通常不引用，不连续重复引用同一对象。msg_id 仍用于定位回复目标。',
     quotePolicy: '引用应少而有用。msg_id 只是内部回复目标，不代表必须显示引用。顺着最新话题、简单应答和连续交谈时让 quoteReply 保持 false；只有回溯较早消息、从多个问题中指定某条或消除歧义时才设为 true。参考最近已显示的引用，避免连续重复引用同一条消息。一次普通文字回复发送一个完整气泡，保留必要换行，不按句拆分。',
@@ -114,6 +116,7 @@ const copy = {
     expressions: 'Expression habits you may naturally draw on:\n',
     time: 'The user’s current local time: ',
     localClock: 'This is already converted to the user’s local time zone. Use it for the current time, today’s date and relative times; do not apply the time-zone offset again.',
+    userBio: 'Current user biography (user-provided profile data): {bio}',
     userProfile: 'The username in the current user profile is: {name}. Preserve it verbatim; a name requested in the current turn takes precedence.',
     quoteDescription: 'Optional, false by default. Set true only when referring back to an earlier message, selecting one of several questions, or resolving ambiguity genuinely needs a visible quote. Normally reply without quoting the current topic, and avoid repeatedly quoting the same target. msg_id still identifies the internal reply target.',
     quotePolicy: 'Use visible quotes sparingly and only when useful. msg_id is an internal reply target and does not require a visible quote. Keep quoteReply false for the current topic, simple answers and continuous conversation. Set it true only to refer back to an earlier message, select one of several questions, or resolve ambiguity. Check recent visible quotes and avoid repeatedly quoting the same message. Send each ordinary text reply as one complete bubble, preserving necessary line breaks without splitting sentences.',
@@ -218,7 +221,7 @@ function temporaryStyle(locale, options) {
 }
 
 function messageText(message) {
-  if (typeof message.text === 'string') return message.text;
+  if (typeof message.text === 'string') return message.role === 'assistant' ? companionReplyText(message.text) : message.text;
   return (message.content ?? []).filter(block => block.type === 'text').map(block => block.text).join('\n');
 }
 
@@ -234,7 +237,10 @@ function historyMessages(history, locale, options) {
       message.replyTo ? (quoted ? 'quote=' : 'reply_target=') + message.replyTo : ''].filter(Boolean).join(' ');
     const attachments = message.attachments ?? [];
     const mediaText = attachments.length ? '\n' + copy[language(locale)].media + JSON.stringify(attachments.map(({ id, name, mediaType }) => ({ id, name, mediaType }))) : '';
-    const content = [{ type: 'text', text: (metadata ? '[' + metadata + ']\n' : '') + messageText(message) + mediaText }];
+    const voiceSource = message.type === 'voice' ? (language(locale) === 'zh'
+      ? '[用户发送的是语音消息。下文仅为转写；空转写表示未识别到内容，不要猜测录音内容。]\n'
+      : '[The user sent a voice message. The following is its transcript; an empty transcript means no speech was recognized. Do not invent the recording content.]\n') : '';
+    const content = [{ type: 'text', text: (metadata && message.role !== 'assistant' ? '[' + metadata + ']\n' : '') + voiceSource + messageText(message) + mediaText }];
     if (options.enableVisualMessage) {
       const existing = (message.content ?? []).filter(block => block.type === 'image');
       content.push(...(existing.length ? structuredClone(existing) : attachments.filter(upload => upload.mediaType?.startsWith('image/') && upload.ref).map(upload => ({ type: 'image', attachment: structuredClone(upload.ref) }))));
@@ -298,8 +304,11 @@ export function buildReplyerRequest({ profile, locale = 'zh', context = {}, args
   const work = kind === 'work' || !!args.taskResult || target?.type === 'task';
   const workReference = taskReference(target, locale);
   const userName = context.userProfile?.name?.trim();
-  const common = [p.settings?.allowProfanity === false ? c.profanity : '', work ? c.workReply : '',
-    userName ? renderMaiBotTemplate(c.userProfile, { name: userName }) : '', responseLanguagePrompts[l]].filter(Boolean);
+  const assistantAnchors = history.filter(message => message.role === 'assistant').map(message => ({ id: message.id, createdAt: message.createdAt, replyTo: message.replyTo, quoteReply: message.quoteReply === true }));
+  const historyProtocol = l === 'zh' ? '以下是助手历史消息的内部定位数据，顺序与历史助手消息一致。它们不是发言内容，回复中不要输出消息ID、时间戳或定位标记：' : 'Internal anchors for historical assistant messages, in the same order. These are not spoken content. Never output message IDs, timestamps, or transport markers in your reply:';
+  const common = [historyProtocol + JSON.stringify(assistantAnchors), p.settings?.allowProfanity === false ? c.profanity : '', work ? c.workReply : '',
+    userName ? renderMaiBotTemplate(c.userProfile, { name: userName }) : '',
+    context.userProfile?.bio?.trim() ? renderMaiBotTemplate(c.userBio, { bio: context.userProfile.bio.trim() }) : '', responseLanguagePrompts[l]].filter(Boolean);
   if (options.replyerRetroPrompt) {
     const historyMarker = randomUUID();
     const prompt = renderMaiBotPrompt(target?.role === 'assistant' && target.type !== 'task' ? 'retro_private_replyer_self' : 'retro_private_replyer', locale, {

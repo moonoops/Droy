@@ -1,4 +1,8 @@
-plugins { id 'com.android.application' }
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
 
 def nodeRuntimeDir = rootProject.file(providers.gradleProperty('droyNodeRuntimeDir').getOrElse('../artifacts/runtime-node'))
 def releaseSpec = new groovy.json.JsonSlurper().parse(rootProject.file('runtime/release.json'))
@@ -211,6 +215,8 @@ tasks.named('preBuild').configure { dependsOn verifyQwenRuntime }
 android {
     namespace 'io.droyagent.app'
     compileSdk 36
+    buildFeatures { compose true }
+    kotlinOptions { jvmTarget = '17' }
     defaultConfig {
         applicationId 'io.droyagent.app'
         minSdk 30
@@ -251,8 +257,26 @@ androidComponents {
 
 dependencies {
     implementation project(':android-use')
+    implementation project(':terminal-ui')
+    implementation 'org.commonmark:commonmark:0.31.0'
+    implementation 'org.commonmark:commonmark-ext-gfm-tables:0.31.0'
+    implementation 'org.commonmark:commonmark-ext-gfm-strikethrough:0.31.0'
     implementation files(rootProject.file('runtime/generated/audio/sherpa-onnx-1.13.8.aar'))
-    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.0'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.21'
+    def composeBom = platform('androidx.compose:compose-bom:2025.10.01')
+    implementation composeBom
+    androidTestImplementation composeBom
+    implementation 'androidx.activity:activity-compose:1.11.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.9.4'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4'
+    implementation 'androidx.navigation:navigation-compose:2.9.8'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.foundation:foundation'
+    // 1.4 keeps MotionScheme internal; this version exposes the Expressive theme
+    // while retaining the current SDK/toolchain dependency baseline.
+    implementation 'androidx.compose.material3:material3:1.5.0-alpha01'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
     implementation 'androidx.webkit:webkit:1.17.0'
     implementation 'androidx.core:core:1.17.0'
     implementation 'org.nanohttpd:nanohttpd:2.3.1'

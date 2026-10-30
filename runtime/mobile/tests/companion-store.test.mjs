@@ -5,13 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { CompanionStore } from '../companions/store.mjs';
+import { openLegacyCompanionStore, markLegacyFixture } from './fixtures/legacy-companion-db.mjs';
 import { defaultProfiles, localizedProfile } from '../companions/profiles.mjs';
 import { prepareReply } from '../companions/delivery.mjs';
 
 const code = expected => error => error.code === expected;
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'droy-companion-store-'));
-  let store = await CompanionStore.open({ directory });
+  let store = await openLegacyCompanionStore({ directory });
   t.after(async () => { await store?.close(); await rm(directory, { recursive: true, force: true }); });
   return { directory, get store() { return store; }, async reopen() { await store.close(); store = await CompanionStore.open({ directory }); } };
 }
@@ -91,6 +92,7 @@ test('legacy quiet-hour objects retain their chosen time and null remains disabl
   const f = await fixture(t);
   await f.store.close();
   const db = new DatabaseSync(join(f.directory, 'companions.sqlite'));
+  markLegacyFixture(db);
   for (const [id, quietHours, allowProfanity] of [['kaka', { start: '21:30', end: '06:45' }, false], ['maimai', null, true]]) {
     const row = JSON.parse(db.prepare('SELECT data FROM profiles WHERE id=?').get(id).data);
     delete row.personalityOverride; delete row.chatBackground;
@@ -115,7 +117,7 @@ const imageUpload = (id, owner = 'kaka') => ({ id, mediaType: 'image/png', name:
 
 test('the global user avatar is independent of companion uploads, profile changes and history deletion', async t => {
   const f = await fixture(t);
-  assert.deepEqual(await f.store.getUserProfile(), { name: '', avatarUrl: '/droy/companions/assets/user-default.png' });
+  assert.deepEqual(await f.store.getUserProfile(), { name: '', bio: '', avatarUrl: '/droy/companions/assets/user-default.png' });
   const avatar = imageUpload('shared-avatar', 'user-profile'), local = imageUpload('local-avatar');
   await f.store.putUserUpload(avatar); await f.store.putUpload('kaka', local);
   await assert.rejects(f.store.updateUserProfile({ avatarUrl: local.url }), code('COMPANION_ATTACHMENT_SCOPE'));
@@ -127,7 +129,7 @@ test('the global user avatar is independent of companion uploads, profile change
   await f.store.clearMessages('kaka');
   await f.store.updateProfile('maimai', { name: 'Fictional Friend' });
   await f.reopen();
-  assert.deepEqual(await f.store.getUserProfile(), { name: 'Fictional User', avatarUrl: avatar.url });
+  assert.deepEqual(await f.store.getUserProfile(), { name: 'Fictional User', bio: '', avatarUrl: avatar.url });
   assert.deepEqual(await f.store.getUserUpload(avatar.id), avatar);
   for (const patch of [{ name: '  ' }, { name: 'x'.repeat(81) }, { name: 'bad\nname' }, { companionId: 'kaka' }, { avatarUrl: 'https://example.com/avatar.png' }])
     await assert.rejects(f.store.updateUserProfile(patch));
@@ -346,6 +348,7 @@ test('legacy upload JSON migrates once, preserving state and existing upload ide
   await f.store.putUpload('kaka',first);
   await f.store.close();
   const db = new DatabaseSync(join(f.directory,'companions.sqlite'));
+  markLegacyFixture(db);
   db.prepare('INSERT INTO companion_state VALUES(?,?)').run('kaka',JSON.stringify({summary:'Fictional retained summary',uploads:{[first.id]:first,[second.id]:second}}));
   db.close();
   await f.reopen();
@@ -362,6 +365,7 @@ test('failed legacy migration leaves the original state and no partial upload ro
   await f.store.close();
   const legacy={summary:'Fictional untouched summary',uploads:{[first.id]:first,invalid:{...upload('invalid'),bytes:-1}}};
   let db = new DatabaseSync(join(f.directory,'companions.sqlite'));
+  markLegacyFixture(db);
   db.prepare('INSERT INTO companion_state VALUES(?,?)').run('kaka',JSON.stringify(legacy));db.close();
   await assert.rejects(CompanionStore.open({directory:f.directory}),code('COMPANION_INVALID_INPUT'));
   db = new DatabaseSync(join(f.directory,'companions.sqlite'));
@@ -599,4 +603,27 @@ test('an excluded task cannot receive new explicit provenance even when it drops
   const cancelled=await store.getMessage('kaka','task');
   assert.deepEqual(cancelled.task,{state:'cancelled',summary:''});
   assert.equal(cancelled.contextExcluded,true);
+});
+
+ test('user biography defaults empty, persists, clears and validates independently of name', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.store.getUserProfile()).bio, '');
+  await f.store.updateUserProfile({bio:'  Fictional designer\nLikes hiking  '});
+  await f.reopen();
+  assert.equal((await f.store.getUserProfile()).bio, 'Fictional designer\nLikes hiking');
+  await f.store.updateUserProfile({name:'Fictional Alex'});
+  assert.equal((await f.store.getUserProfile()).bio, 'Fictional designer\nLikes hiking');
+  await assert.rejects(f.store.updateUserProfile({bio:'a'.repeat(2001)}));
+  assert.equal((await f.store.updateUserProfile({bio:''})).bio, '');
+});
+
+test('legacy assistant envelopes are hidden in history and previews without rewriting stored data',async t=>{
+  const f=await fixture(t);
+  const text='[msg_id=12345678-1234-1234-1234-123456789abc 2026-10-30T02:21:58.247Z reply_target=87654321-4321-4321-4321-cba987654321]\nFictional reply';
+  await f.store.appendMessage('kaka',message('legacy-envelope',text,{role:'assistant'}));
+  assert.equal((await f.store.getMessage('kaka','legacy-envelope')).text,'Fictional reply');
+  assert.equal((await f.store.listMessages('kaka')).messages[0].text,'Fictional reply');
+  assert.equal((await f.store.listMessages('kaka',{after:'seq:0'})).messages[0].text,'Fictional reply');
+  const db=new DatabaseSync(join(f.directory,'companions.sqlite'),{readOnly:true});
+  try {assert.equal(JSON.parse(db.prepare('SELECT data FROM messages WHERE message_id=?').get('legacy-envelope').data).text,text);} finally {db.close();}
 });

@@ -1,0 +1,8 @@
+<resources>
+    <string name="native_transcript_title">Subagent conversation</string>
+    <string name="native_transcript_read_only">Read only</string>
+    <string name="native_transcript_empty">No messages</string>
+    <string name="native_transcript_unavailable">This conversation is unavailable.</string>
+    <string name="native_transcript_identity">Cannot open this subagent conversation.</string>
+    <string name="native_transcript_failed">Could not load this conversation.</string>
+</resources>

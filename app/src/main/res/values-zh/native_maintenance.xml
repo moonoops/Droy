@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_maintenance_waiting">等待任务完成后删除</string>
+    <string name="native_maintenance_cleaning">正在删除伙伴</string>
+    <string name="native_maintenance_failed">删除未完成</string>
+</resources>

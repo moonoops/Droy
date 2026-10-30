@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CompanionStore } from './store.mjs';
 import { CompanionRuntime } from './runtime.mjs';
-import { localizedProfile } from './profiles.mjs';
+import { localizedProfile, defaultProfiles } from './profiles.mjs';
 import { dialoguePrompts } from './dialogue-prompts.mjs';
 import { requireMobileSession } from '../auth.mjs';
 import { resolveMobileLocale } from '../locale.mjs';
@@ -26,7 +26,7 @@ function send(res,status,data) {
 function attachmentUrl(id,attachmentId) {
   return base+'/'+encodeURIComponent(id)+'/attachments/'+encodeURIComponent(attachmentId);
 }
-async function saveUpload(req,ctx,owner,{imageOnly=false}={}) {
+async function saveUpload(req,ctx,owner,{imageOnly=false,urlForUpload}={}) {
   const input=await body(req,32*1024*1024);
   if(typeof input.base64!=='string'||typeof input.mediaType!=='string'||typeof input.name!=='string') fail('COMPANION_INVALID_INPUT');
   const data=Buffer.from(input.base64,'base64');
@@ -37,7 +37,7 @@ async function saveUpload(req,ctx,owner,{imageOnly=false}={}) {
     :await ctx.attachments.saveFile({data,name:input.name});
   const attachmentId=randomUUID();
   return {id:attachmentId,name:ref.name,mediaType:image?ref.mediaType:input.mediaType,bytes:ref.bytes,ref,
-    url:attachmentUrl(owner,attachmentId)};
+    url:urlForUpload?urlForUpload(attachmentId):attachmentUrl(owner,attachmentId)};
 }
 async function sendUpload(res,ctx,upload) {
   if(!upload)fail('COMPANION_NOT_FOUND');
@@ -49,8 +49,11 @@ async function sendUpload(res,ctx,upload) {
 export function createCompanionHandler({ctx,runtime,store,assets=new URL('./assets/',import.meta.url)}) {
   return async(req,res)=>{
     if(!requireMobileSession(req,res)) return;
-    const url=new URL(req.url,'http://127.0.0.1'),path=url.pathname.slice(base.length).split('/').filter(Boolean).map(decodeURIComponent);
+    let path=[];
     try {
+      const url=new URL(req.url,'http://127.0.0.1');
+      try {path=url.pathname.slice(base.length).split('/').filter(Boolean).map(decodeURIComponent);}
+      catch {fail('COMPANION_INVALID_INPUT');}
       if(path[0]==='events' && req.method==='GET') {
         res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});
         res.write(': connected\n\n');
@@ -69,11 +72,47 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         const locale=resolveMobileLocale(ctx);
         return send(res,200,{
           defaultWorkspaceId:ctx.droyInitialization?.defaultWorkspaceId??null,
-          companions:profiles.map(profile=>({...localizedProfile(profile,locale),model:profile.model??ctx.agentDefaultModel?.currentSelection(),avatarUrl:profile.avatar,unread:profile.unreadCount,
-            status:{phase:runtime.state(profile.id).phase}})),
-          settings:await store.getSettings(),userProfile:await store.getUserProfile(),models:catalog.groups.flatMap(group=>group.models.map(model=>({...model,provider:group.id}))),
+          companions:profiles.map(profile=>({...localizedProfile(profile,locale),model:profile.model??ctx.agentDefaultModel?.currentSelection(),modelInherited:profile.model==null,avatarUrl:profile.avatar,unread:profile.unreadCount,
+            status:runtime.status(profile.id)})),
+          settings:await store.getSettings(),userProfile:await store.getUserProfile(),defaultModel:ctx.agentDefaultModel?.currentSelection()??null,models:catalog.groups.flatMap(group=>group.models.map(model=>({...model,provider:group.id,providerName:group.name??group.id}))),
           stickers:stickerCatalog(locale),
         });
+      }
+      if(path[0]==='templates'&&path.length===1&&req.method==='GET') {
+        const locale=resolveMobileLocale(ctx),templates=[];
+        for(const template of defaultProfiles()) {
+          const view=localizedProfile(template,locale);
+          templates.push({templateId:template.templateId,name:view.name,avatarUrl:template.avatar,personality:view.personality,
+            behaviorStyle:view.behaviorStyle,replyStyle:view.replyStyle,settings:structuredClone(template.settings),
+            chatBackground:structuredClone(template.chatBackground),suggestedName:await store.suggestName(template.templateId,locale)});
+        }
+        return send(res,200,{templates});
+      }
+      if(!path.length&&req.method==='POST') {
+        const input=await body(req);
+        if(!await store.getCreation(input?.requestId)&&input.model)await ctx.llm.resolveCallConfig(input.model);
+        const created=await store.createProfile(input);
+        await runtime.startInstance(created.profile.id);runtime.emit(null,'profile');
+        const profile=created.profile;
+        return send(res,created.replayed?200:201,{...created,profile:{...localizedProfile(profile,resolveMobileLocale(ctx)),
+          model:profile.model??ctx.agentDefaultModel?.currentSelection(),modelInherited:profile.model==null,avatarUrl:profile.avatar,status:runtime.status(profile.id)}});
+      }
+      if(path[0]==='creation-drafts') {
+        if(path.length===1&&req.method==='POST')return send(res,200,await store.createDraft(await body(req)));
+        const draftId=path[1];
+        if(path.length===2&&req.method==='GET')return send(res,200,await store.getDraft(draftId));
+        if(path.length===3&&path[2]==='cancel'&&req.method==='POST') {
+          const input=await body(req);if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).length)fail('COMPANION_INVALID_INPUT');
+          return send(res,200,await store.cancelDraft(draftId));
+        }
+        if(path.length===3&&path[2]==='uploads'&&req.method==='POST') {
+          const draft=await store.getDraft(draftId);if(draft.state!=='open')fail('COMPANION_DRAFT_CLOSED');
+          const upload=await saveUpload(req,ctx,draftId,{imageOnly:true,
+            urlForUpload:uploadId=>`${base}/creation-drafts/${draftId}/attachments/${uploadId}`});
+          return send(res,201,await store.putDraftUpload(draftId,upload));
+        }
+        if(path.length===4&&path[2]==='attachments'&&req.method==='GET')return await sendUpload(res,ctx,await store.getDraftUpload(draftId,path[3]));
+        return send(res,405,{error:'METHOD_NOT_ALLOWED'});
       }
       if(path[0]==='settings' && path.length===1 && req.method==='PATCH') {
         const settings=await store.updateSettings(await body(req));runtime.emit(null,'profile');return send(res,200,settings);
@@ -101,9 +140,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         const input=await body(req);
         if(input.model) await ctx.llm.resolveCallConfig(input.model);
         if(input.avatarUrl!==undefined) {
-          const upload=await store.getUpload(id,String(input.avatarUrl).split('/').at(-1));
-          const valid=upload?.url===input.avatarUrl&&upload.mediaType?.startsWith('image/');
-          if(!valid && ![base+'/assets/kaka.png',base+'/assets/maimai.png'].includes(input.avatarUrl)) fail('COMPANION_ATTACHMENT_SCOPE');
+          if(input.avatar!==undefined&&input.avatar!==input.avatarUrl)fail('COMPANION_INVALID_INPUT');
           input.avatar=input.avatarUrl;delete input.avatarUrl;
         }
         if(Object.keys(input).some(key=>!['name','avatar','model','settings','personalityOverride','chatBackground'].includes(key))) fail('COMPANION_INVALID_INPUT');
@@ -121,8 +158,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
           const previews=await store.replyPreviews(id,previewIds);
           page.messages=page.messages.map(message=>message.replyTo&&message.quoteReply!==false
             ?{...message,replyPreview:previews[message.replyTo]??null}:message);
-          const state=runtime.state(id);
-          return send(res,200,{...page,status:{phase:state.phase,error:state.error?runtime.copy().generationFailed:undefined}});
+          return send(res,200,{...page,status:runtime.status(id)});
         }
         if(req.method==='POST') {
           const input=await body(req);
@@ -187,15 +223,19 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
       return send(res,405,{error:'METHOD_NOT_ALLOWED'});
     } catch(error) {
       if(res.headersSent) {res.destroy(error);return;}
-      const locale=resolveMobileLocale(ctx),code=error.code??error.message;
+      const locale=resolveMobileLocale(ctx),raw=error.code;
+      const code=typeof raw==='string'&&(/^(?:COMPANION_[A-Z_]+)$/.test(raw)
+        ||['INVALID_IMAGE','UNSUPPORTED_IMAGE_TYPE','IMAGE_TOO_LARGE','IMAGE_TOO_MANY_PIXELS','IMAGE_DIMENSION_TOO_LARGE'].includes(raw))?raw:'COMPANION_OPERATION_FAILED';
       const copy=dialoguePrompts[locale];
       const generation=req.method==='POST'&&(path[1]==='messages'&&path.length===2||path[1]==='retry');
       const message=code==='COMPANION_MODEL_REQUIRED'?copy.missingModel
+        :code==='COMPANION_NAME_CONFLICT'?copy.nameConflict:code==='COMPANION_CREATION_CONFLICT'?copy.creationConflict
+        :code==='COMPANION_DRAFT_CLOSED'?copy.draftClosed
         :['COMPANION_IMAGE_REQUIRED','INVALID_IMAGE','UNSUPPORTED_IMAGE_TYPE'].includes(code)?copy.invalidImage
         :['IMAGE_TOO_LARGE','IMAGE_TOO_MANY_PIXELS','IMAGE_DIMENSION_TOO_LARGE'].includes(code)?copy.imageTooLarge
         :generation?copy.generationFailed:copy.operationFailed;
       ctx.logger.warn('COMPANION_HTTP_FAILED: '+code);
-      return send(res,/NOT_FOUND/.test(code)?404:/CONFLICT|MANAGED/.test(code)?409:400,{
+      return send(res,code==='COMPANION_OPERATION_FAILED'?500:/NOT_FOUND/.test(code)?404:/CONFLICT|MANAGED|DRAFT_CLOSED/.test(code)?409:400,{
         error:code,message});
     }
   };

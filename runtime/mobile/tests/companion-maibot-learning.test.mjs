@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerHooks } from 'node:module';
 import { CompanionStore } from '../companions/store.mjs';
+import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { CompanionLearning, maiBotLearningCopy } from '../companions/learning.mjs';
 import { renderMaiBotPrompt } from '../companions/maibot-prompts.mjs';
 
@@ -18,7 +19,7 @@ const empty=()=>({impressions:[],expressions:[],jargon:[],memories:[]});
 
 async function fixture(t,{respond,locale='en'}={}) {
   const directory=await mkdtemp(join(tmpdir(),'droy-maibot-learning-'));
-  let store=await CompanionStore.open({directory});
+  let store=await openLegacyCompanionStore({directory});
   for(const id of ['kaka','maimai'])await store.updateProfile(id,{model:{provider:'fictional',model:'fixture-'+id}});
   const calls=[],memories=new Map(),language={value:locale};
   const memoryFor=async id=>{

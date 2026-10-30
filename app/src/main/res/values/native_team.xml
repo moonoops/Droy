@@ -1,0 +1,19 @@
+<resources>
+    <string name="native_team_title">Agent team</string>
+    <string name="native_team_members">Members</string>
+    <string name="native_team_tasks">Shared tasks</string>
+    <string name="native_team_empty">No team in this conversation</string>
+    <string name="native_team_no_tasks">No shared tasks</string>
+    <string name="native_team_failed">The team could not be loaded</string>
+    <string name="native_team_retry">Retry</string>
+    <string name="native_team_lead">Lead</string>
+    <string name="native_team_member">Teammate</string>
+    <string name="native_team_member_failed">Failed to start</string>
+    <string name="native_team_preparing">Preparing</string>
+    <string name="native_team_pending">Pending</string>
+    <string name="native_team_in_progress">In progress</string>
+    <string name="native_team_completed">Completed</string>
+    <string name="native_team_owner">Owner: %1$s</string>
+    <string name="native_team_scopes">Write scopes: %1$s</string>
+    <string name="native_team_blockers">Waiting for tasks: %1$s</string>
+</resources>

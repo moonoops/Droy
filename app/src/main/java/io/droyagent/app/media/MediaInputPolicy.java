@@ -45,7 +45,7 @@ public final class MediaInputPolicy {
             return value;
         }
         if (destination.equals("companion")) {
-            if (!"im:kaka".equals(value) && !"im:maimai".equals(value))
+            if (value == null || !value.startsWith("im:") || !io.droyagent.app.CompanionIdentity.isValid(value.substring(3)))
                 throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("目标伙伴无效", "Invalid target companion"));
             return value;
         }

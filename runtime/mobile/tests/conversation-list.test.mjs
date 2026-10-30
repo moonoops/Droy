@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { CompanionStore } from '../companions/store.mjs';
+import { openLegacyCompanionStore, markLegacyFixture } from './fixtures/legacy-companion-db.mjs';
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'droy-conversation-list-'));
-  let store = await CompanionStore.open({ directory });
+  let store = await openLegacyCompanionStore({ directory });
   t.after(async () => { await store.close(); await rm(directory, { recursive: true, force: true }); });
   return { directory, get store() { return store; }, async reopen() { await store.close(); store = await CompanionStore.open({ directory }); } };
 }
@@ -114,6 +115,7 @@ test('an existing database gains conversation state without changing its message
   await f.store.appendMessage('kaka', message('unread'));
   await f.store.close();
   const db = new DatabaseSync(join(f.directory, 'companions.sqlite'));
+  markLegacyFixture(db);
   db.exec('DROP TABLE conversation_state'); db.close();
   await f.reopen();
   const saved = await row(f.store);

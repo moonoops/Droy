@@ -5,7 +5,7 @@ import static org.junit.Assert.*;
 
 public class PetDisplayPolicyTest {
     @Test public void defaultsPreserveAnExplicitOldOptOut() {
-        assertEquals("always", PetDisplayPolicy.initial(false, true));
+        assertEquals("adaptive", PetDisplayPolicy.initial(false, true));
         assertEquals("off", PetDisplayPolicy.initial(true, true));
         assertEquals("off", PetDisplayPolicy.initial(false, false));
         assertEquals("off", PetDisplayPolicy.initial(true, false));

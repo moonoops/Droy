@@ -351,7 +351,17 @@ export function createMemoryService({ host, privacy, confirmForget, estimateToke
       // when an execution backend becomes unavailable or permission is revoked.
       return host.capture(args.operation, args.args ?? {});
     }
+    if (input.operation === 'pendingAccess') {
+      fields(args, []);
+      return typeof privacy.pendingEndpointAccess === 'function' ? privacy.pendingEndpointAccess() : [];
+    }
+    if (input.operation === 'resolveAccess') {
+      fields(args, ['id', 'approved']);
+      if (typeof args.id !== 'string' || typeof args.approved !== 'boolean' || typeof privacy.resolveEndpointAccess !== 'function') fail('MEMORY_INVALID_REQUEST');
+      return privacy.resolveEndpointAccess(args.id, args.approved);
+    }
     if (input.operation === 'endpoints') {
+      if (typeof host.storedAuthorizations === 'function') return host.storedAuthorizations();
       if (typeof host.processingEndpoints !== 'function') fail('MEMORY_ENDPOINTS_UNAVAILABLE', 503);
       return host.processingEndpoints();
     }
@@ -367,6 +377,7 @@ export function createMemoryService({ host, privacy, confirmForget, estimateToke
     if (['grant', 'revoke'].includes(input.operation)) {
       fields(args, ['id', 'purpose', 'categories']);
       if (typeof args.id !== 'string' || typeof args.purpose !== 'string') fail('MEMORY_INVALID_REQUEST');
+      if (input.operation === 'revoke' && typeof host.revokeStoredAuthorization === 'function') return host.revokeStoredAuthorization(args.id, args.purpose);
       if (typeof host.resolveProcessingEndpoint !== 'function') fail('MEMORY_ENDPOINTS_UNAVAILABLE', 503);
       const route = await host.resolveProcessingEndpoint(args.id, args.purpose);
       if (input.operation === 'revoke') return privacy.revokeEndpoint(route);

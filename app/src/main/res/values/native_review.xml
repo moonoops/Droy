@@ -1,0 +1,4 @@
+<resources>
+    <string name="native_review_schedule_request">"Create a scheduled task for me: "</string>
+    <string name="native_review_unread">%1$d unread</string>
+</resources>

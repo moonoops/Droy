@@ -34,6 +34,7 @@ final class ProductBridge extends NanoHTTPD {
     private final ComputeTools compute;
     private final HardwareRuntime hardware;
     private final ToolProgress progress;
+    private final NativeFirstUseAuthorization firstUse;
     private final VerificationFlow verification = new VerificationFlow(SystemClock::elapsedRealtime);
     final ControlPolicy policy = new ControlPolicy(SystemClock::elapsedRealtime);
 
@@ -50,6 +51,7 @@ final class ProductBridge extends NanoHTTPD {
         this.context = app;
         executor = new AndroidUseExecutor(app);
         catalog = new CapabilityCatalog(app);
+        firstUse = NativeFirstUseAuthorization.get(app);
         personal = new PersonalDataTools(app, new PersonalDataTools.NotificationSource() {
             public JSONObject status() throws Exception { return DroyNotificationService.status(app); }
             public JSONObject query(JSONObject args, Cancellation cancellation) throws Exception {
@@ -133,6 +135,11 @@ final class ProductBridge extends NanoHTTPD {
             if (session.getUri().equals("/attachments/normalize"))
                 return ok(AttachmentImageCodec.normalize(context, request));
             String task = request.optString("taskId"), call = request.optString("callId");
+            if (session.getUri().equals("/permissions/preflight")) {
+                JSONObject arguments = request.optJSONObject("args");
+                return ok(firstUse.preflight(request.getString("action"), arguments == null ? new JSONObject() : arguments,
+                    task, call, request.has("humanBudgetMs") ? budget(request.get("humanBudgetMs")) : 120000, policy));
+            }
             if (session.getUri().equals("/cancel")) {
                 policy.cancel(task, call);
                 hardware.closeOwner(task);
@@ -140,13 +147,15 @@ final class ProductBridge extends NanoHTTPD {
                 AudioCapture.get(context).cancelStart(task, call);
                 AudioTranscription.get(context).cancelStart(task, call);
                 ToolProgress.endScreenOperation(task); RuntimeService.refreshExecutionProgress();
+                firstUse.cancel(task, call);
                 return ok(new JSONObject());
             }
             if (session.getUri().equals("/task/end")) {
-                policy.end(task); verification.end(task); ProactiveNotifications.get(context).end(task);
+                policy.end(task); verification.end(task);
                 memory.end(task);
                 hardware.closeOwner(task);
                 ToolProgress.endScreenOperation(task); RuntimeService.refreshExecutionProgress();
+                firstUse.end(task);
                 return ok(new JSONObject());
             }
             if (!session.getUri().equals("/tool")) return response(Response.Status.NOT_FOUND, failure("NOT_FOUND", NativeLocale.text("接口不存在", "Endpoint not found")));
@@ -203,6 +212,9 @@ final class ProductBridge extends NanoHTTPD {
             case "recordModel" -> SetupManager.recordModel(context, request);
             case "checkModelFingerprint" -> SetupManager.checkModelFingerprint(context, request.getString("configFingerprint"));
             case "complete" -> SetupManager.complete(context);
+            case "nativeStatus" -> SetupManager.nativeStatus(context, request);
+            case "nativeAcknowledgeIdentity" -> SetupManager.nativeAcknowledgeIdentity(context, request);
+            case "nativeComplete" -> SetupManager.nativeComplete(context, request);
             default -> throw new IllegalArgumentException(NativeLocale.text("不支持的安装操作", "Unsupported installation operation"));
         };
     }
@@ -255,9 +267,9 @@ final class ProductBridge extends NanoHTTPD {
             boolean verificationActionStarted = false;
             boolean screenMutation = VerificationFlow.affectsScreen(action, tool.optBoolean("screen"), trace.readOnly);
             try {
+                if (sequenceTicket == null) firstUse.checkDispatch(task, call, ticket, policy);
                 long authorizedAt = SystemClock.elapsedRealtime();
                 checkPermission(tool, false);
-                ProactiveNotifications.get(context).checkAppOperation(task);
                 trace.authorizationMs = SystemClock.elapsedRealtime() - authorizedAt;
                 Cancellation cancellation = new Cancellation() {
                     private boolean usingRoot;
@@ -269,17 +281,12 @@ final class ProductBridge extends NanoHTTPD {
                         ticket.check();
                         try { checkPermission(tool, usingRoot); }
                         catch (org.json.JSONException invalid) { throw new IllegalStateException(NativeLocale.text("能力目录无效", "Invalid capability catalog"), invalid); }
-                        ProactiveNotifications.get(context).checkAppOperation(task);
                     }
                     @Override public long remainingMillis(long maximumMs) throws Exception {
                         check(); return ticket.remainingMillis(maximumMs);
                     }
                     @Override public void dispatched() throws InterruptedException {
                         check(); ticket.dispatched(); trace.dispatchedAtMs = SystemClock.elapsedRealtime() - trace.startedAt;
-                        if (trace.dispatchTracked) {
-                            try { ProactiveNotifications.get(context).appActionDispatched(task); }
-                            catch (Exception failure) { throw new IllegalStateException(NativeLocale.text("通知执行记录未保存", "Notification execution record was not saved"), failure); }
-                        }
                     }
                 };
                 cancellation.check();
@@ -339,7 +346,6 @@ final class ProductBridge extends NanoHTTPD {
     private JSONObject executeSequence(JSONObject args, String task, String call, long budgetMs, CallTrace trace) throws Exception {
         ActionSequence sequence = new ActionSequence(args);
         JSONObject tool = catalog.tool("sequence");
-        checkPermission(tool, false);
         long sequenceBudget = Math.min(budgetMs, args.optLong("timeoutMs", 30000));
         ControlPolicy.Ticket ticket = policy.begin(task, call, sequenceBudget);
         trace.ticket = ticket; trace.dispatchTracked = true;
@@ -347,6 +353,8 @@ final class ProductBridge extends NanoHTTPD {
         String key = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256")
                 .digest((task + "\0" + call).getBytes(StandardCharsets.UTF_8)));
         try {
+            firstUse.checkDispatch(task, call, ticket, policy);
+            checkPermission(tool, false);
             String previous = receipts.getString(key, null);
             if (previous != null) return ActionSequence.resumed(new JSONObject(previous)).put("nativeTiming", trace.timing());
             Cancellation cancellation = new Cancellation() {
@@ -354,7 +362,6 @@ final class ProductBridge extends NanoHTTPD {
                     ticket.check();
                     try { checkPermission(tool, false); }
                     catch (org.json.JSONException invalid) { throw new IllegalStateException(NativeLocale.text("能力目录无效", "Invalid capability catalog"), invalid); }
-                    ProactiveNotifications.get(context).checkAppOperation(task);
                 }
                 @Override public long remainingMillis(long maximumMs) throws Exception {
                     check(); return ticket.remainingMillis(maximumMs);
@@ -430,9 +437,10 @@ final class ProductBridge extends NanoHTTPD {
         if (action.equals("audio_status")) return audio.status(args.optString("captureId"), owner);
         // Cleanup remains available after a product grant or the engine is stopped.
         if (action.equals("audio_stop")) return audio.stop(args.optString("captureId"), owner);
-        VoiceWake.get(context).pauseForVoice();
         ControlPolicy.Ticket ticket = policy.begin(owner, call, budgetMs);
         try {
+            firstUse.checkDispatch(owner, call, ticket, policy);
+            VoiceWake.get(context).pauseForVoice();
             ticket.check();
             JSONObject result = audio.start(args, owner, call);
             ticket.check();
@@ -639,7 +647,7 @@ final class ProductBridge extends NanoHTTPD {
                 org.json.JSONArray required = tool.getJSONArray("permissions");
                 for (int j = 0; j < required.length(); j++) if (!grants.optBoolean(required.getString(j)))
                     reasons.put(NativeLocale.text("产品未授权：", "Not authorized in product settings: ") + catalog.group(required.getString(j)).getString("label"));
-                if (tool.optBoolean("screen") && ChatFileTransfers.isPickerOpen()) reasons.put(NativeLocale.text("请先完成系统文件选择", "Complete the system file selection first"));
+                if (tool.optBoolean("screen") && NativeRuntimeHost.isFilePickerOpen()) reasons.put(NativeLocale.text("请先完成系统文件选择", "Complete the system file selection first"));
             }
             boolean productAllowed = reasons.length() == 0;
             JSONObject systemState = diagnostics.optJSONObject(tool.getString("action"));
@@ -658,7 +666,7 @@ final class ProductBridge extends NanoHTTPD {
             .put("product", new JSONObject().put("observeAllowed", ProductPermissions.allowed(settings, "allowObserve"))
                 .put("controlAllowed", ProductPermissions.allowed(settings, "allowControl"))
                 .put("screenshotsAllowed", ProductPermissions.allowed(settings, "allowScreenshot")).put("stopped", policy.isStopped())
-                .put("productUiProtected", false).put("filePickerProtected", ChatFileTransfers.isPickerOpen()).put("grants", grants))
+                .put("productUiProtected", false).put("filePickerProtected", NativeRuntimeHost.isFilePickerOpen()).put("grants", grants))
             .put("groups", groupStates).put("tools", toolStates).put("systemPermissions", systemPermissions)
             .put("diagnostics", diagnostics)
             .put("progress", progress.history())
@@ -725,7 +733,7 @@ final class ProductBridge extends NanoHTTPD {
             throw new ProductPermissionDenied("private_droy_ui", NativeLocale.text("Droy 的私人记忆与对话界面仅供用户查看；请切换到目标应用后继续", "Droy private memory and conversation screens are for the user only. Switch to the target app before continuing"));
         // The system picker grants persistent access to user-selected documents;
         // opening Droy's own UI does not extend that separate authorization flow.
-        if (tool.optBoolean("screen") && ChatFileTransfers.isPickerOpen())
+        if (tool.optBoolean("screen") && NativeRuntimeHost.isFilePickerOpen())
             throw new ProductPermissionDenied("picker_visible", NativeLocale.text("文件选择界面仅供用户操作；请完成选择后继续", "The file picker is for the user only. Complete the selection before continuing"));
         try {
             CapabilityAuthorization.check(tool, catalog::group, key -> ProductPermissions.allowed(settings, key), rootRequested);

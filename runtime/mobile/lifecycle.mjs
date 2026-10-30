@@ -14,7 +14,14 @@ export function apply(ctx) {
     await Promise.all(ctx.sessions.list().map(session => ctx.sessions.flush(session)));
     await ctx.sessionPersistence.flush();
   })();
-  ctx.provide('droyLifecycle', { get stopping() { return stopping; }, drain });
+  const prepareMaintenanceExit = async assertQuiet => {
+    if (stopping || typeof assertQuiet !== 'function' || !assertQuiet()) throw Object.assign(new Error('COMPANION_MAINTENANCE_BUSY'), { code: 'COMPANION_MAINTENANCE_BUSY' });
+    await Promise.all(ctx.sessions.list().map(session => ctx.sessions.flush(session)));
+    await ctx.sessionPersistence.flush();
+    if (!assertQuiet()) throw Object.assign(new Error('COMPANION_MAINTENANCE_BUSY'), { code: 'COMPANION_MAINTENANCE_BUSY' });
+    stopping = true;
+  };
+  ctx.provide('droyLifecycle', { get stopping() { return stopping; }, drain, prepareMaintenanceExit });
   ctx.on('llm/stream', (_options, next) => {
     if (stopping) throw new Error('DROY_STOPPING');
     return next();

@@ -86,8 +86,8 @@ public final class MainActivity extends Activity {
     private boolean backFocusSynchronized;
     private static final java.util.concurrent.atomic.AtomicInteger visibleActivities = new java.util.concurrent.atomic.AtomicInteger();
 
-    static boolean isSensitiveUiVisible() { return visibleActivities.get() > 0 || AudioPermissionActivity.isVisible() || ChatFileTransfers.isPickerOpen()
-        || io.droyagent.app.media.MediaInputController.isPickerOpen() || io.droyagent.app.media.ShareReceiveActivity.isVisible(); }
+    static boolean isSensitiveUiVisible() { return visibleActivities.get() > 0 || NativeRuntimeHost.isVisible() || AudioPermissionActivity.isVisible() || NativeRuntimeHost.isFilePickerOpen()
+        || io.droyagent.app.media.ShareReceiveActivity.isVisible(); }
 
     private final Runnable refresh = new Runnable() {
         public void run() {
@@ -180,18 +180,18 @@ public final class MainActivity extends Activity {
     }
 
     static void revealBrowser(Context context, String sessionId) {
-        Intent intent = new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        Intent intent = new Intent(context, NativeAppActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             .putExtra("browserSessionId", sessionId);
         context.startActivity(intent);
     }
     static void revealTask(Context context, String taskId) {
-        context.startActivity(new Intent(context, MainActivity.class)
+        context.startActivity(new Intent(context, NativeAppActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             .putExtra("petTaskId", taskId));
     }
     static void revealQuestion(Context context, String taskId, String requestId) {
         if (!ToolProgress.hasPending(taskId, requestId)) return;
-        context.startActivity(new Intent(context, MainActivity.class)
+        context.startActivity(new Intent(context, NativeAppActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             .putExtra("petTaskId", taskId).putExtra("petRequestId", requestId));
     }
@@ -386,12 +386,7 @@ public final class MainActivity extends Activity {
                 try {
                     JSONObject request = new JSONObject(message.getData());
                     response.put("id", request.getInt("id"));
-                    NativeLocale.adopt(request.getString("language"));
-                    RuntimeService.refreshExecutionProgress();
-                    AudioCaptureService.refreshLocale(this);
-                    ProactiveNotifications.refreshLocale(this);
-                    io.droyagent.app.history.HistoryLocationService.refreshLocale(this);
-                    PetOverlay.refresh(this);
+                    NativeRuntimeHost.adoptLocale(this, request.getString("language"));
                     loadingOverlay.setContentDescription(NativeLocale.text("正在准备对话", "Preparing your conversation"));
                     response.put("ok", true);
                     reply.postMessage(response.toString());
@@ -413,7 +408,7 @@ public final class MainActivity extends Activity {
                     JSONObject request = NativeUiProtocol.parse(message.getData());
                     response.put("id", request.getString("id"));
                     if (request.getString("action").equals("memoryArchiveSave")) {
-                        if (ChatFileTransfers.isPickerOpen()) throw new IllegalStateException(NativeLocale.text("请先完成当前文件选择", "Finish the current file selection first"));
+                        if (NativeRuntimeHost.isFilePickerOpen()) throw new IllegalStateException(NativeLocale.text("请先完成当前文件选择", "Finish the current file selection first"));
                         String address = NativeUiProtocol.memoryArchiveDownload(request.getJSONObject("args"),sessionPort);
                         markUiReady();
                         transfers.download(address,"attachment; filename=\"droy-memory.droy\"","application/octet-stream");
@@ -1524,13 +1519,17 @@ public final class MainActivity extends Activity {
 
     private void clearHistoryAfterStop() {
         if (historyChanging) return;
+        if (NativeCompanionDeletion.pending(this)) {
+            Toast.makeText(this, NativeLocale.text("正在清理伙伴数据", "Cleaning up companion data"), Toast.LENGTH_SHORT).show();
+            return;
+        }
         historyChanging = true; startingRequested = false; RuntimeService.requestStop(this);
         new Thread(() -> {
             boolean acquired = false;
             try {
                 long deadline = SystemClock.elapsedRealtime() + 20000;
                 do {
-                    acquired = RuntimeService.beginHistoryChange();
+                    acquired = RuntimeService.beginHistoryChange(this);
                     if (acquired) break;
                     Thread.sleep(100);
                 } while (SystemClock.elapsedRealtime() < deadline);

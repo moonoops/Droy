@@ -61,7 +61,7 @@ if remote == ["am", "get-current-user"]:
 if remote[:2] == ["am", "start"]:
     if config.get("browser_task_on_top") and "--activity-reorder-to-front" not in remote:
         respond("Status: ok\nActivity: io.droyagent.app.dev/io.droyagent.app.BrowserActivity\nComplete")
-    respond(config.get("launch_output", "Status: ok\nActivity: " + package + "/io.droyagent.app.MainActivity\nComplete"),
+    respond(config.get("launch_output", "Status: ok\nActivity: " + package + "/io.droyagent.app.NativeAppActivity\nComplete"),
             config.get("launch_exit", 0))
 if remote[:2] == ["pm", "path"]:
     respond("package:/data/app/mock/base.apk" if config.get("installed", True) else "")
@@ -605,7 +605,7 @@ class PermissionSetupTests(unittest.TestCase):
         result = self.run_setup()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         commands = self.remote_calls()
-        launch = commands.index(["am", "start", "--user", "0", "-W", "--activity-reorder-to-front", "-n", "io.droyagent.app.dev/io.droyagent.app.MainActivity"])
+        launch = commands.index(["am", "start", "--user", "0", "-W", "--activity-reorder-to-front", "-n", "io.droyagent.app.dev/io.droyagent.app.NativeAppActivity"])
         for permission in ("android.permission.WRITE_SECURE_SETTINGS", "android.permission.DUMP"):
             self.assertLess(commands.index(["pm", "grant", "--user", "0", MODULE.PACKAGE, permission]), launch)
         provider_calls = [i for i, command in enumerate(commands) if command[:2] == ["content", "call"]]
@@ -625,7 +625,7 @@ class PermissionSetupTests(unittest.TestCase):
         configurations = [
             {"launch_exit": 1},
             {"launch_output": "Error: Activity not started"},
-            {"launch_output": "Status: timeout\nActivity: io.droyagent.app.dev/io.droyagent.app.MainActivity"},
+            {"launch_output": "Status: timeout\nActivity: io.droyagent.app.dev/io.droyagent.app.NativeAppActivity"},
             {"launch_output": "Status: ok\nActivity: other.app/.MainActivity"},
             {"launch_output": "Status: ok\nComplete"},
         ]
@@ -641,7 +641,7 @@ class PermissionSetupTests(unittest.TestCase):
                 self.assertFalse(json.loads(self.state_path.read_text())["product"])
 
     def test_existing_activity_full_component_is_accepted(self):
-        result = self.run_setup(config={"launch_output": "Warning: Activity not started, its current task has been brought to the front\nStatus: ok\nActivity: io.droyagent.app.dev/io.droyagent.app.MainActivity\nComplete"})
+        result = self.run_setup(config={"launch_output": "Warning: Activity not started, its current task has been brought to the front\nStatus: ok\nActivity: io.droyagent.app.dev/io.droyagent.app.NativeAppActivity\nComplete"})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(self.summary(result)["ok"])
 

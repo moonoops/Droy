@@ -11,6 +11,7 @@ import {fileURLToPath} from 'node:url';
 import {dialoguePrompts} from '../companions/dialogue-prompts.mjs';
 import {buildPlannerPrompt} from '../companions/maibot-prompts.mjs';
 import {responseLanguagePrompts} from '../prompt.mjs';
+import {seedLegacyCompanionDb} from './fixtures/legacy-companion-db.mjs';
 
 async function eventually(read,label) {
   const deadline=Date.now()+10000;
@@ -26,6 +27,7 @@ const textChunks=text=>[
 ];
 test('restricted companions remain usable with persisted legacy protection and no Root', {timeout:60000},async t=>{
   const home=await mkdtemp(join(tmpdir(),'droy-companions-integration-'));
+  await seedLegacyCompanionDb(join(home,'droy-companions'));
   const reservation=createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));
   const port=reservation.address().port;await new Promise(r=>reservation.close(r));
   const native=createServer(async(req,res)=>{

@@ -7,6 +7,9 @@ Run commands from the repository root. The build supports macOS and x86_64 Linux
 | Tool | Version |
 | --- | --- |
 | Java | JDK 17 |
+| Kotlin / Compose compiler plugin | 2.2.21 |
+| Compose BOM / Material 3 | 2025.10.01 / 1.5.0-alpha01 |
+| Navigation Compose | 2.9.8 |
 | Host Node.js | 22 or 24, with npm |
 | Python | 3.9+, with xz support |
 | patchelf | 0.19.2 |
@@ -27,6 +30,13 @@ sdkmanager --sdk_root="$ANDROID_HOME" \
 The Gradle wrapper, npm lockfile and runtime manifests pin dependencies. The
 first build needs access to Android repositories, Gradle, npm, Termux and the
 model download sources declared in the manifests.
+
+The native workbench uses the public Material 3 Expressive motion API. Material
+3 is pinned separately from the BOM because version 1.4 keeps that API internal.
+Keep the Kotlin and Compose compiler plugin versions aligned when updating them.
+Navigation Compose 2.9.8 provides the native back stack, saved root pages and
+predictive back while retaining this SDK/toolchain baseline. Navigation 2.10
+requires a newer Compose/SDK baseline; upgrade that combination separately.
 
 ## Build
 

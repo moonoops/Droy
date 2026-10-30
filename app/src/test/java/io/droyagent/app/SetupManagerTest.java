@@ -111,4 +111,40 @@ public final class SetupManagerTest {
             .put("passed", false).put("rootVerified", false), 20);
         assertFalse(explicitFailure.getBoolean("rootVerified"));
     }
+
+    private static JSONObject verifiedModel() throws Exception {
+        return new JSONObject().put("passed", true).put("toolsPassed", true).put("configFingerprint", "a".repeat(64));
+    }
+
+    @Test public void nativeFirstUsePolicyCanCompleteWithoutAnySystemPermissionOrPracticeProof() throws Exception {
+        JSONObject checks = SetupManager.nativeChecks(verifiedModel(), "a".repeat(64), true, "b".repeat(64),
+            new JSONObject().put("profileFingerprint", "b".repeat(64)), "on_first_use", true);
+        assertTrue(checks.getBoolean("canComplete"));
+        assertEquals(5, checks.getJSONArray("checks").length());
+        String values = checks.getJSONArray("checks").toString();
+        assertFalse(values.contains("accessibility")); assertFalse(values.contains("root"));
+        assertFalse(values.contains("webView")); assertFalse(values.contains("device"));
+    }
+
+    @Test public void nativeCompletionRequiresMatchingModelFingerprintAndRealToolValidation() throws Exception {
+        JSONObject confirmed = new JSONObject().put("profileFingerprint", "b".repeat(64));
+        assertFalse(SetupManager.nativeChecks(verifiedModel(), "c".repeat(64), true, "b".repeat(64), confirmed, "batch", true).getBoolean("canComplete"));
+        assertFalse(SetupManager.nativeChecks(verifiedModel().put("toolsPassed", false), "a".repeat(64), true, "b".repeat(64), confirmed, "batch", true).getBoolean("canComplete"));
+        assertFalse(SetupManager.nativeChecks(verifiedModel(), "a".repeat(64), true, "b".repeat(64), confirmed, "on_first_use", false).getBoolean("canComplete"));
+    }
+
+    @Test public void nativeIdentityConfirmationIsBoundToTheSavedProfileAndNotAWizardAcknowledgement() throws Exception {
+        JSONObject other = new JSONObject().put("profileFingerprint", "c".repeat(64));
+        assertFalse(SetupManager.nativeChecks(verifiedModel(), "a".repeat(64), true, "b".repeat(64), other, "batch", true).getBoolean("canComplete"));
+        assertFalse(SetupManager.nativeChecks(verifiedModel(), "a".repeat(64), false, "b".repeat(64),
+            new JSONObject().put("profileFingerprint", "b".repeat(64)), "batch", true).getBoolean("canComplete"));
+        assertFalse(SetupManager.nativeChecks(verifiedModel(), "a".repeat(64), true, "b".repeat(64),
+            new JSONObject().put("root", true).put("welcome", true), "batch", true).getBoolean("canComplete"));
+    }
+
+    @Test public void nativePermissionPolicyMustBeExplicitAndKnown() throws Exception {
+        for (String value : new String[]{"", "defer", "all", "invalid"})
+            assertFalse(SetupManager.nativeChecks(verifiedModel(), "a".repeat(64), true, "b".repeat(64),
+                new JSONObject().put("profileFingerprint", "b".repeat(64)), value, true).getBoolean("canComplete"));
+    }
 }

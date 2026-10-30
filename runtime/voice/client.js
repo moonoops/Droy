@@ -479,7 +479,7 @@ window.__ModuleLoader__.load({
           setSaving(true); setNotice('');
           try {
             const wake = { chinese: draft.wake.chinese, english: draft.wake.english,
-              timing: draft.wake.timing || 'screen_on', useCompanionName: !!draft.wake.useCompanionName, target: 'standard' };
+              timing: draft.wake.timing || 'screen_on', useCompanionName: false, target: 'standard' };
             await controller.request('wake.configure', { ...wake, enabled: state.wake?.enabled ?? config.wake.enabled });
             const saved = await controller.saveConfig(wakeOnly ? { wake } : { tts: draft.tts, wake });
             if (!saved) return false;
@@ -490,7 +490,6 @@ window.__ModuleLoader__.load({
           h('h2', { className: 'droy-section-title' }, tr("语音设置")),
           h(Feedback, { state }), notice ? h('p', { className: 'droy-description', role: 'status' }, tr(notice)) : null,
           h('section', null, h('h3', null, tr("语音输入")),
-            h(Toggle, { name: 'standard', label: tr("语音对话入口"), checked: config.entries.standard, onChange: value => act(controller.saveConfig({ entries: { standard: value } })) }),
             h('p', { className: 'droy-description' }, tr("按住说话，松开识别并发送；语音对话会在一句话结束后自动发送。")),
             h('p', { className: 'droy-description' }, tr("语音在手机本地识别，自动识别语言，无需配置。")),
             h('p', { className: recognition.state === 'failed' ? 'droy-voice-error' : 'droy-description', role: 'status',
@@ -538,12 +537,8 @@ window.__ModuleLoader__.load({
               options: [{ value: 'screen_on', label: tr("仅亮屏时") }, { value: 'foreground', label: tr("仅在 Droy 内") }] }) }),
             h('p', { className: 'droy-description' }, draft.wake.timing === 'foreground' ? tr("仅在 Droy 位于前台且屏幕解锁时监听。") : tr("屏幕亮起且解锁时监听。")),
             h('h4', null, tr("唤醒关键词")),
-            h(Toggle, { name: 'useCompanionName', label: tr("使用 Droy 伙伴名称唤醒"), checked: draft.wake.useCompanionName,
-              onChange: value => patch('wake', 'useCompanionName', value) }),
-            h('p', { className: 'droy-description' }, tr("使用“你好 + 名称”或“Hi + 名称”唤醒，开启后不再单独设置中英文唤醒词。"),
-              state.wake?.companionName ? ' ' + tr("当前伙伴名称：{v0}。", {v0: state.wake.companionName}) : ''),
-            h(Field, { label: tr("中文唤醒词"), value: draft.wake.chinese, disabled: !!draft.wake.useCompanionName, onChange: value => patch('wake', 'chinese', value) }),
-            h(Field, { label: tr("英文唤醒词"), value: draft.wake.english, disabled: !!draft.wake.useCompanionName, onChange: value => patch('wake', 'english', value) }),
+            h(Field, { label: tr("中文唤醒词"), value: draft.wake.chinese, disabled: false, onChange: value => patch('wake', 'chinese', value) }),
+            h(Field, { label: tr("英文唤醒词"), value: draft.wake.english, disabled: false, onChange: value => patch('wake', 'english', value) }),
             h('p', { className: 'droy-description', role: 'status' }, tr(state.wake?.message) || tr("唤醒默认关闭")),
             prep?.state === 'preparing' ? h('progress', { max: prep.totalBytes || 1, value: prep.downloadedBytes || 0, 'aria-label': tr("唤醒资源准备进度") }) : null,
             prep?.error ? h('p', { className: 'droy-voice-error' }, tr(prep.error)) : null,

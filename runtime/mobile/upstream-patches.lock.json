@@ -44,6 +44,9 @@
     "@deepseek-ai/dsh-session-title-all-prompts-llm/lib/index.js": "f0848617b3df0905d0f5170e982f3e6e66e6d5283141dff6427848309903faec",
     "@deepseek-ai/dsh-fs-local/lib/index.js": "63fbb41d2c33e07111884b798be507e68c2752acab8249c821c20ade436e894f",
     "@deepseek-ai/dsh-client-ui-chat/lib/client.js": "a00e5176d1257d51604cefbe9a15d326d4283439df31f76ba20ff690c76e10a1",
-    "@deepseek-ai/dsh-client-ui-entry-customization/lib/client.js": "287f36fe74f6be3eb5ab51ec0c1f09ae8cacea8a01fe56b3966553106c69f7e4"
+    "@deepseek-ai/dsh-client-ui-entry-customization/lib/client.js": "287f36fe74f6be3eb5ab51ec0c1f09ae8cacea8a01fe56b3966553106c69f7e4",
+    "@deepseek-ai/dsh-api-session-controller/lib/index.js": "a9801acb577b03053c5d5a3191ff555c5f1d791d0acddec113bea4511e33b386",
+    "@deepseek-ai/dsh-api-gateway/lib/index.js": "4fbe460fec585ebc2cf2887261f6c33f024081a539d9fb5d6557a9002324b23f",
+    "@deepseek-ai/dsh-schedule/lib/index.js": "022b9f191b6ca0f4b0f26625afc49f375933068a42712c0a75e94e439d7e6d0e"
   }
 }

@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AppOpsManager;
 import android.content.Intent;
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -75,6 +76,20 @@ final class PermissionSetup {
         start(PermissionSetupPlan.forCapabilities(Set.of(key), hardware(), false));
     }
 
+    void requestOrdinaryBatch(Set<String> enabled) throws Exception {
+        start(PermissionSetupPlan.ordinaryForCapabilities(enabled, hardware(), true));
+    }
+
+    void forOrdinaryPreference(String key) throws Exception {
+        start(PermissionSetupPlan.ordinaryForCapabilities(Set.of(key), hardware(), false));
+    }
+
+    void requestOrdinaryPermissions(Set<String> permissions) throws Exception {
+        if (!PermissionSetupPlan.ordinaryPermissionNames().containsAll(permissions))
+            throw new IllegalArgumentException("Invalid ordinary permission set");
+        start(PermissionSetupPlan.ordinaryPermissionNames().stream().filter(permissions::contains).toList());
+    }
+
     boolean requestIfNeeded(String name) throws Exception {
         if (runtimePermissions(name) == null && !Set.of("accessibility", "notificationAccess", "usage", "brightness", "petOverlay", "shizuku", "root").contains(name)) return false;
         if (!needed(name)) return false;
@@ -83,10 +98,17 @@ final class PermissionSetup {
     }
 
     private Set<String> hardware() throws Exception {
+        return supportedHardware(owner);
+    }
+
+    static Set<String> supportedHardware(Context owner) throws Exception {
         JSONObject hardware = HardwarePermissionState.status(owner).getJSONObject("hardware");
         Set<String> supported = new LinkedHashSet<>();
         for (String key : List.of("wifi", "bluetooth", "telephony", "stepCounter", "heartRate"))
             if (hardware.optBoolean(key)) supported.add(key);
+        if (owner.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) supported.add("camera");
+        if (owner.getPackageManager().hasSystemFeature(PackageManager.FEATURE_MICROPHONE)) supported.add("microphone");
+        if (owner.getPackageManager().hasSystemFeature(PackageManager.FEATURE_LOCATION)) supported.add("location");
         return supported;
     }
 
@@ -105,8 +127,13 @@ final class PermissionSetup {
 
     private boolean needed(String name) throws Exception {
         String[] runtime = runtimePermissions(name);
+        if (runtime != null) clearGrantedRequestMarkers(runtime);
+        return needsSystemPermission(owner, name);
+    }
+
+    static boolean needsSystemPermission(Context owner, String name) throws Exception {
+        String[] runtime = runtimePermissions(name);
         if (runtime != null) {
-            clearGrantedRequestMarkers(runtime);
             for (String permission : runtime) if (owner.checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) return true;
             return false;
         }
@@ -122,7 +149,7 @@ final class PermissionSetup {
             }
             case "shizuku" -> ShizukuAccess.get(owner).status().optBoolean("running") && !ShizukuAccess.get(owner).available();
             case "root" -> hasSu() && !SetupRootVerification.status().optBoolean("passed");
-            default -> false;
+            default -> throw new IllegalArgumentException("Unknown system permission");
         };
     }
 
@@ -132,7 +159,7 @@ final class PermissionSetup {
         return false;
     }
 
-    private static String[] runtimePermissions(String name) {
+    static String[] runtimePermissions(String name) {
         return switch (name) {
             case "notifications" -> Build.VERSION.SDK_INT >= 33 ? new String[]{Manifest.permission.POST_NOTIFICATIONS} : new String[0];
             case "calendar" -> new String[]{Manifest.permission.READ_CALENDAR};

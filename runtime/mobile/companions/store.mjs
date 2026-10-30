@@ -1,10 +1,54 @@
+import { companionVisibleMessage } from './reply-text.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, chmod } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import { assertCompanionId, defaultProfiles, LEGACY_COMPANION_PERSONAS } from './profiles.mjs';
+import { assertCompanionId, assertTemplateId, COMPANION_TEMPLATE_IDS, defaultProfiles, profileFromTemplate,
+  normalizedName, profileNameKeys, LEGACY_COMPANION_PERSONAS } from './profiles.mjs';
 
 const APPLICATION_ID = 1146241872;
+const BASE_SCHEMA_SQL = `
+  CREATE TABLE profiles(id TEXT PRIMARY KEY,data TEXT NOT NULL);
+  CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,companion_id TEXT NOT NULL REFERENCES profiles(id),message_id TEXT NOT NULL,client_id TEXT,fingerprint TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(companion_id,message_id),UNIQUE(companion_id,client_id));
+  CREATE INDEX messages_companion_sequence ON messages(companion_id,seq DESC);
+  CREATE TABLE sessions(session_id TEXT PRIMARY KEY,companion_id TEXT NOT NULL REFERENCES profiles(id),kind TEXT NOT NULL,workspace_id TEXT NOT NULL,task_id TEXT);
+  CREATE INDEX sessions_owner ON sessions(companion_id,kind);
+  CREATE TABLE settings(singleton INTEGER PRIMARY KEY,data TEXT NOT NULL);
+  CREATE TABLE read_positions(companion_id TEXT PRIMARY KEY REFERENCES profiles(id),seq INTEGER NOT NULL DEFAULT 0);`;
+const EXTENSION_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS companion_state(companion_id TEXT PRIMARY KEY REFERENCES profiles(id),data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS conversation_state(companion_id TEXT PRIMARY KEY REFERENCES profiles(id),pinned INTEGER NOT NULL DEFAULT 0,hidden INTEGER NOT NULL DEFAULT 0);
+  CREATE TABLE IF NOT EXISTS message_tombstones(companion_id TEXT NOT NULL REFERENCES profiles(id),message_id TEXT NOT NULL,client_id TEXT,PRIMARY KEY(companion_id,message_id));
+  CREATE TABLE IF NOT EXISTS companion_uploads(seq INTEGER PRIMARY KEY AUTOINCREMENT,companion_id TEXT NOT NULL REFERENCES profiles(id),upload_id TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(companion_id,upload_id));
+  CREATE INDEX IF NOT EXISTS uploads_owner_sequence ON companion_uploads(companion_id,seq DESC);
+  CREATE TABLE IF NOT EXISTS user_profile(singleton INTEGER PRIMARY KEY,data TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS user_uploads(upload_id TEXT PRIMARY KEY,data TEXT NOT NULL);`;
+const CREATION_SCHEMA_SQL = `
+  CREATE TABLE name_claims(name_key TEXT NOT NULL,companion_id TEXT NOT NULL REFERENCES profiles(id),PRIMARY KEY(name_key,companion_id));
+  CREATE INDEX name_claims_owner ON name_claims(companion_id);
+  CREATE TABLE creation_drafts(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,state TEXT NOT NULL,created_at TEXT NOT NULL,companion_id TEXT REFERENCES profiles(id));
+  CREATE TABLE draft_uploads(draft_id TEXT NOT NULL REFERENCES creation_drafts(id),upload_id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(draft_id,upload_id));
+  CREATE TABLE creation_receipts(request_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,companion_id TEXT NOT NULL REFERENCES profiles(id));`;
+export const COMPANION_STORE_MAINTENANCE_SQL = `
+  CREATE TABLE IF NOT EXISTS creation_tombstones(kind TEXT NOT NULL,digest TEXT NOT NULL,PRIMARY KEY(kind,digest));
+  CREATE TABLE IF NOT EXISTS maintenance_operations(operation_id TEXT PRIMARY KEY,epoch_digest TEXT NOT NULL,target_id TEXT NOT NULL,manifest_digest TEXT NOT NULL,retained_digest TEXT NOT NULL,state TEXT NOT NULL,tombstones TEXT NOT NULL);`;
+
+/** The provider owns the exact SQLite schema, including automatic indexes. */
+export function companionStoreMaintenanceSchema(version = 3) {
+  if (![2, 3].includes(version)) fail('COMPANION_FORMAT_UNSUPPORTED');
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(BASE_SCHEMA_SQL + EXTENSION_SCHEMA_SQL + CREATION_SCHEMA_SQL + (version === 3 ? COMPANION_STORE_MAINTENANCE_SQL : ''));
+    return { version, applicationId: APPLICATION_ID,
+      catalog: db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all() };
+  } finally { db.close(); }
+}
+
+export function companionCreationTombstoneDigest(kind, value) {
+  if (!['profile-request', 'draft-request', 'draft-id'].includes(kind)) fail('COMPANION_INVALID_INPUT');
+  id(value);
+  return createHash('sha256').update('droy-companion-creation-v1\0' + kind + '\0' + value).digest('hex');
+}
 const PROFILE_FIELDS = ['name', 'avatar', 'personality', 'personalityOverride', 'chatBackground', 'behaviorStyle', 'replyStyle', 'model', 'settings', 'workspaceId', 'chatSessionId'];
 const CONTEXT_FIELDS = ['contextSourceIds', 'contextRange', 'contextExcluded'];
 const MESSAGE_FIELDS = ['id', 'clientId', 'role', 'type', 'text', 'createdAt', 'status', 'attachments', 'replyTo', 'quoteReply', 'task', 'voice', 'stickerId', 'transcript', 'error', ...CONTEXT_FIELDS];
@@ -13,7 +57,7 @@ const RECEIVED_INPUT_SQL = "json_extract(data,'$.status')='received' AND COALESC
 const fail = code => { throw Object.assign(new Error(code), { code }); };
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const clone = value => structuredClone(value);
-const DEFAULT_USER_PROFILE = Object.freeze({ name: '', avatarUrl: '/droy/companions/assets/user-default.png' });
+const DEFAULT_USER_PROFILE = Object.freeze({ name: '', bio: '', avatarUrl: '/droy/companions/assets/user-default.png' });
 const DEFAULT_QUIET_HOURS = Object.freeze({ enabled: true, start: '22:00', end: '09:00' });
 const backgroundUrl = imageId => '/droy/companions/assets/wallpaper-' + imageId + '.webp';
 function fields(value, allowed) {
@@ -111,8 +155,7 @@ function profilePatch(patch, current) {
   fields(patch, PROFILE_FIELDS);
   const next = clone(patch);
   if (next.name !== undefined) {
-    text(next.name, 320, false);
-    if ([...next.name.trim()].length > 80 || /[\u0000-\u001f\u007f]/u.test(next.name)) fail('COMPANION_INVALID_INPUT');
+    normalizedName(next.name);
     next.name = next.name.trim();
   }
   if (next.avatar !== undefined && next.avatar !== null) {
@@ -184,32 +227,28 @@ export class CompanionStore {
       db.exec('PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON;');
       const version = db.prepare('PRAGMA user_version').get().user_version;
       const application = db.prepare('PRAGMA application_id').get().application_id;
-      if (version !== 0 && (version !== 1 || application !== APPLICATION_ID)) fail('COMPANION_FORMAT_UNSUPPORTED');
-      if (version === 0) {
-        db.exec(`BEGIN IMMEDIATE;
-          CREATE TABLE profiles(id TEXT PRIMARY KEY,data TEXT NOT NULL);
-          CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,companion_id TEXT NOT NULL REFERENCES profiles(id),message_id TEXT NOT NULL,client_id TEXT,fingerprint TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(companion_id,message_id),UNIQUE(companion_id,client_id));
-          CREATE INDEX messages_companion_sequence ON messages(companion_id,seq DESC);
-          CREATE TABLE sessions(session_id TEXT PRIMARY KEY,companion_id TEXT NOT NULL REFERENCES profiles(id),kind TEXT NOT NULL,workspace_id TEXT NOT NULL,task_id TEXT);
-          CREATE INDEX sessions_owner ON sessions(companion_id,kind);
-          CREATE TABLE settings(singleton INTEGER PRIMARY KEY,data TEXT NOT NULL);
-          CREATE TABLE read_positions(companion_id TEXT PRIMARY KEY REFERENCES profiles(id),seq INTEGER NOT NULL DEFAULT 0);
-          PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=1; COMMIT;`);
-      }
-      db.exec('CREATE TABLE IF NOT EXISTS companion_state(companion_id TEXT PRIMARY KEY REFERENCES profiles(id),data TEXT NOT NULL)');
-      db.exec('CREATE TABLE IF NOT EXISTS conversation_state(companion_id TEXT PRIMARY KEY REFERENCES profiles(id),pinned INTEGER NOT NULL DEFAULT 0,hidden INTEGER NOT NULL DEFAULT 0)');
-      db.exec('CREATE TABLE IF NOT EXISTS message_tombstones(companion_id TEXT NOT NULL REFERENCES profiles(id),message_id TEXT NOT NULL,client_id TEXT,PRIMARY KEY(companion_id,message_id))');
-      db.exec('CREATE TABLE IF NOT EXISTS companion_uploads(seq INTEGER PRIMARY KEY AUTOINCREMENT,companion_id TEXT NOT NULL REFERENCES profiles(id),upload_id TEXT NOT NULL,data TEXT NOT NULL,UNIQUE(companion_id,upload_id)); CREATE INDEX IF NOT EXISTS uploads_owner_sequence ON companion_uploads(companion_id,seq DESC)');
-      db.exec('CREATE TABLE IF NOT EXISTS user_profile(singleton INTEGER PRIMARY KEY,data TEXT NOT NULL); CREATE TABLE IF NOT EXISTS user_uploads(upload_id TEXT PRIMARY KEY,data TEXT NOT NULL)');
+      if (![0,1,2,3].includes(version) || (version !== 0 && application !== APPLICATION_ID)
+        || (version === 0 && (application !== 0 || db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").get())))
+        fail('COMPANION_FORMAT_UNSUPPORTED');
       const store = new CompanionStore(db);
-      store.#transaction(() => {
-        for (const profile of defaultProfiles()) {
-          db.prepare('INSERT OR IGNORE INTO profiles VALUES(?,?)').run(profile.id, JSON.stringify(profile));
-          const saved = JSON.parse(db.prepare('SELECT data FROM profiles WHERE id=?').get(profile.id).data);
+      if (version < 2) store.#transaction(() => {
+        if (version === 0) db.exec(BASE_SCHEMA_SQL);
+        db.exec(EXTENSION_SCHEMA_SQL + CREATION_SCHEMA_SQL);
+        if (version === 0) {
+          const profile = profileFromTemplate('kaka');
+          db.prepare('INSERT INTO profiles VALUES(?,?)').run(profile.id, JSON.stringify(profile));
+        }
+        const presets = new Map(defaultProfiles().map(profile => [profile.templateId, profile]));
+        for (const row of db.prepare('SELECT id,data FROM profiles ORDER BY rowid').all()) {
+          const saved = JSON.parse(row.data);
+          if (saved.id !== row.id) fail('COMPANION_FORMAT_UNSUPPORTED');
           let upgraded = false;
+          if (!Object.hasOwn(saved, 'templateId')) { saved.templateId = COMPANION_TEMPLATE_IDS.includes(saved.id) ? saved.id : null; upgraded = true; }
+          const profile = presets.get(saved.templateId);
           for (const field of ['personalityOverride', 'chatBackground']) if (!Object.hasOwn(saved, field)) {
-            saved[field] = clone(profile[field]); upgraded = true;
+            saved[field] = field === 'personalityOverride' ? '' : { type: 'default' }; upgraded = true;
           }
+          if (!object(saved.settings)) fail('COMPANION_FORMAT_UNSUPPORTED');
           if (!Object.hasOwn(saved.settings, 'quietHours')) {
             saved.settings.quietHours = { ...DEFAULT_QUIET_HOURS }; upgraded = true;
           } else if (saved.settings.quietHours === null) {
@@ -221,15 +260,16 @@ export class CompanionStore {
           // exact previous preset; profile identity and private data stay intact.
           for (const field of ['personality', 'behaviorStyle', 'replyStyle']) {
             for (const locale of ['zh', 'en']) {
-              const previous = LEGACY_COMPANION_PERSONAS[profile.id]?.[field]?.[locale];
-              if (typeof previous === 'string' && saved[field]?.[locale] === previous && previous !== profile[field][locale]) {
+              const previous = LEGACY_COMPANION_PERSONAS[saved.templateId]?.[field]?.[locale];
+              if (version === 1 && profile && typeof previous === 'string' && saved[field]?.[locale] === previous && previous !== profile[field][locale]) {
                 saved[field][locale] = profile[field][locale];
                 upgraded = true;
               }
             }
           }
-          if (upgraded) db.prepare('UPDATE profiles SET data=? WHERE id=?').run(JSON.stringify(saved), profile.id);
-          db.prepare('INSERT OR IGNORE INTO read_positions VALUES(?,0)').run(profile.id);
+          if (upgraded) db.prepare('UPDATE profiles SET data=? WHERE id=?').run(JSON.stringify(saved), saved.id);
+          db.prepare('INSERT OR IGNORE INTO read_positions VALUES(?,0)').run(saved.id);
+          store.#putNameClaims(saved, { legacy: true });
         }
         db.prepare('INSERT OR IGNORE INTO settings VALUES(1,?)').run(JSON.stringify({ defaultMode: 'messages' }));
         db.prepare('INSERT OR IGNORE INTO user_profile VALUES(1,?)').run(JSON.stringify(DEFAULT_USER_PROFILE));
@@ -245,11 +285,24 @@ export class CompanionStore {
           delete state.uploads;
           db.prepare('UPDATE companion_state SET data=? WHERE companion_id=?').run(JSON.stringify(state),row.companion_id);
         }
+        db.exec(`PRAGMA application_id=${APPLICATION_ID}; PRAGMA user_version=2;`);
+      });
+      if (version < 3) store.#transaction(() => {
+        db.exec(COMPANION_STORE_MAINTENANCE_SQL + 'PRAGMA user_version=3;');
       });
       return store;
     } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); db.close(); throw error; }
   }
   constructor(db) { this.#db = db; }
+  #putNameClaims(profile, { previous, legacy = false } = {}) {
+    const keys = profileNameKeys(profile), retained = new Set(previous ? profileNameKeys(previous) : []);
+    if (!legacy) for (const key of keys) {
+      if (!retained.has(key) && this.#db.prepare('SELECT 1 FROM name_claims WHERE name_key=? AND companion_id<>?').get(key, profile.id))
+        fail('COMPANION_NAME_CONFLICT');
+    }
+    this.#db.prepare('DELETE FROM name_claims WHERE companion_id=?').run(profile.id);
+    for (const key of keys) this.#db.prepare('INSERT INTO name_claims VALUES(?,?)').run(key, profile.id);
+  }
   #ready() { if (this.#closed) fail('COMPANION_STORE_CLOSED'); }
   #transaction(operation) {
     this.#ready(); this.#db.exec('BEGIN IMMEDIATE');
@@ -262,7 +315,134 @@ export class CompanionStore {
     if (!row) fail('COMPANION_NOT_FOUND');
     return JSON.parse(row.data);
   }
+  #creationAvailable(kind, value) {
+    if (this.#db.prepare('SELECT 1 FROM creation_tombstones WHERE kind=? AND digest=?').get(kind, companionCreationTombstoneDigest(kind, value)))
+      fail('COMPANION_CREATION_DELETED');
+  }
   async getProfile(companionId) { return this.#profile(companionId); }
+  async suggestName(templateId, locale = 'zh') {
+    this.#ready(); assertTemplateId(templateId);
+    const base = defaultProfiles().find(profile => profile.templateId === templateId).displayName[locale === 'en' ? 'en' : 'zh'];
+    for (let suffix = 1; ; suffix++) {
+      const name = `${base} ${suffix}`;
+      if (!this.#db.prepare('SELECT 1 FROM name_claims WHERE name_key=?').get(normalizedName(name))) return name;
+    }
+  }
+  #draft(draftId, open = false) {
+    this.#ready(); id(draftId);
+    this.#creationAvailable('draft-id', draftId);
+    const draft = this.#db.prepare('SELECT * FROM creation_drafts WHERE id=?').get(draftId);
+    if (!draft) fail('COMPANION_DRAFT_NOT_FOUND');
+    if (open && draft.state !== 'open') fail('COMPANION_DRAFT_CLOSED');
+    return draft;
+  }
+  async createDraft(input) {
+    fields(input, ['requestId']); id(input.requestId);
+    return this.#transaction(() => {
+      this.#creationAvailable('draft-request', input.requestId);
+      let draft = this.#db.prepare('SELECT * FROM creation_drafts WHERE request_id=?').get(input.requestId);
+      if (!draft) {
+        const draftId = 'draft-' + randomUUID();
+        this.#db.prepare('INSERT INTO creation_drafts VALUES(?,?,?,?,NULL)').run(draftId, input.requestId, 'open', new Date().toISOString());
+        draft = this.#draft(draftId);
+      }
+      return { draftId: draft.id, state: draft.state, ...(draft.companion_id ? { companionId: draft.companion_id } : {}) };
+    });
+  }
+  async getDraft(draftId) {
+    const draft = this.#draft(draftId);
+    return { draftId: draft.id, state: draft.state, createdAt: draft.created_at,
+      ...(draft.companion_id ? { companionId: draft.companion_id } : {}),
+      uploads: draft.state === 'open' ? this.#db.prepare('SELECT data FROM draft_uploads WHERE draft_id=? ORDER BY rowid').all(draftId).map(row => JSON.parse(row.data)) : [] };
+  }
+  async putDraftUpload(draftId, input) {
+    const upload = uploadData(input);
+    if (!upload.mediaType.startsWith('image/') || upload.url !== `/droy/companions/creation-drafts/${draftId}/attachments/${upload.id}`)
+      fail('COMPANION_ATTACHMENT_SCOPE');
+    return this.#transaction(() => {
+      this.#draft(draftId, true);
+      const existing = this.#db.prepare('SELECT data FROM draft_uploads WHERE draft_id=? AND upload_id=?').get(draftId, upload.id);
+      if (existing) {
+        if (canonical(JSON.parse(existing.data)) !== canonical(upload)) fail('COMPANION_ATTACHMENT_CONFLICT');
+      } else this.#db.prepare('INSERT INTO draft_uploads VALUES(?,?,?)').run(draftId, upload.id, JSON.stringify(upload));
+      return upload;
+    });
+  }
+  async getDraftUpload(draftId, uploadId) {
+    this.#draft(draftId, true); id(uploadId);
+    const row = this.#db.prepare('SELECT data FROM draft_uploads WHERE draft_id=? AND upload_id=?').get(draftId, uploadId);
+    return row ? JSON.parse(row.data) : null;
+  }
+  async cancelDraft(draftId) {
+    return this.#transaction(() => {
+      const draft = this.#draft(draftId);
+      if (draft.state === 'committed') return { cancelled: false, state: 'committed', companionId: draft.companion_id };
+      this.#db.prepare("UPDATE creation_drafts SET state='cancelled' WHERE id=?").run(draftId);
+      return { cancelled: true, state: 'cancelled' };
+    });
+  }
+  async createProfile(input) {
+    fields(input, ['requestId', 'templateId', 'name', 'personalityOverride', 'model', 'settings', 'chatBackground', 'draftId', 'avatarUploadId']);
+    this.#ready(); id(input.requestId); this.#creationAvailable('profile-request', input.requestId);
+    assertTemplateId(input.templateId); normalizedName(input.name);
+    if (input.draftId !== undefined) id(input.draftId);
+    if (input.avatarUploadId !== undefined) { id(input.avatarUploadId); if (!input.draftId) fail('COMPANION_ATTACHMENT_SCOPE'); }
+    const preset = defaultProfiles().find(profile => profile.templateId === input.templateId);
+    const patch = profilePatch({ name: input.name, personalityOverride: input.personalityOverride === undefined ? '' : input.personalityOverride,
+      model: input.model === undefined ? null : input.model,
+      ...(input.settings === undefined ? {} : { settings: input.settings }),
+      ...(input.chatBackground === undefined ? {} : { chatBackground: input.chatBackground }) }, preset);
+    const content = { templateId: input.templateId, ...patch,
+      settings: patch.settings ?? clone(preset.settings), chatBackground: patch.chatBackground ?? clone(preset.chatBackground),
+      draftId: input.draftId ?? null, avatarUploadId: input.avatarUploadId ?? null };
+    if (content.chatBackground.type === 'upload') {
+      if (!content.draftId) fail('COMPANION_ATTACHMENT_SCOPE');
+      const url = `/droy/companions/creation-drafts/${content.draftId}/attachments/${content.chatBackground.id}`;
+      if (content.chatBackground.url !== undefined && content.chatBackground.url !== url) fail('COMPANION_ATTACHMENT_SCOPE');
+      content.chatBackground.url = url;
+    }
+    const fingerprint = createHash('sha256').update(canonical(content)).digest('hex');
+    return this.#transaction(() => {
+      this.#creationAvailable('profile-request', input.requestId);
+      const receipt = this.#db.prepare('SELECT * FROM creation_receipts WHERE request_id=?').get(input.requestId);
+      if (receipt) {
+        if (receipt.fingerprint !== fingerprint) fail('COMPANION_CREATION_CONFLICT');
+        return { requestId: input.requestId, replayed: true, profile: this.#profile(receipt.companion_id) };
+      }
+      if (content.draftId) this.#draft(content.draftId, true);
+      const profile = { ...profileFromTemplate(content.templateId, { name: content.name, model: content.model }),
+        personalityOverride: content.personalityOverride, settings: clone(content.settings), chatBackground: clone(content.chatBackground) };
+      const uploads = new Map();
+      const transferImage = uploadId => {
+        if (!uploads.has(uploadId)) {
+          const row = this.#db.prepare('SELECT data FROM draft_uploads WHERE draft_id=? AND upload_id=?').get(content.draftId, uploadId);
+          const upload = row ? JSON.parse(row.data) : null;
+          if (!upload?.mediaType?.startsWith('image/') || upload.url !== `/droy/companions/creation-drafts/${content.draftId}/attachments/${uploadId}`)
+            fail('COMPANION_ATTACHMENT_SCOPE');
+          uploads.set(uploadId, { ...upload, url: `/droy/companions/${profile.id}/attachments/${uploadId}` });
+        }
+        return uploads.get(uploadId);
+      };
+      if (content.avatarUploadId) profile.avatar = transferImage(content.avatarUploadId).url;
+      if (content.chatBackground.type === 'upload') profile.chatBackground.url = transferImage(content.chatBackground.id).url;
+      this.#db.prepare('INSERT INTO profiles VALUES(?,?)').run(profile.id, JSON.stringify(profile));
+      this.#db.prepare('INSERT INTO read_positions VALUES(?,0)').run(profile.id);
+      this.#putNameClaims(profile);
+      for (const upload of uploads.values()) {
+        this.#saveUpload(profile.id, upload);
+        this.#db.prepare('DELETE FROM draft_uploads WHERE draft_id=? AND upload_id=?').run(content.draftId, upload.id);
+      }
+      this.#db.prepare('INSERT INTO creation_receipts VALUES(?,?,?)').run(input.requestId, fingerprint, profile.id);
+      if (content.draftId) this.#db.prepare("UPDATE creation_drafts SET state='committed',companion_id=? WHERE id=?").run(profile.id, content.draftId);
+      return { requestId: input.requestId, replayed: false, profile: clone(profile) };
+    });
+  }
+  async getCreation(requestId) {
+    this.#ready(); id(requestId);
+    this.#creationAvailable('profile-request', requestId);
+    const receipt = this.#db.prepare('SELECT companion_id FROM creation_receipts WHERE request_id=?').get(requestId);
+    return receipt ? { requestId, profile: this.#profile(receipt.companion_id) } : null;
+  }
   async getState(companionId) {
     this.#profile(companionId);
     const row = this.#db.prepare('SELECT data FROM companion_state WHERE companion_id=?').get(companionId);
@@ -327,11 +507,11 @@ export class CompanionStore {
   }
   async profiles() {
     this.#ready();
-    return defaultProfiles().map(({ id: companionId }) => {
-      const profile = this.#profile(companionId);
+    return this.#db.prepare('SELECT data FROM profiles ORDER BY rowid').all().map(row => {
+      const profile = JSON.parse(row.data), companionId = profile.id;
       const last = this.#db.prepare("SELECT data FROM messages WHERE companion_id=? AND json_extract(data,'$.role') IN ('user','assistant') ORDER BY seq DESC LIMIT 1").get(companionId);
       const unread = this.#db.prepare("SELECT COUNT(*) count FROM messages WHERE companion_id=? AND seq>(SELECT seq FROM read_positions WHERE companion_id=?) AND json_extract(data,'$.role')='assistant'").get(companionId, companionId);
-      const conversation = this.#conversation(companionId), lastMessage = last ? JSON.parse(last.data) : null;
+      const conversation = this.#conversation(companionId), lastMessage = last ? companionVisibleMessage(JSON.parse(last.data)) : null;
       return { ...profile, lastMessage, lastActivityAt: lastMessage?.createdAt ?? null, ...conversation, unreadCount: unread.count };
     });
   }
@@ -359,8 +539,17 @@ export class CompanionStore {
     });
   }
   async updateProfile(companionId, patch) {
+    return this.#transaction(() => {
     const current = this.#profile(companionId);
     const next = { ...current, ...profilePatch(patch, current), ...(patch.name !== undefined ? { nameCustomized: true } : {}), updatedAt: new Date().toISOString() };
+    if (patch.avatar !== undefined && patch.avatar !== current.avatar && patch.avatar !== null
+      && !defaultProfiles().some(profile => profile.avatar === next.avatar)) {
+      const uploadId = String(next.avatar).split('/').at(-1);
+      const row = this.#db.prepare('SELECT data FROM companion_uploads WHERE companion_id=? AND upload_id=?').get(companionId, uploadId);
+      const upload = row ? JSON.parse(row.data) : null;
+      if (!upload?.mediaType?.startsWith('image/') || next.avatar !== `/droy/companions/${companionId}/attachments/${uploadId}` || upload.url !== next.avatar)
+        fail('COMPANION_ATTACHMENT_SCOPE');
+    }
     if (patch.chatBackground !== undefined && next.chatBackground.type === 'upload') {
       const row = this.#db.prepare('SELECT data FROM companion_uploads WHERE companion_id=? AND upload_id=?').get(companionId, next.chatBackground.id);
       const upload = row ? JSON.parse(row.data) : null;
@@ -368,16 +557,23 @@ export class CompanionStore {
         fail('COMPANION_ATTACHMENT_SCOPE');
       next.chatBackground.url = upload.url;
     }
+    if (patch.name !== undefined) this.#putNameClaims(next, { previous: current });
     this.#db.prepare('UPDATE profiles SET data=? WHERE id=?').run(JSON.stringify(next), companionId);
     return clone(next);
+    });
   }
   async getUserProfile() {
     this.#ready();
-    return JSON.parse(this.#db.prepare('SELECT data FROM user_profile WHERE singleton=1').get().data);
+    return { ...DEFAULT_USER_PROFILE, ...JSON.parse(this.#db.prepare('SELECT data FROM user_profile WHERE singleton=1').get().data) };
   }
   async updateUserProfile(patch) {
-    this.#ready(); fields(patch, ['name', 'avatarUrl']);
-    const next = { ...JSON.parse(this.#db.prepare('SELECT data FROM user_profile WHERE singleton=1').get().data), ...patch };
+    this.#ready(); fields(patch, ['name', 'avatarUrl', 'bio']);
+    const next = { ...DEFAULT_USER_PROFILE, ...JSON.parse(this.#db.prepare('SELECT data FROM user_profile WHERE singleton=1').get().data), ...patch };
+    if (patch.bio !== undefined) {
+      text(patch.bio, 8000);
+      if ([...patch.bio].length > 2000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(patch.bio)) fail('COMPANION_INVALID_INPUT');
+      next.bio = patch.bio.trim();
+    }
     if (patch.name !== undefined) {
       text(patch.name, 320, false);
       if ([...patch.name.trim()].length > 80 || /[\u0000-\u001f\u007f]/u.test(patch.name)) fail('COMPANION_INVALID_INPUT');
@@ -436,13 +632,14 @@ export class CompanionStore {
     return next;
   }
   async bindSession(companionId, binding) {
-    const profile = this.#profile(companionId);
+    this.#profile(companionId);
     fields(binding, ['sessionId', 'workspaceId', 'kind', 'taskId']);
     id(binding.sessionId); id(binding.workspaceId);
     if (!['chat', 'work'].includes(binding.kind)) fail('COMPANION_INVALID_INPUT');
     if (binding.taskId !== undefined && binding.taskId !== null) id(binding.taskId);
     const next = { companionId, sessionId: binding.sessionId, workspaceId: binding.workspaceId, kind: binding.kind, taskId: binding.taskId ?? null };
     this.#transaction(() => {
+      const profile = this.#profile(companionId);
       const existing = this.#db.prepare('SELECT * FROM sessions WHERE session_id=?').get(binding.sessionId);
       if (existing && (existing.companion_id !== companionId || existing.kind !== binding.kind || existing.workspace_id !== binding.workspaceId || existing.task_id !== next.taskId)) fail('COMPANION_SESSION_CONFLICT');
       this.#db.prepare('INSERT OR IGNORE INTO sessions VALUES(?,?,?,?,?)').run(binding.sessionId, companionId, binding.kind, binding.workspaceId, next.taskId);
@@ -468,7 +665,7 @@ export class CompanionStore {
     const row = this.#db.prepare('SELECT data FROM messages WHERE companion_id=? AND message_id=?').get(companionId, messageId);
     return row ? JSON.parse(row.data) : null;
   }
-  async getMessage(companionId, messageId) { return this.#message(companionId, messageId); }
+  async getMessage(companionId, messageId) { return companionVisibleMessage(this.#message(companionId, messageId)); }
   async replyPreviews(companionId, messageIds) {
     this.#profile(companionId);
     if (!Array.isArray(messageIds) || messageIds.length > 200) fail('COMPANION_INVALID_INPUT');
@@ -479,7 +676,7 @@ export class CompanionStore {
     const forgotten = new Set(state.forgottenMessageIds ?? []), through = Number((state.forgottenThrough ?? 'seq:0').slice(4));
     const rows = this.#db.prepare('SELECT seq,data FROM messages WHERE companion_id=? AND message_id IN (' + ids.map(() => '?').join(',') + ')').all(companionId, ...ids);
     return Object.fromEntries(rows.flatMap(row => {
-      const message = JSON.parse(row.data);
+      const message = companionVisibleMessage(JSON.parse(row.data));
       if (row.seq <= through || forgotten.has(message.id) || message.contextExcluded || message.role === 'system' || message.type === 'task') return [];
       return [[message.id, { id: message.id, text: [...(message.text || message.transcript || '')].slice(0, 180).join(''), type: message.type }]];
     }));
@@ -534,7 +731,7 @@ export class CompanionStore {
       if (!Number.isSafeInteger(sequence) || sequence < 0) fail('COMPANION_INVALID_INPUT');
       const rows = this.#db.prepare('SELECT seq,data FROM messages WHERE companion_id=? AND seq>? ORDER BY seq LIMIT ?').all(companionId, sequence, limit + 1);
       const selected = rows.slice(0, limit);
-      return { messages: selected.map(row => JSON.parse(row.data)), hasMore: rows.length > limit,
+      return { messages: selected.map(row => companionVisibleMessage(JSON.parse(row.data))), hasMore: rows.length > limit,
         nextBefore: null, nextAfter: `seq:${selected.at(-1)?.seq ?? sequence}` };
     }
     let sequence = Number.MAX_SAFE_INTEGER;
@@ -551,7 +748,7 @@ export class CompanionStore {
     }
     const rows = this.#db.prepare('SELECT seq,data FROM messages WHERE companion_id=? AND seq<? ORDER BY seq DESC LIMIT ?').all(companionId, sequence, limit + 1);
     const hasMore = rows.length > limit;
-    const messages = rows.slice(0, limit).map(row => JSON.parse(row.data)).reverse();
+    const messages = rows.slice(0, limit).map(row => companionVisibleMessage(JSON.parse(row.data))).reverse();
     return { messages, hasMore, nextBefore: hasMore ? `seq:${rows[Math.min(limit, rows.length) - 1].seq}` : null,
       nextAfter: `seq:${rows[0]?.seq ?? 0}` };
   }

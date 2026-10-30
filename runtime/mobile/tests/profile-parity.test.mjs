@@ -139,3 +139,21 @@ test('upstream capabilities remain inherited while new built-in modes require an
   assert.deepEqual(generated.find(row=>row.id==='future-capability'),future.at(-2));
   assert.equal(generated.find(row=>row.id==='preset-future').disabled,true);
 });
+
+
+test('mobile deployment disables additional DeepSeek session upload and keeps local history persistence', () => {
+  assert.equal(byId.get('session-log-deepseek').config.enabled, false);
+  assert.notEqual(byId.get('session-persistence-jsonl').disabled, true);
+  assert.equal(byId.get('session-persistence-jsonl').config.compression, 'none');
+});
+
+
+test('installed DeepSeek extension omits dsh_session_log with the deployed disabled flag', async () => {
+  const plugin = await import('../../dsh/node_modules/@deepseek-ai/dsh-session-log-deepseek/lib/index.js');
+  let extension;
+  plugin.apply({ deepseekLlmApiExtensions: { register(name, value) {
+    assert.equal(name, 'dsh_session_log'); extension = value;
+  } }, sessions: { get() { throw new Error('Disabled upload must not read local history'); } } },
+  { enabled: { get: () => byId.get('session-log-deepseek').config.enabled }, maxBytes: 16384 });
+  assert.equal(extension.prepare({ sessionId: 'synthetic-session' }), undefined);
+});

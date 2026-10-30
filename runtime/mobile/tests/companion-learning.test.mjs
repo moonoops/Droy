@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerHooks } from 'node:module';
 import { CompanionStore } from '../companions/store.mjs';
+import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { CompanionLearning, learningProtocols, rankMemoryCandidates } from '../companions/learning.mjs';
 import { dialoguePrompts } from '../companions/dialogue-prompts.mjs';
 
@@ -19,7 +20,7 @@ const emptyLearning = () => ({impressions:[],expressions:[],jargon:[],memories:[
 
 async function fixture(t,{respond,options={},locale='en'}={}) {
   const directory=await mkdtemp(join(tmpdir(),'droy-companion-learning-'));
-  const store=await CompanionStore.open({directory}),memories=new Map(),calls=[];
+  const store=await openLegacyCompanionStore({directory}),memories=new Map(),calls=[];
   await store.updateProfile('kaka',{model:{provider:'fixture-a',model:'local-a'}});
   await store.updateProfile('maimai',{model:{provider:'fixture-b',model:'local-b'}});
   let memoryAccesses=0;

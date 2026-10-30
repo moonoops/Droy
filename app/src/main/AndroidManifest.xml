@@ -65,13 +65,17 @@
         <!-- Keep the portrait policy when targeting Android 16, including large displays. -->
         <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
         <property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false" />
-        <activity android:name=".MainActivity" android:screenOrientation="portrait" android:theme="@style/DroyChatTheme" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden" android:enableOnBackInvokedCallback="true">
+        <activity android:name=".TestPageActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".NativeAppActivity" android:screenOrientation="portrait" android:exported="true" android:launchMode="singleTask"
+            android:theme="@style/DroyChatTheme" android:windowSoftInputMode="adjustResize"
+            android:enableOnBackInvokedCallback="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".TestPageActivity" android:screenOrientation="portrait" android:exported="false" />
+        <!-- Existing shortcuts and pending intents keep their component, but open the native UI. -->
+        <activity-alias android:name=".MainActivity" android:exported="true" android:targetActivity=".NativeAppActivity" />
         <activity android:name=".AudioPermissionActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
         <activity android:name=".MemoryPermissionActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
         <activity android:name=".NfcReaderActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />

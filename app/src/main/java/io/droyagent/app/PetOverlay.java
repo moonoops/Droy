@@ -111,7 +111,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
             JSONObject current = ToolProgress.current(context);
             boolean sameTask = taskId.isEmpty() || taskId.equals(current.optString("taskId"));
             boolean available = RuntimeService.hasActiveSession() && sameTask && overlay.permitted() && !overlay.locked()
-                && !"off".equals(displayMode(context, overlay.appVisible)) && !overlay.showingConversation();
+                && enabled(context) && !"off".equals(displayMode(context, overlay.appVisible)) && !overlay.showingConversation();
             return new JSONObject().put("petAvailable", available).put("conversationVisible", overlay.showingConversation());
         });
     }
@@ -186,7 +186,8 @@ final class PetOverlay implements OverlayInteraction.Listener {
             PetDisplayPolicy.initial(internal, preferences.getBoolean("petEnabled", true)));
         return PetDisplayPolicy.valid(value) ? value : "off";
     }
-    static boolean enabled(Context context) { return !"off".equals(displayMode(context, false)) || !"off".equals(displayMode(context, true)); }
+    static boolean enabled(Context context) { return context.getSharedPreferences("product", Context.MODE_PRIVATE).getBoolean("petEnabled", true)
+        && (!"off".equals(displayMode(context, false)) || !"off".equals(displayMode(context, true))); }
     static String loadError() { return PetPackage.error(); }
     static void select(Context context, String id) throws Exception {
         PetPackage candidate = PetPackage.load(context, id);
@@ -195,16 +196,16 @@ final class PetOverlay implements OverlayInteraction.Listener {
         PetPackage.use(candidate);
         MAIN.post(() -> { PetOverlay overlay = get(context); overlay.removeWindows(); overlay.displayedMessageKey = ""; overlay.refreshNow(); });
     }
-    static String name(Context context) { return context.getSharedPreferences("product", Context.MODE_PRIVATE).getString("petName", "Droy"); }
+    static String name(Context context) { return NativeLocale.text("宠物", "Pet"); }
     private Activity activity() {
         Activity activity = foregroundActivity.get();
         return appVisible && activity != null && !activity.isFinishing() && !activity.isDestroyed()
             && activity.getWindow().getDecorView().getWindowToken() != null ? activity : null;
     }
     private boolean permitted() { return appVisible ? activity() != null : Settings.canDrawOverlays(context); }
-    private String modeKey() { return displayMode(context, false) + ":" + displayMode(context, true); }
+    private String modeKey() { return preferences.getBoolean("petEnabled", true) + ":" + displayMode(context, false) + ":" + displayMode(context, true); }
     private boolean shouldDisplay() {
-        return displayPolicy.visible(displayMode(context, appVisible), snapshot.optBoolean("active"), pending() != null,
+        return enabled(context) && displayPolicy.visible(displayMode(context, appVisible), snapshot.optBoolean("active"), pending() != null,
             SystemClock.elapsedRealtime() < previewUntil, SystemClock.elapsedRealtime());
     }
     private boolean locked() { return context.getSystemService(KeyguardManager.class).isKeyguardLocked(); }
@@ -276,7 +277,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
             OverlayInteraction.addListener(this);
         }
         if (locked()) { removeWindows(); return; }
-        if (!permitted() || "off".equals(displayMode(context, appVisible))) {
+        if (!enabled(context) || !permitted() || "off".equals(displayMode(context, appVisible))) {
             removeWindows();
             JSONObject question = pending();
             if (question != null && !showingConversation() && clearanceDepth == 0 && !petHidden && !bubbleHidden && !busy) {

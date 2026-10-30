@@ -1,0 +1,4 @@
+<resources>
+    <string name="native_review_schedule_request">替我创建一个定时任务：</string>
+    <string name="native_review_unread">%1$d 条未读</string>
+</resources>

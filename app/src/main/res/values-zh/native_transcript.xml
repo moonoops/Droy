@@ -1,0 +1,8 @@
+<resources>
+    <string name="native_transcript_title">子代理会话</string>
+    <string name="native_transcript_read_only">只读</string>
+    <string name="native_transcript_empty">暂无消息</string>
+    <string name="native_transcript_unavailable">此会话已不可用。</string>
+    <string name="native_transcript_identity">无法打开此子代理会话。</string>
+    <string name="native_transcript_failed">未能加载此会话。</string>
+</resources>

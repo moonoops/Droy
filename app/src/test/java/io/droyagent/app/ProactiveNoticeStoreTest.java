@@ -35,4 +35,17 @@ public class ProactiveNoticeStoreTest {
         snapshot.getJSONObject(0).put("status", "changed");
         assertEquals("published", store.find("id-3").getString("status"));
     }
+    @Test public void companionRetirementRemovesOnlyItsMessageReceipts() throws Exception {
+        ProactiveNoticeStore store = new ProactiveNoticeStore(new JSONArray()
+            .put(new JSONObject().put("noticeId", "a").put("channel", "companion").put("companionId", "retiring"))
+            .put(new JSONObject().put("noticeId", "b").put("channel", "companion").put("companionId", "other"))
+            .put(new JSONObject().put("noticeId", "task").put("channel", "system").put("companionId", "retiring")));
+        store.removeCompanion("retiring");
+        assertNull(store.find("a"));
+        assertNotNull(store.find("b"));
+        assertNotNull(store.find("task"));
+        store.removeCompanion("retiring");
+        assertEquals(2, store.snapshot().length());
+    }
+
 }

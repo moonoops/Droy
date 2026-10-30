@@ -25,13 +25,13 @@ test('paired prompts separate reply anchors from sparse visible quotes and prese
     const current=context();current.currentTime='2026-10-28T02:00:00Z';current.userProfile={name:'Fictional Lin'};
     current.messages[1].quoteReply=false;
     let request=buildReplyerRequest({profile:p,locale,context:current,args:{msg_id:'u2'}});
-    assert.match(texts(request)[1],/reply_target=u1/);assert.doesNotMatch(texts(request)[1],/quote=u1/);
+    assert.doesNotMatch(texts(request)[1],/msg_id|reply_target|quote=/);assert.match(request.system,/"replyTo":"u1"/);assert.match(request.system,/"quoteReply":false/);
     assert.match(request.system,/Fictional Lin/);assert.match(request.system,/原样保留的自定义性格 \/ custom persona/);
     assert.match(texts(request).at(-1),/2026-10-28T10:00:00\+08:00/);
     assert.match(texts(request).at(-1),/Asia\/Shanghai, UTC\+08:00/);
     current.messages[1].quoteReply=true;
     request=buildReplyerRequest({profile:p,locale,context:current,args:{msg_id:'u2'}});
-    assert.match(texts(request)[1],/quote=u1/);
+    assert.match(request.system,/"quoteReply":true/);assert.equal(texts(request)[1],'你说周末去爬山');
   }
 });
 
@@ -92,7 +92,7 @@ test('Replyer history remains user/assistant messages and reference, target and 
   const request = buildReplyerRequest({ profile: profile(), context: context(), args: { msg_id: 'u2', reply_reference: '理解改天的打算，可以自然接话', reply_style: '简短表达' }, expressions: '用“那就”自然接话' });
   assert.deepEqual(request.messages.slice(0, 3).map(message => message.role), ['user', 'assistant', 'user']);
   assert.match(texts(request)[0], /^\[msg_id=u1 .*\]\n我昨天说的那个计划$/);
-  assert.match(texts(request)[1], /^\[msg_id=a1 reply_target=u1\]\n你说周末去爬山$/);
+  assert.equal(texts(request)[1], '你说周末去爬山');
   assert.match(texts(request)[3], /表达习惯/);
   assert.match(texts(request)[4], /【回复信息参考】/);
   assert.match(texts(request)[5], /msg_id 为 u2/);
@@ -209,5 +209,26 @@ test('completed and failed task IDs are internal result anchors, never fabricate
     assert.match(request.system, locale === 'zh' ? /本次回复在交付工作结果/ : /This reply delivers a work result/);
     if (state === 'failed') assert.match(all, /WEATHER_SERVICE_UNAVAILABLE/);
     assert.throws(() => buildReplyerRequest({ profile: profile(), locale, context: current, args: { msg_id: 'unknown-task' }, options: { replyerRetroPrompt } }), /COMPANION_REPLY_TARGET_NOT_FOUND/);
+  }
+});
+
+test('voice messages are identified to Replyer without inventing an empty transcript', () => {
+  for (const locale of ['zh', 'en']) {
+    for (const text of ['', 'Fictional recognized words']) {
+      const message = { id: 'voice-source', role: 'user', type: 'voice', text, voice: { transcriptionState: text ? 'ready' : 'failed' } };
+      const request = buildReplyerRequest({ profile: profile(), locale, context: { ...context(), messages: [message] }, args: { msg_id: message.id } });
+      assert.match(texts(request)[0], locale === 'zh' ? /用户发送的是语音消息/ : /user sent a voice message/);
+      assert.match(texts(request)[0], locale === 'zh' ? /不要猜测录音内容/ : /Do not invent the recording content/);
+      if (text) assert.ok(texts(request)[0].endsWith(text));
+      assert.equal(message.text, text);
+    }
+  }
+});
+
+test('reply model receives current user biography in both locales', () => {
+  for (const locale of ['zh','en']) {
+    const current=context();current.userProfile={name:'Fictional Lin',bio:'Fictional architect'};
+    const request=buildReplyerRequest({profile:profile(),locale,context:current,args:{msg_id:'u2'}});
+    assert.match(request.system,/Fictional Lin/);assert.match(request.system,/Fictional architect/);
   }
 });

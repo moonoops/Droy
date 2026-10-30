@@ -30,7 +30,9 @@ final class ProductPermissions {
     }
 
     static void setStopped(Context context, boolean stopped) {
-        if (!preferences(context).edit().putBoolean(STOPPED, stopped).commit())
+        SharedPreferences.Editor editor = preferences(context).edit().putBoolean(STOPPED, stopped);
+        if (stopped) editor.putBoolean("nativePermissionExplicitPause", true);
+        if (!editor.commit())
             throw new IllegalStateException(io.droyagent.app.NativeLocale.text("工具运行设置保存失败", "Tool runtime setting could not be saved"));
     }
 

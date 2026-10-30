@@ -156,6 +156,22 @@ try {
  assert.match(JSON.stringify(locale),/"preference":"zh"/);
  for(const path of ['/','/api','/droy/preferences','/droy/ready','/droy/shutdown','/droy/notify/plugin','/assets/unknown.js'])assert.equal((await fetch(`http://127.0.0.1:${port}${path}`)).status,401);
  const cookie=`droy_session=${token}`;
+ const nativeDeadline=Date.now()+5000;while(!ctx.get('droyNativeApi')&&Date.now()<nativeDeadline)await new Promise(resolve=>setTimeout(resolve,10));
+ assert.ok(ctx.get('droyNativeApi'),'native workbench API must mount against the actual Host services');
+ for(const path of ['/droy/native/models','/droy/native/workspaces','/droy/native/session/list'])
+  assert.equal((await fetch(`http://127.0.0.1:${port}${path}`)).status,401,'native routes retain the Host authentication guard');
+ const nativeModels=await fetch(`http://127.0.0.1:${port}/droy/native/models`,{headers:{cookie}});
+ assert.equal(nativeModels.status,200);const nativeCatalog=await nativeModels.json();assert.equal(nativeCatalog.ok,true);
+ assert.ok(Array.isArray(nativeCatalog.result.groups));assert.ok(Array.isArray(nativeCatalog.result.routableProviders));assert.ok(Array.isArray(nativeCatalog.result.failures));
+ assert.equal(typeof nativeCatalog.result.default.provider,'string');assert.equal(typeof nativeCatalog.result.default.model,'string');
+ const nativeWorkspaces=await fetch(`http://127.0.0.1:${port}/droy/native/workspaces`,{headers:{cookie}});
+ assert.equal(nativeWorkspaces.status,200);const nativeWorkspaceState=await nativeWorkspaces.json();assert.equal(nativeWorkspaceState.ok,true);
+ assert.equal(nativeWorkspaceState.result.defaultWorkspaceId,initial[0].id);
+ assert.ok(nativeWorkspaceState.result.items.some(item=>item.workspaceId===initial[0].id&&item.path===defaultPath));
+ assert.ok(Array.isArray(nativeWorkspaceState.result.archivedSessionIds));assert.ok(Array.isArray(nativeWorkspaceState.result.pinnedSessionIds));
+ const nativeSessions=await fetch(`http://127.0.0.1:${port}/droy/native/session/list`,{method:'POST',headers:{cookie,'content-type':'application/json'},body:'{}'});
+ assert.equal(nativeSessions.status,200);const nativeSessionState=await nativeSessions.json();assert.equal(nativeSessionState.ok,true);assert.ok(Array.isArray(nativeSessionState.result.items));
+ for(const session of nativeSessionState.result.items){assert.equal(typeof session.sessionId,'string');assert.equal(typeof session.running,'boolean');assert.equal(typeof session.agentAvailable,'boolean');}
  const companionRoot=await fetch(`http://127.0.0.1:${port}/droy/companions`,{headers:{cookie}});assert.equal(companionRoot.status,200);assert.equal((await companionRoot.json()).defaultWorkspaceId,initial[0].id);
  const ready=await fetch(`http://127.0.0.1:${port}/droy/ready`,{headers:{cookie}});assert.equal(ready.status,200);const readiness=await ready.json();assert.equal(readiness.ready,true);assert.equal(readiness.dshVersion,expectedDsh);assert.equal(readiness.mobileVersion,expectedMobile);
  const login=await fetch(`http://127.0.0.1:${port}/?token=${token}`,{headers:{cookie},redirect:'manual'});

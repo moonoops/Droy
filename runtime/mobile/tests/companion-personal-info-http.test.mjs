@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { CompanionStore } from '../companions/store.mjs';
+import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { dialoguePrompts } from '../companions/dialogue-prompts.mjs';
 import { encodePng } from '../png.mjs';
 
@@ -27,13 +28,14 @@ const image = () => ({ name: 'fictional.png', mediaType: 'image/png', base64: en
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'droy-personal-info-http-'));
-  const store = await CompanionStore.open({ directory: join(directory, 'companions') }), context = new Context();
+  const store = await openLegacyCompanionStore({ directory: join(directory, 'companions') }), context = new Context();
   await context.plugin(MobileAttachments, { dshHome: join(directory, 'host') });
   let locale = 'en';
   const events = [], ctx = { droyInitialization:{defaultWorkspaceId:'fictional-default-workspace-id'}, attachments: context.attachments, logger: { warn() {} },
     sessionController: { modelCatalog: async () => ({ groups: [] }) }, workspaceRegistry: { get() {} },
     settings: { describe: () => [{ ns: 'locale', value: { preference: locale } }] } };
-  const runtime = { emit: (...args) => events.push(args), state: () => ({ phase: 'idle' }), copy: () => ({ generationFailed: 'Fictional failure' }) };
+  const runtime = { emit: (...args) => events.push(args), state: () => ({ phase: 'idle' }),
+    status: () => ({ phase: 'idle', chatExecution: { quiescent: true, cancelRequested: false } }), copy: () => ({ generationFailed: 'Fictional failure' }) };
   const previousToken = process.env.DROY_WEB_TOKEN; process.env.DROY_WEB_TOKEN = token;
   const handler = createCompanionHandler({ ctx, runtime, store });
   const server = createServer((req, res) => handler(req, res).catch(error => { res.writeHead(500); res.end(String(error)); }));
@@ -51,11 +53,23 @@ async function fixture(t) {
   return { store, request, api, events, url, runtime, ctx, setLocale: value => { locale = value; } };
 }
 
+test('effective companion models preserve whether they follow the global default', async t => {
+  const f = await fixture(t);
+  f.ctx.agentDefaultModel = { currentSelection: () => ({ provider: 'fixture', model: 'global' }) };
+  const inherited = (await f.api()).value.companions.find(item => item.id === 'kaka');
+  assert.equal(inherited.modelInherited, true);
+  assert.deepEqual(inherited.model, { provider: 'fixture', model: 'global' });
+  await f.store.updateProfile('kaka', { model: { provider: 'fixture', model: 'explicit' } });
+  const explicit = (await f.api()).value.companions.find(item => item.id === 'kaka');
+  assert.equal(explicit.modelInherited, false);
+  assert.deepEqual(explicit.model, { provider: 'fixture', model: 'explicit' });
+});
+
 test('user avatars have authenticated product ownership and cannot be sent as companion attachments', async t => {
   const f = await fixture(t);
   assert.equal((await fetch(f.url + '/user-profile')).status, 401);
   const initial = await f.api();
-  assert.deepEqual(initial.value.userProfile, { name: '', avatarUrl: '/droy/companions/assets/user-default.png' });
+  assert.deepEqual(initial.value.userProfile, { name: '', bio: '', avatarUrl: '/droy/companions/assets/user-default.png' });
   const uploaded = await f.api('/user-profile/uploads', 'POST', image());
   assert.equal(uploaded.status, 201);
   assert.match(uploaded.value.url, /^\/droy\/companions\/user-profile\/attachments\//);

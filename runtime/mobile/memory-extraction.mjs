@@ -207,5 +207,7 @@ export function createDshMemoryExtraction({ ctx, privacy, settings,
     await Promise.allSettled([...pending]);
   }
   return { extraction: { resolveRoute, authorize, readSource, countTokens, generate, language: () => resolveMobileLocale(ctx) },
-    subscribe, enqueueCompletedTurn, dispose };
+    subscribe, enqueueCompletedTurn, dispose,
+    pendingWork: () => Object.freeze([...pending]),
+    async whenIdle() { while (pending.size) await Promise.allSettled([...pending]); } };
 }

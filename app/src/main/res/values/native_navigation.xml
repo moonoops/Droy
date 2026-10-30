@@ -1,0 +1,10 @@
+<resources>
+    <string name="native_external_invalid">Unable to open this target.</string>
+    <string name="native_external_storage">Open request could not be saved. Retry.</string>
+    <string name="native_external_missing">This content is no longer available.</string>
+    <string name="native_external_ended">This request has ended.</string>
+    <string name="native_external_denied">This conversation is not accessible.</string>
+    <string name="native_external_unsupported">This target cannot be opened yet.</string>
+    <string name="native_external_waiting">Content is not ready. Retry shortly.</string>
+    <string name="native_external_failed">Unable to open. Retry.</string>
+</resources>

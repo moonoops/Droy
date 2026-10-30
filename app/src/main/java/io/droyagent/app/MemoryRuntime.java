@@ -67,7 +67,7 @@ final class MemoryRuntime {
         && ProductPermissions.allowed(ProductPermissions.preferences(context),"allowRoot"); }
     JSONObject settings() throws Exception {
         return new JSONObject().put("enabled", preferences.getBoolean("enabled", false))
-            .put("recallEnabled", preferences.getBoolean("recallEnabled", true))
+            .put("recallEnabled", true)
             .put("automaticExtraction", preferences.getBoolean("automaticExtraction", false))
             .put("privacyEverActivated", preferences.getBoolean("privacyEverActivated", false));
     }
@@ -113,13 +113,17 @@ final class MemoryRuntime {
             case "host-stop":
                 fields(input, "operation"); invalidate("MEMORY_HOST_STOPPED"); return status();
             case "initialization.prepare": fields(input, "operation"); return prepareInitialization();
+            case "authorization.inspect":
+                fields(input, "operation");
+                return new JSONObject().put("available", protectionRequired() && preferences.getBoolean("memoryStoreInitializedIntent", false))
+                    .put("host", hostConfiguration());
             default: throw new IllegalArgumentException("MEMORY_UNKNOWN_OPERATION");
         }
     }
     private JSONObject saveSettings(JSONObject patch) throws Exception {
         fields(patch, "enabled", "recallEnabled", "automaticExtraction");
         boolean enabling = bool(patch, "enabled", preferences.getBoolean("enabled", false));
-        boolean recall = bool(patch, "recallEnabled", preferences.getBoolean("recallEnabled", true));
+        boolean recall = true;
         boolean extraction = bool(patch, "automaticExtraction", preferences.getBoolean("automaticExtraction", false));
         if (patch.has("enabled") && enabling) checkRoot();
         synchronized (lock) {
@@ -157,8 +161,6 @@ final class MemoryRuntime {
                 qualified = false; hostReady = false; reason = "MEMORY_RESTART_REQUIRED";
             }
             history.stop("protection_restart");
-            main.post(() -> { Activity activity; synchronized (lock) { activity = resumedActivity.get(); }
-                if (activity != null && !activity.isDestroyed()) activity.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE); });
             RuntimeService.restartForMemoryProtection(context);
             return new JSONObject().put("restartRequired", true).put("reason", "MEMORY_RESTART_REQUIRED");
         }
@@ -256,7 +258,7 @@ final class MemoryRuntime {
     }
     void activityResumed(Activity activity) {
         synchronized (lock) { resumedActivity = new WeakReference<>(activity); }
-        if (protectionRequired()) activity.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+        activity.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
         history.refreshAuthorization();
     }
     boolean ownUiVisible() { synchronized (lock) { Activity activity = resumedActivity.get(); return protectionRequired() && activity != null && !activity.isFinishing() && !activity.isDestroyed(); } }

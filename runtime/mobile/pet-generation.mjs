@@ -132,9 +132,14 @@ const personaSourceKey = pet => JSON.stringify({ appearance: pet.description, pe
 export function createPetCreationService({ home, generator, personaGenerator, reportError = () => {},
   getLocale = () => process.env.DROY_LOCALE,
   defaultLogoFile = new URL('./assets/brand-logo.png', import.meta.url) }) {
-  const root = home ? join(home, 'pets') : null, jobs = new Map();
+  const root = home ? join(home, 'pets') : null, jobs = new Map(), pending = new Set();
   let disposed = false;
   let mutation = Promise.resolve();
+  const track = operation => {
+    pending.add(operation);
+    operation.then(() => pending.delete(operation), () => pending.delete(operation));
+    return operation;
+  };
 
   async function availability() {
     const image = await generator.availability();
@@ -231,7 +236,7 @@ export function createPetCreationService({ home, generator, personaGenerator, re
     try { await save(pet); }
     catch (error) { jobs.delete(pet.id); throw error; }
     const initial = view(pet);
-    void (async () => {
+    track((async () => {
       try {
         const path = await directory(pet.id);
         if (mode === 'reference') {
@@ -300,7 +305,7 @@ export function createPetCreationService({ home, generator, personaGenerator, re
         try { await save(pet); } catch { reportError('DROY_PET_DRAFT_SAVE_FAILED'); }
         reportError('DROY_PET_GENERATION_FAILED');
       } finally { jobs.delete(pet.id); }
-    })();
+    })());
     return initial;
   }
 
@@ -388,12 +393,13 @@ export function createPetCreationService({ home, generator, personaGenerator, re
       return { body: bytes, type: 'image/png' };
     },
     dispose() { disposed = true; for (const controller of jobs.values()) controller.abort(); },
-    async waitForIdle() { while (jobs.size) await new Promise(resolve => setTimeout(resolve, 10)); },
+    pendingWork: () => Object.freeze([...pending]),
+    async waitForIdle() { while (pending.size) await Promise.allSettled([...pending]); },
   };
   for (const name of ['create', 'generate', 'retry']) {
     const run = service[name];
     service[name] = input => {
-      const result = mutation.then(() => run(input));
+      const result = track(mutation.then(() => run(input)));
       mutation = result.catch(() => {});
       return result;
     };

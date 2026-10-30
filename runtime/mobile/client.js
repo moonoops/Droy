@@ -2035,8 +2035,8 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         companionWorkspaceIds() { return companionUi.state.getSnapshot().companions.map(row=>row.workspaceId).filter(Boolean); },
         defaultWorkspaceId() { return companionUi.state.getSnapshot().defaultWorkspaceId ?? null; },
         async openCompanion(id) {
-          if(!['kaka','maimai'].includes(id))throw new Error('COMPANION_NOT_FOUND');
           initialInteraction=true;await companionUi.initialize();
+          if(!companionUi.state.getSnapshot().companions.some(row=>row.id===id))throw new Error('COMPANION_NOT_FOUND');
           closeTopModal(doc);
           if(doc.querySelector('[data-droy-drawer-open="true"]'))ctx.layout.toggleSidebar();
           companionUi.open(id);return {companionId:id};

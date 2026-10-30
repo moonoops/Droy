@@ -6,6 +6,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompanionStore } from '../companions/store.mjs';
+import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { readSharedAttachment, replyAttachment, stickerCatalog } from '../companions/media.mjs';
 import { encodePng } from '../png.mjs';
 
@@ -25,7 +26,7 @@ const code = expected => error => error.code === expected;
 const png = () => encodePng({ width: 2, height: 2, channels: 4, pixels: Buffer.alloc(16, 200) });
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'droy-companion-media-'));
-  const ctx = new Context(), store = await CompanionStore.open({ directory: join(directory, 'companions') });
+  const ctx = new Context(), store = await openLegacyCompanionStore({ directory: join(directory, 'companions') });
   await ctx.plugin(MobileAttachments, { dshHome: join(directory, 'host') });
   t.after(async () => { await ctx.fiber.dispose(); await store.close(); await rm(directory, { recursive: true, force: true }); });
   let count = 0;

@@ -11,6 +11,8 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import org.json.JSONObject;
+import io.droyagent.app.nativeui.permissions.NativePermissionPolicyStore;
+import io.droyagent.app.nativeui.permissions.NativePermissionOutcome;
 
 /** Completes only a previously requested capture while a real Activity is visible. */
 public final class AudioPermissionActivity extends Activity {
@@ -72,6 +74,7 @@ public final class AudioPermissionActivity extends Activity {
             }
             if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 message.setText(io.droyagent.app.NativeLocale.text("音频采集需要系统麦克风权限。授权后将继续本次采集。", "Audio capture requires system microphone permission. This capture will continue once permission is granted."));
+                permissionPolicy().recordRequested("microphone", System.currentTimeMillis());
                 waiting = true; requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, MICROPHONE); return;
             }
             if (pending.optString("source").equals("playback")) {
@@ -89,6 +92,11 @@ public final class AudioPermissionActivity extends Activity {
         super.onRequestPermissionsResult(request, permissions, grants);
         if (request != MICROPHONE) return;
         waiting = false;
+        try {
+            permissionPolicy().recordOutcome("microphone",
+                checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                    ? NativePermissionOutcome.GRANTED : NativePermissionOutcome.NOT_GRANTED, System.currentTimeMillis());
+        } catch (IllegalStateException failure) { fail(failure); return; }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) continueAuthorization();
         else { deny(); message.setText(io.droyagent.app.NativeLocale.text("未授予麦克风权限，采集未开始。可返回音频设置重新发起。", "Microphone permission was not granted, so capture did not start. Return to audio settings to try again.")); }
     }
@@ -103,7 +111,8 @@ public final class AudioPermissionActivity extends Activity {
     }
 
     private void fail(Exception failure) {
-        deny(); message.setText(failure.getMessage() == null ? io.droyagent.app.NativeLocale.text("音频采集未能开始，请返回后重试。", "Audio capture could not start. Please go back and retry.") : failure.getMessage());
+        deny(); message.setText(failure.getMessage() == null || "PERMISSION_POLICY_NOT_SAVED".equals(failure.getMessage())
+            ? io.droyagent.app.NativeLocale.text("音频采集未能开始，请返回后重试。", "Audio capture could not start. Please go back and retry.") : failure.getMessage());
     }
 
     private void deny() {
@@ -114,6 +123,8 @@ public final class AudioPermissionActivity extends Activity {
             catch (Exception failure) { android.widget.Toast.makeText(this, io.droyagent.app.NativeLocale.text("采集取消状态未能保存，请在音频设置中停止", "Capture cancellation could not be saved. Please stop capture in audio settings"), android.widget.Toast.LENGTH_LONG).show(); }
         }
     }
+
+    private NativePermissionPolicyStore permissionPolicy() { return new NativePermissionPolicyStore(ProductPermissions.preferences(this)); }
 
     @Override protected void onSaveInstanceState(Bundle state) { state.putBoolean("waiting", waiting); super.onSaveInstanceState(state); }
     @Override protected void onDestroy() {

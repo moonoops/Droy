@@ -113,7 +113,7 @@ public final class ForegroundStatusNotifications {
                 audioKind, camera, location, attention, ProductPermissions.stopped(context));
         if (!active && audio == null && position == null && hardware != null && hardware.location())
             detail = NativeLocale.text("为当前任务读取位置，完成后停止。", "Reading location for the current task; stops when complete.");
-        Intent target = new Intent(context, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        Intent target = new Intent(context, NativeAppActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         if (active && !task.isEmpty()) target.putExtra("petTaskId", task);
         JSONObject question = progress.optJSONObject("pending");
         if (active && question != null) target.putExtra("petRequestId", question.optString("requestId"));
@@ -146,7 +146,7 @@ public final class ForegroundStatusNotifications {
             notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("暂停手机操作", "Pause phone operations"), pause).build()); actions++;
         }
         if (attention && actions < 3) {
-            PendingIntent settings = PendingIntent.getActivity(context, 3, new Intent(context, MainActivity.class).putExtra("notificationManagement", true)
+            PendingIntent settings = PendingIntent.getActivity(context, 3, new Intent(context, NativeAppActivity.class).putExtra("notificationManagement", true)
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
             notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("去设置", "Open settings"), settings).build());
         }

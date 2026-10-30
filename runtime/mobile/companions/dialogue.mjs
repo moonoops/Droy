@@ -90,6 +90,7 @@ export function sharedContext(state, memories, messages) {
       ...(message.replyTo ? {replyTo:message.replyTo}:{}),
       ...(typeof message.quoteReply === 'boolean' ? {quoteReply:message.quoteReply}:{}),
       ...(message.task ? {task:message.task}:{}),
+      ...(message.voice ? {voice:message.voice}:{}),
       ...(message.attachments ? {attachments:message.attachments}:{}),
       ...(message.sourceType ? {sourceType:message.sourceType}:{}),
     }))};

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_rich_text_limited">内容较长，当前显示前部。</string>
+    <string name="native_rich_text_copy_full">复制完整消息</string>
+    <string name="native_rich_text_heading">%1$d 级标题</string>
+    <string name="native_rich_text_code">代码</string>
+    <string name="native_rich_text_copy_code">复制代码</string>
+    <string name="native_rich_text_table">表格；可横向滑动查看更多列</string>
+    <string name="native_rich_text_image">图片</string>
+    <string name="native_rich_text_open_link">打开链接</string>
+</resources>

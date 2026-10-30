@@ -8,6 +8,7 @@ import {createServer} from 'node:http';
 import {registerHooks} from 'node:module';
 import {setTimeout as delay} from 'node:timers/promises';
 import {fileURLToPath} from 'node:url';
+import {seedLegacyCompanionDb} from './fixtures/legacy-companion-db.mjs';
 
 async function eventually(read,label) {
   const deadline=Date.now()+10000;
@@ -31,6 +32,7 @@ const toolChunks=(id,name,input={})=>{
 const contentText=message=>(message.content??[]).filter(block=>block.type==='text').map(block=>block.text).join('\n');
 test('packaged companions run isolated Planner and Replyer conversations without Root', {timeout:60000},async t=>{
   const home=await mkdtemp(join(tmpdir(),'droy-companions-integration-'));
+  await seedLegacyCompanionDb(join(home,'droy-companions'));
   const reservation=createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));
   const port=reservation.address().port;await new Promise(r=>reservation.close(r));
   const native=createServer(async(req,res)=>{
@@ -191,7 +193,12 @@ test('packaged companions run isolated Planner and Replyer conversations without
   await companions.submit('kaka',{clientId:'cancel-wait',text:'Start a wait for cancellation testing.'});
   await eventually(()=>companions.state('kaka').phase==='waiting','cancellable wait starts');
   const cancelledCalls=actions.filter(action=>action.sessionId===kakaAgent.id).length;
-  await companions.cancel('kaka');
+  assert.deepEqual(await companions.cancel('kaka'),{cancelRequested:true});
+  assert.equal(companions.chatExecution('kaka').cancelRequested,true);
+  await kakaAgent.whenIdle();
+  await eventually(()=>companions.chatExecution('kaka').quiescent,'chat cancellation confirms real Agent and runtime settlement');
+  assert.deepEqual((await api('/kaka/messages')).value.status.chatExecution,{quiescent:true,cancelRequested:true});
+  assert.deepEqual((await api()).value.companions.find(profile=>profile.id==='kaka').status.chatExecution,{quiescent:true,cancelRequested:true});
   await eventually(()=>kakaAgent.status!=='running','wait cancellation reaches real DSH loop');
   await delay(40);
   assert.equal(actions.filter(action=>action.sessionId===kakaAgent.id).length,cancelledCalls);
@@ -207,6 +214,36 @@ test('packaged companions run isolated Planner and Replyer conversations without
   await eventually(()=>scripts.get(kakaAgent.id).length===0&&kakaAgent.status!=='running'&&!companions.state('kaka').pending.length,'work result chat followup');
   assert.ok((await companions.store.listMessages('kaka')).messages.some(message=>message.role==='assistant'&&message.type==='text'&&message.replyTo===task.taskId),
     'The completed task card is a valid reply target in the real Planner/Replyer loop');
+  const assertModelRound=async({agent,id,model,reference})=>{
+    const before=calls.length,messageId='model-source-'+reference;
+    scripts.set(agent.id,[{name:'companion_reply',args:{msg_id:messageId,reply_reference:reference}},{name:'companion_quiet'}]);
+    assert.equal((await api('/'+id+'/messages','POST',{clientId:messageId,text:'Fictional model-source check '+reference})).status,202);
+    await eventually(()=>scripts.get(agent.id).length===0&&agent.status!=='running','model-source round '+reference);
+    await agent.whenIdle();await eventually(()=>companions.chatExecution(id).quiescent,'model-source runtime retirement '+reference);
+    const round=calls.slice(before).filter(call=>call.sessionId===agent.id);
+    const planner=round.filter(call=>call.tools?.some(tool=>tool.name==='companion_reply'));
+    const replyer=round.filter(call=>call.messages.some(message=>{
+      const text=contentText(message);
+      return (text.startsWith('【回复信息参考】')||text.startsWith('[Reply Reference]'))&&text.includes(reference);
+    }));
+    assert.ok(planner.length>0,'The real Planner must make a request');
+    assert.ok(replyer.length>0,'The real Replyer must make a request');
+    for(const call of [...planner,...replyer])assert.equal(call.model,model);
+  };
+  await companions.store.updateProfile('kaka',{model:null});
+  await assertModelRound({agent:kakaAgent,id:'kaka',model:defaultModel.model,reference:'FIXTURE_INHERITED_FIRST'});
+  assert.equal((await companions.store.getProfile('kaka')).model,null);
+  assert.equal((await api()).value.companions.find(profile=>profile.id==='kaka').modelInherited,true);
+  const changedDefault={provider:'companion-fixture',model:'changed-work-model'};
+  await ctx.agentDefaultModel.saveSelection(changedDefault);
+  await assertModelRound({agent:kakaAgent,id:'kaka',model:changedDefault.model,reference:'FIXTURE_INHERITED_AFTER_GLOBAL_CHANGE'});
+  assert.equal(await companions.agent('kaka'),kakaAgent,'Changing the global default preserves the live chat identity');
+  assert.equal((await companions.store.getProfile('kaka')).model,null);
+  const inherited=(await api()).value.companions.find(profile=>profile.id==='kaka');
+  assert.equal(inherited.modelInherited,true);assert.deepEqual(inherited.model,changedDefault);
+  await assertModelRound({agent:maimaiAgent,id:'maimai',model:'maimai-model',reference:'FIXTURE_EXPLICIT_AFTER_GLOBAL_CHANGE'});
+  assert.deepEqual((await companions.store.getProfile('maimai')).model,{provider:'companion-fixture',model:'maimai-model'});
+  await ctx.agentDefaultModel.saveSelection(defaultModel);
   const root=await ctx.sessionController.create({workspaceId:ctx.workspaceRegistry.list().find(row=>![profile.workspaceId,(listed.value.companions.find(p=>p.id==='maimai')).workspaceId].includes(row.id)).id});
   const assembly=await ctx.systemPrompt.assemble({agent:ctx.agents.get(root.sessionId),scope:ctx.agents.get(root.sessionId)});
   assert.ok(!assembly.contexts.find(item=>item.name==='droy:current-companion')?.text);

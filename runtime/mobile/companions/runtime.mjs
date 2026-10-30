@@ -1,3 +1,4 @@
+import { companionReplyText } from './reply-text.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdir,realpath } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -7,9 +8,10 @@ import { createUserMessage,createAssistantMessage } from '@deepseek-ai/dsh-llm';
 import { applyWebSearchTool,applyWebFetchTool } from '@deepseek-ai/dsh-tool-web';
 import { CompanionMemory } from './memory.mjs';
 import { CompanionLearning } from './learning.mjs';
+import { installCompanionMaintenance } from './maintenance-runtime.mjs';
 import { stickerCatalog,readSharedAttachment,replyAttachment } from './media.mjs';
 import { prepareReply,publishReply } from './delivery.mjs';
-import { localizedProfile } from './profiles.mjs';
+import { localizedProfile, profileName } from './profiles.mjs';
 import { dialoguePrompts } from './dialogue-prompts.mjs';
 import { buildPlannerPrompt,buildReplyerRequest,buildWaitReminder,renderMaiBotPrompt,replyToolDescriptions } from './maibot-prompts.mjs';
 import { selectExpressions } from './maibot-expression.mjs';
@@ -51,16 +53,60 @@ export class CompanionRuntime {
     this.listeners = new Set(); this.handles = new Map(); this.routes = new WeakMap(); this.closed = false;
     this.lifetime=new AbortController();this.background=new Set();this.decorated=new WeakSet();
     this.restrictedAgents=new Map();
+    this.workspaceStarts=new Map();this.instanceStarts=new Map();
     this.contextSources=new Map();this.learningSignals=new Map();this.turnMemories=new Map();
     this.learner=new CompanionLearning({store,memoryFor:id=>this.memory(id),generate:(...args)=>this.generate(...args),
+      getProfile:id=>this.profileForUse(id,{requireModel:false}),
       getLocale:()=>this.locale(),options:{learningUserMessages:this.options.learningMessages}});
+    this.maintenance=installCompanionMaintenance(this);
   }
   locale() { return resolveMobileLocale(this.ctx); }
   copy() { return dialoguePrompts[this.locale()]; }
   emit(companionId,kind='message') {
-    const state=companionId?this.state(companionId):null;
-    const event={companionId,kind,...(state?{status:{phase:state.phase,...(state.error?{error:this.copy().generationFailed}:{})}}:{})};
+    const event={companionId,kind,...(companionId?{status:this.status(companionId)}:{})};
     for (const listener of this.listeners) listener(event);
+  }
+  status(id) {
+    const state=this.state(id);
+    return {phase:state.phase,...(state.error?{error:this.copy().generationFailed}:{}),chatExecution:this.chatExecution(id)};
+  }
+  chatExecution(id) {
+    const state=this.state(id),agents=new Set([this.live.get(id)].filter(Boolean));
+    for(const owner of this.owners.values())if(owner.companionId===id&&owner.kind==='chat') {
+      const agent=this.ctx.agents.get(owner.sessionId);if(agent)agents.add(agent);
+    }
+    // This confirms only the companion chat, not its independent work tasks or
+    // background memory learning. An aborted signal alone is never settlement.
+    return {quiescent:!state.chatOperations.size&&!state.pending.length&&!state.chatWaitScheduled&&!state.chatRecoveryScheduled
+      &&!state.chatStopUnconfirmed&&[...agents].every(agent=>agent.status==='idle'&&state.chatObservedIdle.has(agent)),
+    cancelRequested:state.chatCancelRequested};
+  }
+  beginChat(id) {
+    const state=this.state(id),operation={};state.chatOperations.add(operation);
+    const settled=this.maintenance.begin('chat');
+    return ()=>{
+      state.chatOperations.delete(operation);
+      settled();
+      if(!this.closed&&this.chatExecution(id).quiescent)this.emit(id,'status');
+    };
+  }
+  observeChatIdle(id,agent) {
+    const state=this.state(id);
+    if(state.chatIdleObservers.has(agent))return;
+    state.chatObservedIdle.delete(agent);
+    // Public status also reports idle during maintenance. Only whenIdle proves
+    // the current driver and its replacement/maintenance activity have drained.
+    if(typeof agent.whenIdle!=='function'){state.chatStopUnconfirmed=true;return;}
+    const finish=this.beginChat(id);
+    const pending=Promise.resolve().then(async()=>{
+      try {await agent.whenIdle();state.chatObservedIdle.add(agent);}
+      catch(error) {
+        state.chatStopUnconfirmed=true;
+        this.ctx.logger.warn('COMPANION_STOP_UNCONFIRMED: '+(error.code||error.name));
+      } finally {state.chatIdleObservers.delete(agent);finish();}
+    });
+    state.chatIdleObservers.set(agent,pending);this.background.add(pending);
+    pending.finally(()=>this.background.delete(pending));
   }
   async clock(signal=this.lifetime.signal) {
     const current=this.options.getClock?await this.options.getClock(signal):{now:Date.now(),timeZone:(await this.store.getSettings()).timeZone};
@@ -68,7 +114,8 @@ export class CompanionRuntime {
   }
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   state(id) {
-    if (!this.states.has(id)) this.states.set(id,{phase:'idle',revision:0,pending:[],admitted:new Set(),delivered:0});
+    if (!this.states.has(id)) this.states.set(id,{phase:'idle',revision:0,pending:[],admitted:new Set(),delivered:0,
+      chatOperations:new Set(),chatObservedIdle:new WeakSet(),chatIdleObservers:new Map(),chatCancelRequested:false,chatCancelRevision:0});
     return this.states.get(id);
   }
   ownsSession(id) { return this.owners.has(String(id)); }
@@ -85,22 +132,27 @@ export class CompanionRuntime {
       else if(created)await workspace.setTitle(title);
     }
     for (const profile of profiles) {
-      const path = join(this.directory, profile.id, 'work');
-      await mkdir(path,{recursive:true});
-      await mkdir(join(this.directory,profile.id,'chat'),{recursive:true});
-      const workspace = await this.ctx.workspaceRegistry.create(path,profile.name);
-      if (profile.workspaceId !== workspace.id) await this.store.updateProfile(profile.id,{workspaceId:workspace.id});
+      if(profile.workspaceId||!profile.id.startsWith('companion-'))await this.prepareWorkspace(profile.id);
       for (const owner of await this.store.listSessions(profile.id)) this.owners.set(owner.sessionId,owner);
     }
     this.installOwnership();
     this.ctx.on('agent/created',async ({agent}) => {
-      const owner = this.owners.get(agent.id) ?? await this.store.sessionOwner(agent.id);
-      if (owner) { this.owners.set(agent.id,owner); await this.decorate(agent,owner); }
+      return this.maintenance.run('agent-created',async()=>{
+        const owner = this.owners.get(agent.id) ?? await this.store.sessionOwner(agent.id);
+        if (owner) {
+          this.owners.set(agent.id,owner);await this.decorate(agent,owner);
+          if(owner.kind==='chat')this.observeChatIdle(owner.companionId,agent);
+        }
+      });
     });
     this.ctx.on('agent/status',({agent,status}) => {
-      if (status === 'running' && this.ownsSession(agent.id)) {
+      if (this.ownsSession(agent.id)) {
+        this.maintenance.changed();
         const owner = this.owners.get(agent.id);
-        if (owner.kind === 'chat') { this.state(owner.companionId).phase = 'thinking'; this.emit(owner.companionId,'status'); }
+        if (owner.kind === 'chat') {
+          if(status==='running'){this.state(owner.companionId).phase='thinking';this.observeChatIdle(owner.companionId,agent);}
+          this.emit(owner.companionId,'status');
+        }
       }
     });
     this.ctx.on('session/event',(session,event) => {
@@ -111,8 +163,31 @@ export class CompanionRuntime {
   }
   async start() {
     if(this.started||this.closed)return;this.started=true;
-    for(const profile of await this.store.profiles()) {
-      const id=profile.id,saved=await this.store.getState(id),state=this.state(id);
+    for(const profile of await this.store.profiles())await this.startInstance(profile.id);
+  }
+  prepareWorkspace(id) {
+    if(this.workspaceStarts.has(id))return this.workspaceStarts.get(id);
+    const opening=(async()=>{
+      const profile=await this.store.getProfile(id),path=join(this.directory,id,'work');
+      let workspace=profile.workspaceId?this.ctx.workspaceRegistry.get(profile.workspaceId):null;
+      if(profile.workspaceId&&!workspace)fail('COMPANION_WORKSPACE_NOT_FOUND');
+      await mkdir(path,{recursive:true});await mkdir(join(this.directory,id,'chat'),{recursive:true});
+      if(!workspace) {
+        workspace=await this.ctx.workspaceRegistry.create(path,profileName(profile,this.locale()));
+        await this.store.updateProfile(id,{workspaceId:workspace.id});
+      }
+      return workspace.id;
+    })();
+    this.workspaceStarts.set(id,opening);
+    opening.catch(()=>this.workspaceStarts.delete(id));
+    return opening;
+  }
+  startInstance(id) {
+    if(this.closed)return Promise.resolve();
+    if(this.instanceStarts.has(id))return this.instanceStarts.get(id);
+    const starting=(async()=>{
+      await this.store.getProfile(id);
+      const saved=await this.store.getState(id),state=this.state(id);
       const recoveringWait=saved.waitingUntil&&saved.pendingIntent?.kind==='wait'&&!saved.replyDraft;
       if((saved.chatNeedsReset&&!recoveringWait)||saved.replyDraft)await this.store.updateProfile(id,{chatSessionId:null});
       state.pending=await this.activePending(id,[...(saved.pendingMessageIds??[]),...(await this.store.pendingMessages(id)).map(item=>item.id)]);
@@ -122,10 +197,11 @@ export class CompanionRuntime {
       if(recoveringWait) {
         state.phase='waiting';this.scheduleWait(id,saved);
       } else if(saved.replyDraft?.sourceMessageIds?.length&&state.pending.every(item=>covered.has(item.id))) {
-        state.timer=setTimeout(()=>this.recoverReply(id).catch(error=>this.report(id,error)),this.options.debounceMs);
+        state.chatRecoveryScheduled=true;
+        state.timer=this.maintenance.recovery('chat:'+id,Date.now()+this.options.debounceMs,()=>{state.chatRecoveryScheduled=false;return this.recoverReply(id).catch(error=>this.report(id,error));});
       } else {
         if(saved.replyDraft)await this.store.updateState(id,{replyDraft:null});
-        if(state.pending.length)state.timer=setTimeout(()=>this.flush(id).catch(error=>this.report(id,error)),this.options.debounceMs);
+        if(state.pending.length)state.timer=this.maintenance.recovery('chat:'+id,Date.now()+this.options.debounceMs,()=>this.flush(id).catch(error=>this.report(id,error)));
         else this.scheduleWait(id,saved);
       }
       this.scheduleProactive(id,saved.proactiveNextAt);
@@ -133,14 +209,18 @@ export class CompanionRuntime {
       for(const owner of await this.store.listSessions(id,{kind:'work'})) {
         const taskMessage=await this.store.getMessage(id,owner.taskId);
         if(!taskMessage?.contextExcluded&&['running','queued','cancelling'].includes(taskMessage?.task?.state)) {
-          const timer=setTimeout(()=>{
+          const timer=this.maintenance.recovery('work:'+owner.sessionId,Date.now()+this.options.debounceMs,()=>{
             state.workRecoveryTimers.delete(timer);
             const operation=this.resumeWork(owner);this.background.add(operation);
             operation.catch(error=>this.report(id,error)).finally(()=>this.background.delete(operation));
-          },this.options.debounceMs);timer.unref?.();state.workRecoveryTimers.add(timer);
+            return operation;
+          },{unref:true});if(timer)state.workRecoveryTimers.add(timer);
         }
       }
-    }
+    })();
+    this.instanceStarts.set(id,starting);
+    starting.catch(()=>this.instanceStarts.delete(id));
+    return starting;
   }
   installOwnership() {
     const controller = this.ctx.sessionController;
@@ -192,14 +272,14 @@ export class CompanionRuntime {
     const owner = this.owners.get(agent.id);
     if (!owner) return null;
     const profile=localizedProfile(await this.store.getProfile(owner.companionId),this.locale());
-    return {...profile,displayName:profile.name,appearanceId:profile.id};
+    return {...profile,displayName:profile.name,appearanceId:profile.templateId??profile.id};
   }
-  async profileForUse(id) {
-    const profile=await this.store.getProfile(id);
-    if(profile.model)return profile;
-    const model=this.ctx.agentDefaultModel?.currentSelection();
+  async profileForUse(id,{requireModel=true}={}) {
+    const saved=await this.store.getProfile(id),profile={...saved,name:profileName(saved,this.locale())};
+    const model=profile.model??this.ctx.agentDefaultModel?.currentSelection();
+    if(!model&&!requireModel)return profile;
     if(!model?.provider?.trim()||!model?.model?.trim())fail('COMPANION_MODEL_REQUIRED');
-    return this.store.updateProfile(id,{model});
+    return {...profile,model:structuredClone(model)};
   }
   async context(id,owner,signal=this.lifetime.signal) {
     const profile = await this.store.getProfile(id),page=await this.learner.contextMessages(id,{signal});
@@ -218,7 +298,7 @@ export class CompanionRuntime {
     const memories={items:profile.settings.memoryEnabled?recalled.items:[]};
     const [clock,userProfile]=await Promise.all([this.clock(signal),this.store.getUserProfile()]);
     const result={...sharedContext(state,memories,messages),...clock,
-      userProfile:{name:userProfile.name},availableStickers:stickerCatalog(this.locale())};
+      userProfile:{name:userProfile.name,bio:userProfile.bio??''},availableStickers:stickerCatalog(this.locale())};
     if(owner) {
       const sourceContext={contextSourceIds:[...new Set([...messages.map(item=>item.id),
         ...(this.contextSources.get(owner.sessionId)?.contextSourceIds??[]).filter(source=>source.startsWith('memory:')),
@@ -238,10 +318,13 @@ export class CompanionRuntime {
   async generate(profile,system,input,{signal,onDelta,messages,sessionId=profile.chatSessionId ?? 'companion:'+profile.id} = {}) {
     signal=signal?AbortSignal.any([signal,this.lifetime.signal]):this.lifetime.signal;
     signal.throwIfAborted();
-    if (!profile.model) fail('COMPANION_MODEL_REQUIRED');
-    const prepared = await this.ctx.llm.prepareCall(profile.model,signal);
+    const {model}=await this.profileForUse(profile.id);
+    signal.throwIfAborted();
+    // Resolve once per model request. Later global/profile edits apply to the
+    // next request, while this prepared stream keeps its selected route.
+    const prepared = await this.ctx.llm.prepareCall(model,signal);
     const history=messages?.map(item=>item.role==='assistant'
-      ?createAssistantMessage({content:item.content,source:{provider:profile.model.provider,model:profile.model.model}})
+      ?createAssistantMessage({content:item.content,source:{provider:model.provider,model:model.model}})
       :createUserMessage({content:item.content,source:{kind:'user'}}));
     let text = '', completed = false;
     for await (const chunk of prepared.stream({...prepared.config,system,
@@ -258,16 +341,20 @@ export class CompanionRuntime {
     return text;
   }
   async agent(id,{kind='chat',sessionId,taskId} = {}) {
+    const finish=kind==='chat'?this.beginChat(id):()=>{};
+    try {
     if(this.closed)fail('COMPANION_CLOSED');
-    const profile = await this.profileForUse(id);
+    let profile = await this.profileForUse(id);
     if (!profile.model) fail('COMPANION_MODEL_REQUIRED');
     const key = kind === 'chat' ? id : sessionId ?? randomUUID();
     if (this.live.has(key)) {
       const agent = this.live.get(key);
+      if(kind==='chat')this.observeChatIdle(id,agent);
       return agent;
     }
     if (this.handles.has(key)) return (await this.handles.get(key)).agent;
     const opening = (async () => {
+      await this.prepareWorkspace(id);profile=await this.profileForUse(id);
       const existing = kind === 'chat' ? profile.chatSessionId : this.owners.has(sessionId) ? sessionId : null;
       const owner = {companionId:id,kind,taskId:taskId ?? null,workspaceId:profile.workspaceId};
       const setup = async (_scope,agent) => {
@@ -281,10 +368,12 @@ export class CompanionRuntime {
       await this.store.bindSession(id,{sessionId:handle.agent.id,kind,workspaceId:profile.workspaceId,taskId:taskId ?? null});
       if (kind === 'work') await this.ctx.workspaceRegistry.get(profile.workspaceId).attachSession(handle.agent.id);
       this.live.set(key,handle.agent);
+      if(kind==='chat')this.observeChatIdle(id,handle.agent);
       return handle;
     })();
     this.handles.set(key,opening);
     try { return (await opening).agent; } catch (error) { this.handles.delete(key); throw error; }
+    } finally {finish();}
   }
   async decorate(agent,owner) {
     if (this.decorated.has(agent)) return;
@@ -297,7 +386,7 @@ export class CompanionRuntime {
     }
     agent.ctx.on('system-prompt/assemble',async (_assembly,context,next) => {
       const assembly = await next();
-      const profile = await this.store.getProfile(owner.companionId), locale = this.locale();
+      const profile = await this.profileForUse(owner.companionId), locale = this.locale();
       this.routes.set(agent,profile.model);
       assembly.variables = {...assembly.variables,provider:profile.model.provider,model:profile.model.model};
       assembly.sections = assembly.sections.filter(section=>![MOBILE_PROMPT_SECTION,COMPANION_PROMPT_SECTION].includes(section.name));
@@ -322,7 +411,7 @@ export class CompanionRuntime {
     },{prepend:true});
     const register = (name,descriptionKey,parameters,execute) => agent.ctx.tools.register(defineTool({
       name,description:this.copy()[descriptionKey],parameters,output:jsonOutput,
-      execute:async (args,exec) => { exec.signal?.throwIfAborted(); return execute(args,exec); },
+      execute:async (args,exec) => this.maintenance.run('tool:'+name,()=>{exec.signal?.throwIfAborted();return execute(args,exec);}),
     }));
     register('companion_reply','replyDescription',{
       msg_id:{type:'string',required:true},reply_reference:{type:'string',required:true},
@@ -401,6 +490,8 @@ export class CompanionRuntime {
     agent.ctx.effect(()=>()=>{this.restrictedAgents.delete(agent.id);this.contextSources.delete(agent.id);this.turnMemories.delete(agent.id);this.decorated.delete(agent);});
   }
   async submit(id,input) {
+    const finish=this.beginChat(id);
+    try {
     if (this.closed) fail('COMPANION_CLOSED');
     const profile = await this.profileForUse(id);
     if (!profile.model) fail('COMPANION_MODEL_REQUIRED');
@@ -410,39 +501,51 @@ export class CompanionRuntime {
     const saved=await this.store.appendMessage(id,{...(clientId?{id:clientId,clientId}:{}),role:'user',
       type:voice?'voice':stickerId?'sticker':attachments[0]?.mediaType?.startsWith('image/')?'image':attachments.length?'file':'text',
       text,attachments,...(voice?{voice}:{}),...(replyTo?{replyTo,quoteReply:true}:{}),...(stickerId?{stickerId}:{}),
-      status:voice?.transcriptionState==='failed'&&!text.trim()?'sent':'received'});
+      status:'received'});
     if(existing?.status==='sent'||state.admitted.has(saved.id))return saved;
     state.admitted.add(saved.id);
-    if(saved.voice?.transcriptionState==='failed'&&!saved.text.trim()){this.emit(id);return saved;}
     try{await this.enqueue(id,saved);}catch(error){state.admitted.delete(saved.id);throw error;}
     return saved;
+    } finally {finish();}
   }
   async enqueue(id,saved) {
+    const finish=this.beginChat(id);
+    try {
     const state=this.state(id);
     delete state.error;
+    state.chatCancelRequested=false;state.chatWaitScheduled=false;state.chatRecoveryScheduled=false;
     state.revision++; state.pending.push(saved); state.replyAbort?.abort();
     clearTimeout(state.timer); clearTimeout(state.waitTimer);
+    this.maintenance.cancelRecovery('chat:'+id);this.maintenance.cancelRecovery('wait:'+id);
     if(this.options.maibot?.messageSteering)state.waitAbort?.abort('new_message');
     await this.store.updateState(id,current=>({...(state.waitAbort?{}:{waitingUntil:null,pendingIntent:null}),replyDraft:null,
       ...(saved.role==='user'?{lastUserAt:new Date().toISOString()}:{}),
       pendingMessageIds:[...new Set([...(current.pendingMessageIds??[]),saved.id])]}));
     state.phase='thinking'; this.emit(id);
     state.timer=setTimeout(()=>this.flush(id).catch(error=>this.report(id,error)),this.options.debounceMs);
+    } finally {finish();}
   }
   async transcribeVoice(id,messageId,text) {
+    const finish=this.beginChat(id);
+    try {
     if(typeof text!=='string'||!text.trim()||text.length>32768)fail('COMPANION_INVALID_INPUT');
     const item=await this.store.getMessage(id,messageId);
     if(!item?.voice)fail('COMPANION_NOT_FOUND');
     if(item.voice.transcriptionState==='ready')return item;
     const saved=await this.store.updateMessage(id,messageId,{text:text.trim(),status:'received',voice:{...item.voice,transcript:text.trim(),transcriptionState:'ready'}});
     await this.enqueue(id,saved);return saved;
+    } finally {finish();}
   }
   async retry(id) {
+    const finish=this.beginChat(id);
+    try {
+    this.state(id).chatCancelRequested=false;
     this.state(id).phase='thinking';delete this.state(id).error;this.emit(id,'status');
     const state=await this.store.getState(id);
-    if(state.replyDraft)return this.recoverReply(id);
+    if(state.replyDraft)return await this.recoverReply(id);
     this.state(id).pending=await this.activePending(id,[...(state.pendingMessageIds??[]),...(await this.store.pendingMessages(id)).map(item=>item.id)]);
-    return this.flush(id);
+    return await this.flush(id);
+    } finally {finish();}
   }
   async activePending(id,messageIds) {
     const state=await this.store.getState(id),baseline=Number((state.forgottenThrough??'seq:0').slice(4)),active=[];
@@ -453,10 +556,14 @@ export class CompanionRuntime {
     return active;
   }
   async flush(id) {
+    const finish=this.beginChat(id),cancelRevision=this.state(id).chatCancelRevision;
+    try {
     const state=this.state(id),pending=await this.activePending(id,state.pending.splice(0).map(item=>item.id));
+    if(cancelRevision!==state.chatCancelRevision)return;
     if (!pending.length || this.closed) {if(!this.closed){state.phase='idle';this.emit(id,'status');}return;}
     let agent;
-    try {agent=await this.agent(id);}catch(error){state.pending.unshift(...pending);throw error;}
+    try {agent=await this.agent(id);}catch(error){if(cancelRevision===state.chatCancelRevision)state.pending.unshift(...pending);throw error;}
+    if(this.closed||cancelRevision!==state.chatCancelRevision)return;
     const content=pending.filter(item=>item.role==='user').map(item=>({id:item.id,text:item.text,type:item.type,voice:item.voice,attachments:item.attachments,replyTo:item.replyTo}));
     const taskResults=pending.filter(item=>item.role==='assistant'&&item.type==='task').map(item=>({taskId:item.id,...item.task}));
     const input=createUserMessage({source:{kind:'user'},content:[
@@ -465,13 +572,17 @@ export class CompanionRuntime {
       ...pending.flatMap(item=>(item.attachments??[]).filter(upload=>upload.mediaType?.startsWith('image/')).map(upload=>({type:'image',attachment:upload.ref}))),
     ]});
     await this.store.updateState(id,{chatNeedsReset:true});
+    if(this.closed||cancelRevision!==state.chatCancelRevision)return;
     state.turnAction=null;
     state.inFlightIds=[...new Set([...(state.inFlightIds??[]),...pending.map(item=>item.id)])];
     if (agent.status === 'running') agent.steer(input); else agent.followup(input);
+    } finally {finish();}
   }
   async reply(owner,args,signal) {
+    const finish=owner.kind==='chat'?this.beginChat(owner.companionId):()=>{};
+    try {
     const id=owner.companionId,state=this.state(id),revision=state.revision;
-    const profile=await this.store.getProfile(id),locale=this.locale();
+    const profile=await this.profileForUse(id),locale=this.locale();
     const abort=new AbortController(); if(owner.kind==='chat')state.replyAbort=abort;
     const combined=signal ? AbortSignal.any([signal,abort.signal]):abort.signal;
     if(owner.kind==='chat')state.phase='typing'; this.emit(id,'status');
@@ -493,7 +604,7 @@ export class CompanionRuntime {
     const expressions=await selectExpressions({context,args,locale,generate,signal:combined,
       random:options.random,options:options.expression});
     const request=buildReplyerRequest({profile,locale,context,args,expressions:expressions.prompt,kind:owner.kind,options});
-    const text=await generate(request);
+    const text=companionReplyText(await generate(request));
     combined.throwIfAborted();
     if (owner.kind === 'work') {
       state.workResults ??= new Map(); state.workResults.set(owner.sessionId,text);
@@ -527,11 +638,14 @@ export class CompanionRuntime {
     catch(error){notification={status:'failed'};this.ctx.logger.warn('COMPANION_NOTICE_FAILED: '+(error.code||error.name));}
     return {delivered:true,messageIds:ids,text,parts:parts.map((part,index)=>({messageId:ids[index],type:part.type,text:part.text,
       ...(part.stickerId?{stickerId:part.stickerId}:{})})),notification};
+    } finally {finish();}
   }
   stickers() { return stickerCatalog(this.locale()).map((item,index)=>({emoji_id:index+1,...item})); }
   async sendEmoji(owner,args,signal) {
     if(owner.kind==='work')fail('COMPANION_TOOL_NOT_ALLOWED');
-    const id=owner.companionId,state=this.state(id),revision=state.revision,profile=await this.store.getProfile(id),locale=this.locale();
+    const finish=this.beginChat(owner.companionId);
+    try {
+    const id=owner.companionId,state=this.state(id),revision=state.revision,profile=await this.profileForUse(id),locale=this.locale();
     const context=await this.context(id,owner,signal),items=this.stickers();
     const target=context.messages.find(item=>item.id===args.msg_id);
     if(args.msg_id&&!target)fail('COMPANION_REPLY_SOURCE_REQUIRED');
@@ -549,10 +663,13 @@ export class CompanionRuntime {
     const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts});
     const delivered=await this.publish(id,draft,signal);state.turnAction='emoji';state.delivered++;this.emit(id,'status');
     return {delivered:true,messageIds:delivered.messageIds,stickerId:selected.id,description:selected.description};
+    } finally {finish();}
   }
   async wait(owner,args,signal) {
     if(owner.kind==='work')fail('COMPANION_WORK_CANNOT_WAIT');
     if(!Number.isFinite(args.seconds)||args.seconds<=0||args.seconds>86400)fail('COMPANION_INVALID_WAIT');
+    const finish=this.beginChat(owner.companionId);
+    try {
     const id=owner.companionId,state=this.state(id),startedAt=Date.now(),abort=new AbortController();
     const combined=AbortSignal.any([this.lifetime.signal,abort.signal,...(signal?[signal]:[])]);
     state.waitAbort=abort;state.phase='waiting';state.turnAction='wait';state.waitCount=(state.waitCount??0)+1;
@@ -574,13 +691,19 @@ export class CompanionRuntime {
       }
     }
     return {waitedSeconds:(Date.now()-startedAt)/1000,reason,...(state.waitCount>1?{reminder:buildWaitReminder(this.locale())}:{})};
+    } finally {finish();}
   }
-  publish(id,draft,signal) {
-    return publishReply({store:this.store,companionId:id,draft,signal,onSent:()=>this.emit(id,'message')});
+  async publish(id,draft,signal) {
+    const finish=this.beginChat(id);
+    try {return await publishReply({store:this.store,companionId:id,draft,signal,onSent:()=>this.emit(id,'message')});}
+    finally {finish();}
   }
   async recoverReply(id) {
+    const finish=this.beginChat(id),cancelRevision=this.state(id).chatCancelRevision;
+    try {
     const state=this.state(id),saved=await this.store.getState(id),draft=saved.replyDraft;
-    if(!draft)return this.flush(id);
+    if(cancelRevision!==state.chatCancelRevision)return;
+    if(!draft)return await this.flush(id);
     const abort=new AbortController();state.replyAbort=abort;state.phase='typing';this.emit(id,'status');
     const delivered=await this.publish(id,draft,AbortSignal.any([abort.signal,this.lifetime.signal]));
     for(const messageId of draft.sourceMessageIds)state.admitted.delete(messageId);
@@ -592,9 +715,12 @@ export class CompanionRuntime {
       try{await this.notify({companionId:id,name:localizedProfile(profile,this.locale()).name,text,messageId:delivered.messageIds[0]});}
       catch(error){this.ctx.logger.warn('COMPANION_NOTICE_FAILED: '+(error.code||error.name));}
     }
-    this.emit(id,'status');if(state.pending.length)return this.flush(id);
+    this.emit(id,'status');if(state.pending.length)return await this.flush(id);
+    } finally {finish();}
   }
   async finishTurn(owner,event) {
+    const finish=owner.kind==='chat'?this.beginChat(owner.companionId):()=>{};
+    try {
     if(this.closed||this.ctx.get('droyLifecycle')?.stopping)return;
     const id=owner.companionId,state=this.state(id);
     if (owner.kind === 'work') {
@@ -631,6 +757,7 @@ export class CompanionRuntime {
       task.catch(error=>{if(!this.closed)this.ctx.logger.warn('COMPANION_LEARNING_FAILED: '+(error.code || error.message));})
         .finally(()=>this.background.delete(task));
     }
+    } finally {finish();}
   }
   learn(id) {
     if(this.closed)return Promise.resolve();
@@ -698,27 +825,30 @@ export class CompanionRuntime {
     const state=this.state(id);clearTimeout(state.proactiveTimer);
     if(this.closed)return;
     const next=Date.parse(nextAt||'');
-    const delay=Number.isFinite(next)?Math.max(0,next-Date.now()):this.options.proactiveIntervalMs;
-    state.proactiveTimer=setTimeout(async()=>{
+    const deadline=Number.isFinite(next)?next:Date.now()+this.options.proactiveIntervalMs;
+    state.proactiveTimer=this.maintenance.proactive(id,deadline,async()=>{
       try {
-        const saved=await this.store.getState(id),profile=await this.store.getProfile(id);
+        const saved=await this.store.getState(id),profile=await this.profileForUse(id,{requireModel:false});
         if(profile.settings.proactiveEnabled&&profile.model&&state.phase==='idle'&&!state.pending.length&&saved.lastUserAt
           && Date.now()-Date.parse(saved.lastUserAt)>=this.options.proactiveIdleMs)
           await this.wake(id,{kind:'proactive'});
         const at=new Date(Date.now()+this.options.proactiveIntervalMs).toISOString();
         await this.store.updateState(id,{proactiveNextAt:at});this.scheduleProactive(id,at);
       }catch(error){if(!this.closed)this.report(id,error);}
-    },delay);state.proactiveTimer.unref?.();
+    });
   }
   scheduleWait(id,saved) {
-    const state=this.state(id); clearTimeout(state.waitTimer);
+    const state=this.state(id); clearTimeout(state.waitTimer);state.chatWaitScheduled=false;
+    this.maintenance.cancelRecovery('wait:'+id);
     if (!saved.waitingUntil || !saved.pendingIntent) return;
-    const delay=Math.max(0,Date.parse(saved.waitingUntil)-Date.now());
-    if (!Number.isFinite(delay)) return;
-    state.waitTimer=setTimeout(()=>this.wake(id,saved.pendingIntent).catch(error=>this.report(id,error)),delay);
-    state.waitTimer.unref?.();
+    const deadline=Date.parse(saved.waitingUntil);
+    if (!Number.isFinite(deadline)) return;
+    state.chatWaitScheduled=true;
+    state.waitTimer=this.maintenance.recovery('wait:'+id,deadline,()=>{state.chatWaitScheduled=false;return this.wake(id,saved.pendingIntent).catch(error=>this.report(id,error));},{unref:true});
   }
   async wake(id,intent) {
+    const finish=this.beginChat(id);
+    try {
     if (this.closed) return;
     const live=this.state(id),revision=live.revision,continuingWait=intent.kind==='wait';
     const saved=continuingWait?await this.store.getState(id):null;
@@ -737,11 +867,14 @@ export class CompanionRuntime {
         claimed=true;return {waitingUntil:null,pendingIntent:null};
       });
       if(!claimed||this.closed||live.revision!==revision)return;
+      live.chatWaitScheduled=false;
       const state=this.state(id);state.inFlightIds=[...new Set([...(intent.sourceMessageIds??[]),...state.pending.map(item=>item.id)])];
       state.pending=[];state.phase='thinking';
     }
     const input=message(JSON.stringify({internalIntent:intent,consideration:continuingWait?this.copy().waitResumed:this.copy().proactive}));
+    live.chatCancelRequested=false;
     if(agent.status==='running')agent.steer(input);else agent.followup(input);
+    } finally {finish();}
   }
   async invalidate(id,sourceIds,{reset=true,all=false}={}) {
     const live=this.state(id);live.revision++;live.replyAbort?.abort();live.waitAbort?.abort();this.learningSignals.get(id)?.abort();
@@ -751,7 +884,8 @@ export class CompanionRuntime {
     const state=await this.store.updateState(id,current=>({...withoutSources(current,affected),
       memoryRevision:(current.memoryRevision??0)+1,waitingUntil:null,pendingIntent:null,replyDraft:null,
       forgottenMessageIds:[...new Set([...(current.forgottenMessageIds??[]),...sourceIds])]}));
-    clearTimeout(this.state(id).waitTimer);this.state(id).replyAbort?.abort();
+    clearTimeout(this.state(id).waitTimer);this.state(id).chatWaitScheduled=false;this.state(id).replyAbort?.abort();
+    this.maintenance.cancelRecovery('wait:'+id);
     const sources=new Set(affected),invalid=[];
     for(const owner of await this.store.listSessions(id,{kind:'work'})) {
       const used=state.sessionSources?.[owner.sessionId];
@@ -785,6 +919,7 @@ export class CompanionRuntime {
     await this.invalidate(id,sourceIds);this.emit(id);return result;
   }
   async removeMessage(id,messageId) {
+    if (!await this.store.getMessage(id,messageId)) return {removed:true};
     await this.invalidate(id,[messageId]);
     const memory=await this.memory(id);
     let page,cursor;const matches=[];
@@ -816,11 +951,14 @@ export class CompanionRuntime {
     this.emit(id);return {cleared:true};
   }
   async resetChat(id) {
+    const finish=this.beginChat(id);
+    try {
     this.state(id).waitAbort?.abort();
     const key=id,handle=this.handles.get(key);
     if (handle) { const resolved=await handle; resolved.agent.cancel({kind:'user'}); await resolved.dispose(); }
     this.live.delete(key); this.handles.delete(key);
     await this.store.updateProfile(id,{chatSessionId:null});
+    } finally {finish();}
   }
   async cancel(id,{taskId} = {}) {
     const state=this.state(id);
@@ -831,11 +969,19 @@ export class CompanionRuntime {
       await this.store.updateMessage(id,taskId,{task:{...item.task,state:'cancelling'}});
       this.ctx.agents.get(item.task.sessionId)?.cancel({kind:'user'});
     } else {
-      state.revision++;
+      state.chatCancelRequested=true;state.chatCancelRevision++;state.chatStopUnconfirmed=false;
+      const finish=this.beginChat(id);
+      try {
+      this.emit(id,'status');
+      state.revision++;state.chatWaitScheduled=false;state.chatRecoveryScheduled=false;
       clearTimeout(state.timer);clearTimeout(state.waitTimer);state.pending=[];state.inFlightIds=[];state.replyAbort?.abort();state.waitAbort?.abort();
+      this.maintenance.cancelRecovery('chat:'+id);this.maintenance.cancelRecovery('wait:'+id);
       await this.store.completeInputs(id,(await this.store.pendingMessages(id)).map(item=>item.id));
       await this.store.updateState(id,{waitingUntil:null,pendingIntent:null,pendingMessageIds:[],replyDraft:null,chatNeedsReset:false});
-      this.live.get(id)?.cancel({kind:'user'});state.phase='idle';delete state.error;
+      const agent=this.live.get(id);
+      if(agent){this.observeChatIdle(id,agent);agent.cancel({kind:'user'});}
+      state.phase='idle';delete state.error;
+      } finally {finish();}
     }
     this.emit(id); return {cancelRequested:true};
   }
@@ -846,7 +992,7 @@ export class CompanionRuntime {
   }
   async close() {
     if(this.closed)return;
-    this.closed=true;this.lifetime.abort();this.restoreController?.();
+    this.closed=true;this.maintenance.close();this.lifetime.abort();this.restoreController?.();
     for (const state of this.states.values()) {clearTimeout(state.timer);clearTimeout(state.waitTimer);clearTimeout(state.proactiveTimer);for(const timer of state.workRecoveryTimers??[])clearTimeout(timer);state.replyAbort?.abort();}
     for (const handle of this.handles.values()) await (await handle).dispose();
     await Promise.allSettled([...this.background]);

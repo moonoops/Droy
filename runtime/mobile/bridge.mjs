@@ -67,9 +67,9 @@ export function createBridge({ port = process.env.DROY_BRIDGE_PORT, token = proc
       const identity = { taskId: String(exec.agent.id), callId: String(exec.callId) };
       const budgetMs = actionBudget(action, args);
       const deadline = new AbortController();
-      // Native code owns the action budget; allow its final receipt to reach us.
-      const timer = setTimeout(() => deadline.abort(new BridgeError('action_timeout',
-        ownMessage('手机工具未在预算内返回；先核实当前状态，不重放动作'), { outcomeUnknown: true })), budgetMs + 1000);
+      const humanBudgetMs = 120000;
+      let timer = setTimeout(() => deadline.abort(new BridgeError('permission_timeout',
+        ownMessage('授权等待已超时，请重新发起。'), { dispatched: false, outcomeUnknown: false })), humanBudgetMs + 1000);
       timer.unref?.();
       const signal = AbortSignal.any([exec.signal, deadline.signal]);
       let cancellation;
@@ -78,6 +78,13 @@ export function createBridge({ port = process.env.DROY_BRIDGE_PORT, token = proc
       try {
         if (signal.aborted) cancel();
         signal.throwIfAborted();
+        await post('/permissions/preflight', { action, args, humanBudgetMs, ...identity }, signal);
+        signal.throwIfAborted();
+        clearTimeout(timer);
+        // Human authorization has its own deadline; native execution starts its budget only after it passes.
+        timer = setTimeout(() => deadline.abort(new BridgeError('action_timeout',
+          ownMessage('手机工具未在预算内返回；先核实当前状态，不重放动作'), { outcomeUnknown: true })), budgetMs + 1000);
+        timer.unref?.();
         return await post('/tool', { action, args, budgetMs, ...identity }, signal);
       } finally {
         clearTimeout(timer);

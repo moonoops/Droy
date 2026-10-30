@@ -18,6 +18,7 @@ export const backendMessages = Object.freeze({
   '音频接口未及时响应': 'The audio interface did not respond in time.',
   '音频读取失败': 'Could not read audio.',
   '工具调用缺少引擎身份': 'The tool call is missing an engine identity.',
+  '授权等待已超时，请重新发起。': 'Permission request expired. Start a new request.',
   '手机工具未在预算内返回；先核实当前状态，不重放动作': 'The phone tool did not return within its time budget. Verify the current state before continuing; do not replay the action.',
   '手机尚未确认停止；恢复连接后先核实状态，不重放动作': 'The phone has not confirmed that it stopped. Verify its state after reconnecting; do not replay the action.',
   '转写启动缺少可信调用身份': 'Starting transcription requires a trusted call identity.',

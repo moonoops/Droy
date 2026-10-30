@@ -1,0 +1,9 @@
+Material Symbols Rounded
+Copyright Google LLC
+https://github.com/google/material-design-icons
+SVG geometry converted to Android VectorDrawable; no path modification.
+
+photo_camera: symbols/android/photo_camera/materialsymbolsrounded/photo_camera_24px.xml
+Git blob SHA-1: 1620f8caab61d77769a0e7cc32e314f4c093556d
+https://github.com/google/material-design-icons/blob/master/symbols/android/photo_camera/materialsymbolsrounded/photo_camera_24px.xml
+Original Android vector geometry retained; root tint and fill follow the app icon system.

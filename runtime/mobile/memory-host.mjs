@@ -58,10 +58,10 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
   openMemory = options => MemoryStore.open(options), openPrivacy = options => PrivacyStore.open(options),
   executorFactory = options => new RootExecutor(options), qualify = qualifyExecutor,
   paths = hostPaths, clock = Date.now, reportError = () => {}, archiveFactory, featureAvailable = () => false } = {}) {
-  let snapshot, host, executor, memory, privacyStore, initialization, activation, closed = false;
+  let snapshot, host, executor, memory, privacyStore, privacyOpening, privacyInspection, initialization, activation, closed = false;
   let initialized = false, ready = false, active = environment.DROY_MEMORY_PROTECTION_REQUIRED === '1', reason = 'MEMORY_DISABLED';
   let maintenance, extraction, archives, lastHousekeeping = 0, tickBusy = false, timer;
-  let startup, shutdown, tickCompletion, createArchives = archiveFactory;
+  let startup, shutdown, tickCompletion, createArchives = archiveFactory, maintenanceOwner;
   const routes = new Map();
   const privacy = () => ctx.get('droyPrivacy');
   const boundary = () => ctx.get('droyExecution');
@@ -118,6 +118,12 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       privateRoots: ['droy-memory', 'droy-privacy', 'droy-history-spool', 'droy-execution', '.dsh', 'dsh-home']
         .map(name => join(host.filesDir, name)) };
   }
+  async function openPrivacyOnce(options) {
+    if (privacyStore) return privacyStore;
+    privacyOpening ??= openPrivacy(options).then(value => { privacyStore = value; return value; })
+      .finally(() => { privacyOpening = undefined; });
+    return privacyOpening;
+  }
   async function initializeStores() {
     ensureOpen();
     if (initialized) return;
@@ -126,7 +132,7 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       ensureOpen();
       const trusted = paths(permission.host);
       if (trusted.filesDir !== host.filesDir || typeof permission.initialize !== 'boolean') throw failure('MEMORY_INITIALIZATION_DENIED');
-      privacyStore = await openPrivacy({ directory: join(host.filesDir, 'droy-privacy'),
+      privacyStore = await openPrivacyOnce({ directory: join(host.filesDir, 'droy-privacy'),
         markerPath: join(host.filesDir, 'droy-privacy.identity.json'), initialize: permission.initialize });
       ensureOpen();
       memory = await openMemory({ directory: join(host.filesDir, 'droy-memory'), initialize: permission.initialize });
@@ -211,6 +217,38 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_USE_ENV_PROXY', 'NODE_EXTRA_CA_CERTS']
       .map(key => [key, environment[key] ?? '']))));
   }
+  async function existingAuthorizationStore() {
+    ensureOpen();
+    if (privacyStore) return privacyStore;
+    privacyInspection ??= (async () => {
+      const inspection = await bridge.memory({ operation: 'authorization.inspect' });
+      ensureOpen();
+      if (inspection.available !== true) return null;
+      const existing = paths(inspection.host);
+      // This path opens only an existing identity. It never initializes memory,
+      // starts capture, qualifies an executor, or enables model disclosure.
+      privacyStore = await openPrivacyOnce({ directory: join(existing.filesDir, 'droy-privacy'),
+        markerPath: join(existing.filesDir, 'droy-privacy.identity.json'), initialize: false });
+      return privacyStore;
+    })().finally(() => { privacyInspection = undefined; });
+    return privacyInspection;
+  }
+  const storedAuthorizationId = grant => hash(JSON.stringify([grant.url, grant.purpose, grant.configVersion]));
+  async function storedAuthorizations() {
+    const store = await existingAuthorizationStore();
+    if (!store) return [];
+    return (await store.listGrants()).map(grant => ({ id: storedAuthorizationId(grant), purpose: grant.purpose,
+      label: new URL(grant.url).host, model: new URL(grant.url).host, url: grant.url, authorized: true,
+      categories: grant.categories, configVersion: grant.configVersion }));
+  }
+  async function revokeStoredAuthorization(id, purpose) {
+    const store = await existingAuthorizationStore();
+    const grant = store && (await store.listGrants()).find(value => storedAuthorizationId(value) === id && value.purpose === purpose);
+    if (!grant) throw failure('MEMORY_ENDPOINT_REFRESH_REQUIRED');
+    // Invalidate waiters and active dispatch before committing the exact revoke.
+    privacy()?.invalidate();
+    return store.revokeEndpoint({ url: grant.url, purpose: grant.purpose, configVersion: grant.configVersion });
+  }
   async function processingEndpoints() {
     if (!(await status()).ready) return [];
     routes.clear();
@@ -251,7 +289,7 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
     if (!archives) throw failure('MEMORY_ARCHIVE_UNAVAILABLE');
   }
   function tick() {
-    if (closed || tickBusy || !active) return;
+    if (closed || tickBusy || !active || maintenanceOwner?.held) return;
     tickBusy = true;
     tickCompletion = (async () => { try {
       await bridge.memory({ operation: 'root-check' });
@@ -268,7 +306,30 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
     finally { tickBusy = false; } })();
     return tickCompletion;
   }
+  function maintenanceLease({ operationId }) {
+    ensureOpen();
+    if (typeof operationId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)) throw failure('MEMORY_MAINTENANCE_INVALID');
+    if (maintenanceOwner?.operationId === operationId) return maintenanceOwner.api;
+    if (maintenanceOwner?.held) throw failure('MEMORY_MAINTENANCE_CONFLICT');
+    const owner = { operationId, held: false, observedTick: undefined, observedRevision: undefined };
+    const status = () => ({ scope: 'memory-producers', operationId,
+      quiet: !closed && owner.held && !tickBusy && owner.observedTick === tickCompletion
+        && owner.observedRevision === maintenance?.revision() && !(extraction?.pendingWork?.().length),
+      producersSuspended: owner.held && !closed });
+    owner.api = Object.freeze({
+      async suspend() {
+        ensureOpen(); owner.held = true;
+        await startup; await tickCompletion;
+        await extraction?.whenIdle?.(); await maintenance?.whenIdle();
+        owner.observedTick = tickCompletion; owner.observedRevision = maintenance?.revision();
+        return status();
+      },
+      resume() { owner.held = false; return status(); }, status,
+    });
+    maintenanceOwner = owner; return owner.api;
+  }
   const memoryHost = {
+    maintenanceLease, storedAuthorizations, revokeStoredAuthorization,
     executionStatus: status, managementStatus, store, authorizeUi: requireMobileSession, getSettings, saveSettings,
     async featureStop() { if (!closed) await saveSettings({ enabled: false }); },
     capture: (operation, args) => bridge.history(operation === 'configure'
@@ -296,7 +357,7 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       await pipeline(value.stream, res);
     },
   };
-  const privacyHost = { status, store: getPrivacyStore, activate, routingIdentity };
+  const privacyHost = { nativeAccessPrompts: true, status, store: getPrivacyStore, activate, routingIdentity };
   const executionHost = { status, policy, get executor() {
     if (!executor) throw failure('MEMORY_EXECUTION_NOT_READY'); return executor;
   }, async authorizeTool(exec, state) {
@@ -349,7 +410,7 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
         const nativeStop = active ? bridge.memory({ operation: 'host-stop' })
           .catch(error => reportError(error.code ?? 'MEMORY_NATIVE_UNAVAILABLE')) : undefined;
         const outcomes = await Promise.allSettled([nativeStop, extraction?.dispose?.(), executor?.close()]);
-        await Promise.allSettled([activation, initialization, startup].filter(Boolean));
+        await Promise.allSettled([activation, initialization, privacyInspection, privacyOpening, startup].filter(Boolean));
         outcomes.push(...await Promise.allSettled([maintenance?.close(), archives?.close()]));
         await Promise.allSettled([tickCompletion].filter(Boolean));
         outcomes.push(...await Promise.allSettled([memory?.close(), privacyStore?.close()]));

@@ -1,0 +1,19 @@
+<resources>
+    <string name="native_team_title">智能体团队</string>
+    <string name="native_team_members">成员</string>
+    <string name="native_team_tasks">共享任务</string>
+    <string name="native_team_empty">当前对话尚无团队</string>
+    <string name="native_team_no_tasks">暂无共享任务</string>
+    <string name="native_team_failed">暂时无法读取团队</string>
+    <string name="native_team_retry">重试</string>
+    <string name="native_team_lead">主智能体</string>
+    <string name="native_team_member">成员</string>
+    <string name="native_team_member_failed">启动失败</string>
+    <string name="native_team_preparing">准备中</string>
+    <string name="native_team_pending">待处理</string>
+    <string name="native_team_in_progress">进行中</string>
+    <string name="native_team_completed">已完成</string>
+    <string name="native_team_owner">负责人：%1$s</string>
+    <string name="native_team_scopes">写入范围：%1$s</string>
+    <string name="native_team_blockers">等待任务：%1$s</string>
+</resources>

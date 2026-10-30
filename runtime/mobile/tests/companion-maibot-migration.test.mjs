@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { registerHooks } from 'node:module';
 import { CompanionStore } from '../companions/store.mjs';
+import { openLegacyCompanionStore, markLegacyFixture } from './fixtures/legacy-companion-db.mjs';
 import { defaultProfiles, LEGACY_COMPANION_PERSONAS } from '../companions/profiles.mjs';
 
 const imports = registerHooks({ resolve(specifier, context, next) {
@@ -18,15 +19,15 @@ const personaFields = ['personality', 'behaviorStyle', 'replyStyle'];
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'droy-maibot-migration-'));
-  let store = await CompanionStore.open({ directory });
+  let store = await openLegacyCompanionStore({ directory });
   t.after(async () => { await store?.close(); await rm(directory, { recursive: true, force: true }); });
   return {
     directory, get store() { return store; },
-    async reopen(edit) {
+    async reopen(edit, { legacy = false } = {}) {
       await store.close(); store = null;
       if (edit) {
         const db = new DatabaseSync(join(directory, 'companions.sqlite'));
-        try { edit(db); } finally { db.close(); }
+        try { if (legacy) markLegacyFixture(db); edit(db); } finally { db.close(); }
       }
       store = await CompanionStore.open({ directory });
     },
@@ -42,7 +43,7 @@ test('old stock personas upgrade without changing identity, configuration, sessi
   const defaults = new Map(defaultProfiles().map(profile => [profile.id, profile]));
   for (const id of defaults.keys()) {
     await f.store.updateProfile(id, {
-      name: 'Fictional custom ' + id, avatar: 'https://example.com/' + id + '.png',
+      name: 'Fictional custom ' + id,
       model: { provider: 'fixture', model: 'local-' + id },
       settings: { proactiveEnabled: true, memoryEnabled: false, allowProfanity: true, quietHours: null },
     });
@@ -51,6 +52,9 @@ test('old stock personas upgrade without changing identity, configuration, sessi
     await f.store.updateState(id, { summary: 'Fictional shared past ' + id, memoryRevision: 4,
       expressions: [{ situation: 'Fictional greeting', expression: 'Fictional shared expression', sourceIds: ['old-message'] }] });
   }
+  await f.reopen(db => {
+    for (const id of defaults.keys()) editProfile(db, id, profile => ({ ...profile, avatar: 'https://example.com/' + id + '.png' }));
+  }, { legacy: true });
   const before = new Map(await Promise.all([...defaults.keys()].map(async id => [id, {
     profile: await f.store.getProfile(id), state: await f.store.getState(id), messages: await f.store.listMessages(id),
   }])));
@@ -59,7 +63,7 @@ test('old stock personas upgrade without changing identity, configuration, sessi
   await memory.close();
   await f.reopen(db => {
     for (const id of defaults.keys()) editProfile(db, id, profile => ({ ...profile, ...structuredClone(LEGACY_COMPANION_PERSONAS[id]) }));
-  });
+  }, { legacy: true });
   for (const [id, previous] of before) {
     const expected = { ...previous.profile };
     for (const field of personaFields) expected[field] = defaults.get(id)[field];
@@ -81,7 +85,7 @@ test('preset migration compares each translation exactly and preserves partial c
     behaviorStyle: { zh: old.behaviorStyle.zh, en: 'Fictional custom behavior' },
     replyStyle: { zh: '虚构的自定义表达方式', en: old.replyStyle.en },
   };
-  await f.reopen(db => editProfile(db, 'maimai', profile => ({ ...profile, ...custom })));
+  await f.reopen(db => editProfile(db, 'maimai', profile => ({ ...profile, ...custom })), { legacy: true });
   const result = await f.store.getProfile('maimai');
   assert.deepEqual(result.personality, { zh: custom.personality.zh, en: current.personality.en });
   assert.deepEqual(result.behaviorStyle, { zh: current.behaviorStyle.zh, en: custom.behaviorStyle.en });
@@ -104,9 +108,11 @@ test('failed preset upgrade rolls back all profile changes and is retried on a l
   await assert.rejects(f.reopen(db => {
     for (const id of ['kaka', 'maimai']) editProfile(db, id, profile => ({ ...profile, ...structuredClone(LEGACY_COMPANION_PERSONAS[id]) }));
     db.exec("CREATE TRIGGER reject_maimai_upgrade BEFORE UPDATE ON profiles WHEN OLD.id='maimai' BEGIN SELECT RAISE(ABORT,'fictional upgrade failure'); END");
-  }), /fictional upgrade failure/);
+  }, { legacy: true }), /fictional upgrade failure/);
   const db = new DatabaseSync(join(f.directory, 'companions.sqlite'));
   try {
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 1);
+    assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('name_claims','creation_drafts','draft_uploads','creation_receipts')").get(), undefined);
     for (const id of ['kaka', 'maimai']) {
       const profile = JSON.parse(db.prepare('SELECT data FROM profiles WHERE id=?').get(id).data);
       for (const field of personaFields) assert.deepEqual(profile[field], LEGACY_COMPANION_PERSONAS[id][field]);

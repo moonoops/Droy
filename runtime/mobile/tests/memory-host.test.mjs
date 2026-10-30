@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PrivacyStore } from '../../privacy/store.mjs';
 import { createMobileMemoryHost } from '../memory-host.mjs';
 
 async function fixture(t, options = {}) {
@@ -32,6 +33,7 @@ async function fixture(t, options = {}) {
           return { host, runtimeEpoch: state.execution.epoch, challenge: 'native-secret', nativeQualificationId: 'a'.repeat(64) };
         case 'protection-activate':
           assert.equal(input.challenge, 'native-secret'); assert.match(input.qualificationId, /^[a-f0-9]{64}$/); return {};
+        case 'authorization.inspect': return { available: initialized || options.existingAuthorizationStore === true, host };
         case 'initialization.prepare': { const first = !initialized; initialized = true; return { host, initialize: first }; }
         case 'host-ready': state.execution.ready = true; return {};
         case 'activation.invalidate': state.execution.ready = false; state.activation.pendingEnable = false; return {};
@@ -250,4 +252,58 @@ test('processing grants match the actual URL, purpose and configuration version 
   assert.equal((await f.service.memoryHost.resolveProcessingEndpoint(selected.id, 'extraction')).configVersion, configVersion);
   configVersion = 'b'.repeat(64);
   await assert.rejects(f.service.memoryHost.resolveProcessingEndpoint(selected.id, 'extraction'), { code: 'PRIVACY_ROUTING_CHANGED' });
+});
+
+test('temporary deletion window waits for memory tick without disabling settings or probing again', async t => {
+  let block = false;
+  const entered = Promise.withResolvers(), finished = Promise.withResolvers();
+  const f = await fixture(t, { beforeOperation: async input => {
+    if (block && input.operation === 'root-check') { entered.resolve(); await finished.promise; }
+  } });
+  await f.service.start();
+  const before = structuredClone(f.state.settings);
+  block = true; const tick = f.service.tick(); await entered.promise;
+  const lease = f.service.memoryHost.maintenanceLease({ operationId: 'synthetic-delete' });
+  const held = lease.suspend(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(lease.status().quiet, false);
+  const count = f.calls.filter(value => value === 'root-check').length;
+  assert.equal(f.service.tick(), undefined);
+  finished.resolve(); await tick;
+  assert.equal((await held).quiet, true);
+  assert.deepEqual(f.state.settings, before);
+  assert.equal(f.calls.filter(value => value === 'root-check').length, count);
+  assert.equal(lease.resume().producersSuspended, false);
+});
+
+test('saved endpoint grants remain inspectable and exactly revocable after execution readiness is lost', async t => {
+  const f = await fixture(t); await f.service.start();
+  const store = await f.service.privacyHost.store();
+  const endpoint = { url: 'https://synthetic.invalid/v1/chat/completions', purpose: 'conversation', configVersion: 'a'.repeat(64) };
+  await store.grantEndpoint({ ...endpoint, categories: ['memory'] });
+  await store.grantEndpoint({ ...endpoint, purpose: 'extraction', categories: ['memory'] });
+  f.state.root.authorized = false; f.state.execution.ready = false;
+  f.services.droyPrivacy.prepareRoute = () => assert.fail('Revocation must not prepare a model route');
+  const entries = await f.service.memoryHost.storedAuthorizations();
+  assert.equal(entries.length, 2);
+  const target = entries.find(value => value.purpose === 'conversation');
+  await assert.rejects(f.service.memoryHost.revokeStoredAuthorization(target.id, 'extraction'), { code: 'MEMORY_ENDPOINT_REFRESH_REQUIRED' });
+  assert.equal((await f.service.memoryHost.revokeStoredAuthorization(target.id, target.purpose)).revoked, true);
+  assert.deepEqual((await store.listGrants()).map(value => value.purpose), ['extraction']);
+  assert.equal(f.state.execution.ready, false);
+});
+test('cold unready host opens only existing authorization storage without initializing memory or probing Root', async t => {
+  const f = await fixture(t, { active: true, existingAuthorizationStore: true });
+  const store = await PrivacyStore.open({ directory: join(f.directory, 'droy-privacy'), markerPath: join(f.directory, 'droy-privacy.identity.json'), initialize: true });
+  await store.grantEndpoint({ url: 'https://synthetic.invalid/v1/chat/completions', purpose: 'conversation', configVersion: 'a'.repeat(64), categories: ['memory'] });
+  await store.close();
+  f.state.root.authorized = false;
+  await f.service.start();
+  const before = f.calls.length;
+  const entries = await f.service.memoryHost.storedAuthorizations();
+  assert.equal(entries.length, 1);
+  assert.equal((await f.service.memoryHost.revokeStoredAuthorization(entries[0].id, entries[0].purpose)).revoked, true);
+  assert.deepEqual(f.calls.slice(before), ['authorization.inspect']);
+  assert.equal(f.qualification, 0);
+  await assert.rejects(f.service.memoryHost.store(), { code: 'MEMORY_NOT_INITIALIZED' });
+  assert.equal((await f.service.memoryHost.getSettings()).enabled, false);
 });

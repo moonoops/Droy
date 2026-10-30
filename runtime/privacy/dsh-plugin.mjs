@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrivacyError, normalizeEndpoint, sessionIdentity } from './policy.mjs';
 
 export const name = 'droy-privacy';
@@ -28,8 +28,8 @@ const DISPATCH_MESSAGES = Object.freeze({
     en: 'This conversation contains forgotten information. Start a new conversation to continue.',
   },
   PRIVACY_ENDPOINT_NOT_AUTHORIZED: {
-    zh: '当前模型尚未获准处理这些私人信息，请到记忆设置的“处理授权”中检查。',
-    en: 'This model is not authorized to process this private information. Check Processing permissions in Memory settings.',
+    zh: '当前模型尚未获准读取这些记忆。重试时请确认记忆访问请求。',
+    en: 'This model is not authorized to read this memory. Review the memory access request when you retry.',
   },
   PRIVACY_EXECUTION_UNVERIFIED: {
     zh: '私人信息保护尚未就绪，请检查 Root 授权和记忆设置中的保护状态后重试。',
@@ -59,6 +59,8 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
   const calls = new Set();
   const invalidationListeners = new Set();
   const pendingProtection = new Map();
+  const pendingAccess = new Map();
+  let accessEpoch = 0;
   let protectionEpoch = 0;
   let disposed = false;
   let everActive = false;
@@ -184,6 +186,60 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     if (epoch !== protectionEpoch) return { active: true, state: 'unknown' };
     return { active: true, state: record.state };
   }
+  function pendingEndpointAccess() {
+    return [...pendingAccess.values()].map(({ view }) => ({ ...view, categories: [...view.categories] }));
+  }
+  function resolveEndpointAccess(id, approved) {
+    const pending = pendingAccess.get(id);
+    if (!pending || typeof approved !== 'boolean') fail('PRIVACY_AUTHORIZATION_EXPIRED');
+    pending.finish(approved);
+    return { resolved: true };
+  }
+  function cancelEndpointAccess() {
+    accessEpoch++;
+    for (const pending of [...pendingAccess.values()]) pending.finish(false);
+  }
+  async function assertAllowedWithConsent(sessionId, detail, signal) {
+    const store = await getStore();
+    try { await store.assertAllowed({ sessionId, endpoint: detail.endpoint }); return; }
+    catch (error) {
+      if (error.code !== 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' || host?.nativeAccessPrompts !== true) throw error;
+    }
+    signal?.throwIfAborted();
+    if (pendingAccess.size >= 16) fail('PRIVACY_DISPATCH_BUSY');
+    const epoch = accessEpoch;
+    const session = await store.sessionState(sessionId);
+    const id = randomUUID();
+    const view = Object.freeze({ id, sessionId, provider: detail.provider, model: detail.model,
+      url: detail.endpoint.url, purpose: detail.endpoint.purpose, configVersion: detail.endpoint.configVersion,
+      categories: Object.freeze([...session.categories]), expiresAt: Date.now() + 120000 });
+    const approved = await new Promise(resolve => {
+      let timer;
+      const finish = value => {
+        if (!pendingAccess.delete(id)) return;
+        clearTimeout(timer); signal?.removeEventListener('abort', aborted); resolve(value);
+      };
+      const aborted = () => finish(false);
+      pendingAccess.set(id, { view, finish });
+      timer = setTimeout(aborted, 120000);
+      signal?.addEventListener('abort', aborted, { once: true });
+      if (signal?.aborted) aborted();
+    });
+    signal?.throwIfAborted();
+    if (!approved) fail('PRIVACY_ENDPOINT_NOT_AUTHORIZED');
+    await requireReady();
+    const freshRoute = await prepareRoute({ provider: detail.provider, model: detail.model }, detail.endpoint.purpose, signal);
+    const fresh = details(freshRoute).endpoint;
+    if (Object.keys(fresh).some(key => fresh[key] !== detail.endpoint[key])) fail('PRIVACY_ROUTING_CHANGED');
+    const current = await store.sessionState(sessionId);
+    if (epoch !== accessEpoch || current.state !== 'protected' || current.revision !== session.revision) fail('PRIVACY_AUTHORIZATION_REVOKED');
+    const existing = (await store.listGrants()).find(grant => Object.keys(fresh).every(key => grant[key] === fresh[key]));
+    if (epoch !== accessEpoch) fail('PRIVACY_AUTHORIZATION_REVOKED');
+    signal?.throwIfAborted();
+    await store.grantEndpoint({ ...fresh, categories: [...new Set([...(existing?.categories ?? []), ...session.categories])] });
+    signal?.throwIfAborted();
+    await store.assertAllowed({ sessionId, endpoint: fresh });
+  }
   async function beforeDisclosure({ sessionId, categories, sourceRefs, route, signal } = {}) {
     await requireReady(true);
     signal?.throwIfAborted();
@@ -198,7 +254,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
       await (await getStore()).protectSession(sessionId, { categories, sourceRefs });
       persisted = true;
       await ctx.get('droyExecution')?.beforeDisclosure(sessionId);
-      await (await getStore()).assertAllowed({ sessionId, endpoint: detail.endpoint });
+      await assertAllowedWithConsent(sessionId, detail, signal);
       await requireReady();
       signal?.throwIfAborted();
     } finally {
@@ -257,7 +313,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     await requireReady();
     const detail = details(route, options.purpose);
     if (detail.provider !== options.provider || detail.model !== options.model) fail('PRIVACY_ROUTE_MISMATCH');
-    await (await getStore()).assertAllowed({ sessionId: options.sessionId, endpoint: detail.endpoint });
+    await assertAllowedWithConsent(options.sessionId, detail, options.signal);
     return detail;
   }
   async function authorizeExecution(agent, signal) {
@@ -269,7 +325,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     if (record.state === 'forgotten') fail('PRIVACY_SESSION_FORGOTTEN');
     if (record.state === 'protected') {
       const route = await routeForAgent(agent, 'conversation', signal);
-      await (await getStore()).assertAllowed({ sessionId, endpoint: details(route).endpoint });
+      await assertAllowedWithConsent(sessionId, details(route), signal);
     }
     signal?.throwIfAborted();
     return { state: record.state };
@@ -280,7 +336,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     const record = await (await getStore()).sessionState(sessionId);
     if (record.state === 'unknown') fail('PRIVACY_SESSION_UNKNOWN');
     if (record.state === 'forgotten') fail('PRIVACY_SESSION_FORGOTTEN');
-    if (route) await (await getStore()).assertAllowed({ sessionId, endpoint: details(route).endpoint });
+    if (route) await assertAllowedWithConsent(sessionId, details(route), signal);
     signal?.throwIfAborted();
     return { state: record.state, categories: [...record.categories], sourceRefs: [...record.sourceRefs], revision: record.revision };
   }
@@ -321,6 +377,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
   }
   async function revokeEndpoint(route) {
     const endpoint = details(route).endpoint;
+    cancelEndpointAccess();
     const result = await (await getStore()).revokeEndpoint(endpoint);
     abortCalls(call => Object.keys(endpoint).every(key => call.detail.endpoint[key] === endpoint[key]));
     notifyInvalidated();
@@ -334,13 +391,14 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
   }
   function dispose() {
     disposed = true;
+    cancelEndpointAccess();
     abortCalls(() => true);
     notifyInvalidated(); invalidationListeners.clear();
   }
-  function invalidate() { abortCalls(() => true); notifyInvalidated(); }
+  function invalidate() { cancelEndpointAccess(); abortCalls(() => true); notifyInvalidated(); }
   return Object.freeze({ status, prepareRoute, routeForPrepared, routeForAgent, describeRoute,
     capturePiRoute, wrapDispatch, fetchFor, onAgentCreated, beforeDisclosure,
-    grantEndpoint, revokeEndpoint, forgetSources, authorizeExecution, getSourceSession, outputState, onInvalidated, invalidate, dispose });
+    grantEndpoint, revokeEndpoint, pendingEndpointAccess, resolveEndpointAccess, forgetSources, authorizeExecution, getSourceSession, outputState, onInvalidated, invalidate, dispose });
 }
 
 export function apply(ctx) {

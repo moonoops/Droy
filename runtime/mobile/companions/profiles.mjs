@@ -1,6 +1,7 @@
-export const COMPANION_IDS = Object.freeze(['kaka', 'maimai']);
-
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+
+export const COMPANION_TEMPLATE_IDS = Object.freeze(['kaka', 'maimai']);
 
 // Retained solely to upgrade unchanged shipped profiles without replacing user edits.
 export const LEGACY_COMPANION_PERSONAS = Object.freeze({
@@ -60,18 +61,25 @@ export const COMPANION_PERSONAS = Object.freeze({
 });
 
 export function assertCompanionId(id) {
-  if (!COMPANION_IDS.includes(id)) throw Object.assign(new Error('COMPANION_NOT_FOUND'), { code: 'COMPANION_NOT_FOUND' });
+  if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/u.test(id))
+    throw Object.assign(new Error('COMPANION_NOT_FOUND'), { code: 'COMPANION_NOT_FOUND' });
   return id;
 }
-
-export function defaultProfiles({ model = null, now = new Date().toISOString() } = {}) {
-  return COMPANION_IDS.map(id => ({
+export function assertTemplateId(id) {
+  if (!COMPANION_TEMPLATE_IDS.includes(id)) throw Object.assign(new Error('COMPANION_TEMPLATE_NOT_FOUND'), { code: 'COMPANION_TEMPLATE_NOT_FOUND' });
+  return id;
+}
+export function profileFromTemplate(templateId, { id = 'companion-' + randomUUID(), name = null, model = null,
+  now = new Date().toISOString() } = {}) {
+  assertTemplateId(templateId); assertCompanionId(id);
+  return {
     id,
-    name: id === 'kaka' ? '咔咔' : '麦麦',
-    nameCustomized: false,
-    displayName: { zh: id === 'kaka' ? '咔咔' : '麦麦', en: id === 'kaka' ? 'Kaka' : 'Maimai' },
-    avatar: `/droy/companions/assets/${id}.png`,
-    ...structuredClone(COMPANION_PERSONAS[id]),
+    templateId,
+    name,
+    nameCustomized: name !== null,
+    displayName: { zh: templateId === 'kaka' ? '咔咔' : '麦麦', en: templateId === 'kaka' ? 'Kaka' : 'Maimai' },
+    avatar: `/droy/companions/assets/${templateId}.png`,
+    ...structuredClone(COMPANION_PERSONAS[templateId]),
     personalityOverride: '',
     chatBackground: { type: 'default' },
     model: structuredClone(model),
@@ -80,14 +88,37 @@ export function defaultProfiles({ model = null, now = new Date().toISOString() }
     chatSessionId: null,
     createdAt: now,
     updatedAt: now,
-  }));
+  };
+}
+/** Schema-1 snapshots for migrations and explicit legacy fixtures, not an instance catalog. */
+export function defaultProfiles({ model = null, now = new Date().toISOString() } = {}) {
+  return COMPANION_TEMPLATE_IDS.map(templateId => ({ ...profileFromTemplate(templateId,
+    { id: templateId, name: templateId === 'kaka' ? '咔咔' : '麦麦', model, now }), nameCustomized: false }));
+}
+export function profileName(profile, locale = 'zh') {
+  const language = locale === 'en' ? 'en' : 'zh';
+  if (profile.name == null || (!profile.nameCustomized && Object.values(profile.displayName ?? {}).includes(profile.name)))
+    return profile.displayName?.[language] ?? profile.displayName?.zh ?? profile.id;
+  return profile.name;
+}
+export function normalizedName(value) {
+  if (typeof value !== 'string' || !value.trim() || [...value.trim()].length > 80 || Buffer.byteLength(value) > 320
+    || /[\u0000-\u001f\u007f]/u.test(value) || !value.isWellFormed())
+    throw Object.assign(new Error('COMPANION_INVALID_INPUT'), { code: 'COMPANION_INVALID_INPUT' });
+  return value.trim().normalize('NFKC').replace(/\s+/gu, ' ').toLocaleLowerCase('und');
+}
+export function profileNameKeys(profile) {
+  const automatic = profile.name == null || (!profile.nameCustomized && Object.values(profile.displayName ?? {}).includes(profile.name));
+  const values = automatic ? [...Object.values(profile.displayName ?? {}), ...Object.values(defaultProfiles().find(row => row.templateId === profile.templateId)?.displayName ?? {})]
+    : [profile.name];
+  return [...new Set(values.map(normalizedName))];
 }
 
 export function localizedProfile(profile, locale = 'zh') {
   const language = locale === 'en' ? 'en' : 'zh';
   return {
     ...structuredClone(profile),
-    name: !profile.nameCustomized && profile.name === profile.displayName?.zh ? profile.displayName[language] : profile.name,
+    name: profileName(profile, language),
     personality: profile.personalityOverride?.trim() ? profile.personalityOverride : profile.personality[language],
     behaviorStyle: profile.behaviorStyle[language],
     replyStyle: profile.replyStyle[language],

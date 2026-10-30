@@ -54,10 +54,12 @@ final class BackgroundRuntime {
 
     static synchronized boolean visible() { return visibleActivities > 0; }
 
-    static synchronized void activityStarted(Context context) {
+    static synchronized void activityStarted(Context context) { activityStarted(context, true); }
+
+    static synchronized void activityStarted(Context context, boolean startIfAllowed) {
         visibleActivities++;
         VoiceWake.visibilityChangedIfCreated();
-        if (!explicitlyStopped(context) && RuntimeService.canStart())
+        if (startIfAllowed && !explicitlyStopped(context) && RuntimeService.canStart())
             context.startForegroundService(new Intent(context, RuntimeService.class).setAction(RuntimeService.REFRESH));
         RuntimeService.refreshBackgroundPolicy();
     }

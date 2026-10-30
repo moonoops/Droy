@@ -149,9 +149,10 @@ export function rankMemoryCandidates(records,messages,{limit=12}={}) {
 }
 
 export class CompanionLearning {
-  constructor({store,memoryFor,generate,getLocale=()=> 'zh',options={}}) {
-    if (!store || typeof memoryFor !== 'function' || typeof generate !== 'function') fail('COMPANION_LEARNING_CONFIGURATION');
+  constructor({store,memoryFor,generate,getProfile=id=>store.getProfile(id),getLocale=()=> 'zh',options={}}) {
+    if (!store || typeof memoryFor !== 'function' || typeof generate !== 'function' || typeof getProfile !== 'function') fail('COMPANION_LEARNING_CONFIGURATION');
     this.store=store; this.memoryFor=memoryFor; this.generate=generate; this.getLocale=getLocale;
+    this.getProfile=getProfile;
     this.options={...defaults,...options}; this.running=new Map(); this.transientContexts=new Map();
     for (const key of Object.keys(defaults)) if (key!=='semanticRecall'&&(!Number.isSafeInteger(this.options[key]) || this.options[key]<1)) fail('COMPANION_LEARNING_CONFIGURATION');
     if(typeof this.options.semanticRecall!=='boolean')fail('COMPANION_LEARNING_CONFIGURATION');
@@ -306,7 +307,7 @@ export class CompanionLearning {
   }
   async run(id,{signal,force=false,learn=true,compact=true}={}) {
     checkSignal(signal);
-    const profile=await this.store.getProfile(id), initial=await this.store.getState(id), expected=revision(initial);
+    const profile=await this.getProfile(id), initial=await this.store.getState(id), expected=revision(initial);
     const result={companionId:id,learned:false,compacted:false,processedThrough:initial.learnedThroughMessageId ?? null,summaryThrough:initial.summaryThrough ?? null,hasMore:false};
     if(!profile.settings.memoryEnabled)return {...result,skipped:'disabled'};
     if(!profile.model)return {...result,skipped:'model_required'};
@@ -388,7 +389,7 @@ export class CompanionLearning {
   }
   async contextMessages(id,{signal}={}) {
     checkSignal(signal);
-    const profile=await this.store.getProfile(id),initial=await this.store.getState(id),expected=revision(initial),enabled=profile.settings.memoryEnabled;
+    const profile=await this.getProfile(id),initial=await this.store.getState(id),expected=revision(initial),enabled=profile.settings.memoryEnabled;
     while(true) {
       const state=await this.guard(id,expected,signal,enabled);
       const stale=(state.summaryRevision ?? 0)!==expected || state.summaryThrough===null;
@@ -424,7 +425,7 @@ export class CompanionLearning {
   async recall(id,messages,{signal,limit=this.options.recallLimit}={}) {
     checkSignal(signal);
     if(!Number.isInteger(limit)||limit<1||limit>100)fail('COMPANION_INVALID_INPUT');
-    const profile=await this.store.getProfile(id),state=await this.store.getState(id);
+    const profile=await this.getProfile(id),state=await this.store.getState(id);
     if(!profile.settings.memoryEnabled)return {items:[],total:0,enabled:false};
     if(!messages.some(message=>message.role==='user'&&!message.contextExcluded))return {items:[],total:0,candidates:0,enabled:true};
     const expected=revision(state), memory=await this.memoryFor(id);

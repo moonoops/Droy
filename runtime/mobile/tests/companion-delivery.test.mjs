@@ -4,12 +4,13 @@ import { mkdtemp,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompanionStore } from '../companions/store.mjs';
+import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { prepareReply,publishReply } from '../companions/delivery.mjs';
 
 const code=expected=>error=>error.code===expected;
 async function fixture(t) {
   const directory=await mkdtemp(join(tmpdir(),'droy-companion-delivery-'));
-  let store=await CompanionStore.open({directory});
+  let store=await openLegacyCompanionStore({directory});
   t.after(async()=>{await store.close();await rm(directory,{recursive:true,force:true});});
   await store.appendMessage('kaka',{id:'source',role:'user',text:'Fictional user question',status:'received'});
   await store.updateState('kaka',{pendingMessageIds:['source'],summary:'Fictional retained context'});

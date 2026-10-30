@@ -17,7 +17,11 @@ public final class RuntimeService extends Service {
     static volatile RuntimeService instance;
     static volatile String status = NativeLocale.text("引擎尚未启动", "Engine has not started");
     static volatile String webToken = "";
+    // Public correlation identity for one Host start; never derive this from an authentication token.
+    static volatile String runtimeIdentity = "";
     static volatile int webPort;
+    static volatile int hostPid;
+    static volatile String hostBirth = "";
     static volatile boolean ready;
     private static volatile Process lastProcess;
     private static ExecutorService lastWorker;
@@ -79,7 +83,12 @@ public final class RuntimeService extends Service {
         }
         if (intent != null && !REFRESH.equals(intent.getAction())) BackgroundRuntime.startedByUser(this);
         synchronized (RuntimeService.class) {
-            if (historyMaintenance) { status = NativeLocale.text("正在删除对话记录，请稍后启动", "Deleting conversation history. Start again shortly"); stopSelf(); return START_NOT_STICKY; }
+            if (historyMaintenance || NativeCompanionDeletion.pending(this)) {
+                // A foreground/boot refresh may arrive while accepted tasks drain.
+                // Keep the existing child alive; only reject a new launch.
+                if (starting || ready || process != null && process.isAlive()) return restartMode();
+                status = NativeLocale.text("正在清理伙伴数据", "Cleaning up companion data"); stopSelf(); return START_NOT_STICKY;
+            }
         }
         if (stopping) return START_NOT_STICKY;
         if (starting || (process != null && process.isAlive())) { scheduleBackgroundCheck(); return restartMode(); }
@@ -113,8 +122,8 @@ public final class RuntimeService extends Service {
     }
 
     private void stopIfBackgroundIdle() {
-        if (stopping || BackgroundRuntime.visible() || BackgroundRuntime.keepRunning(this)
-                || ChatFileTransfers.hasRuntimeWork()
+        if (stopping || NativeRuntimeHost.companionMaintenanceActive() || BackgroundRuntime.visible() || BackgroundRuntime.keepRunning(this)
+                || NativeRuntimeHost.hasMediaRuntimeWork()
                 || MemoryRuntime.get(this).requiresBackgroundRuntime()
                 || ToolProgress.current(this).optBoolean("active") || AudioTranscription.get(this).hasActiveJobs()
                 || VoiceRuntime.active(this)) return;
@@ -194,7 +203,7 @@ public final class RuntimeService extends Service {
     }
 
     static synchronized boolean canStart() {
-        if (historyMaintenance) return false;
+        if (historyMaintenance || NativeRuntimeHost.companionMaintenanceActive()) return false;
         RuntimeService active = instance;
         // Android can recreate a service before delivering its start command.
         // Its unused executor must not prevent the UI from starting the engine.
@@ -205,6 +214,7 @@ public final class RuntimeService extends Service {
     }
 
     private void startEngine() {
+        final long startedAt = android.os.SystemClock.elapsedRealtime();
         try {
             MemoryRuntime memoryHost = MemoryRuntime.get(this);
             memoryHost.prepareRuntimeStart();
@@ -214,10 +224,13 @@ public final class RuntimeService extends Service {
             RuntimeRelease release = RuntimeInstaller.release(this);
             runningRelease = release;
             if (stopping || Thread.currentThread().isInterrupted()) return;
-            appendLog(NativeLocale.text("运行包校验与准备完成", "Runtime verified and prepared"));
+            appendStartupPhase(NativeLocale.text("运行包校验与准备完成", "Runtime verified and prepared"), startedAt);
             File home = new File(getFilesDir(), "dsh-home"), workspace = new File(getFilesDir(), "workspace");
             if ((!home.isDirectory() && !home.mkdirs()) || (!workspace.isDirectory() && !workspace.mkdirs())) throw new IOException(NativeLocale.text("无法创建会话目录", "Unable to create the conversation directory"));
+            home = home.getCanonicalFile(); workspace = workspace.getCanonicalFile();
             webToken = randomToken();
+            runtimeIdentity = UUID.randomUUID().toString();
+            hostPid = 0; hostBirth = "";
             String bridgeToken = randomToken();
             if (bridge != null) bridge.stop();
             synchronized (launchLock) {
@@ -256,7 +269,7 @@ public final class RuntimeService extends Service {
             env.put("TZ", TimeZone.getDefault().getID());
             runBootstrap(executable, runtime, workspace, env);
             if (stopping) return;
-            appendLog(NativeLocale.text("手机运行配置已准备", "Mobile runtime configuration prepared"));
+            appendStartupPhase(NativeLocale.text("手机运行配置已准备", "Mobile runtime configuration prepared"), startedAt);
             ProcessBuilder builder = new ProcessBuilder(executable, "--expose-internals",
                 new File(runtime, "node_modules/@deepseek-ai/dsh/lib/bin.js").getAbsolutePath(),
                 "--profile", "mobile", "--host", "127.0.0.1", "--port", String.valueOf(webPort), "--no-open");
@@ -294,11 +307,14 @@ public final class RuntimeService extends Service {
                     if (code == 200) {
                         try { release.verifyReady(engine); }
                         catch (IOException mismatch) { throw new IllegalStateException(mismatch.getMessage(), mismatch); }
+                        int readyPid = engine.optInt("hostPid");
+                        String readyBirth = readyPid > 0 ? NativeCompanionDeletion.processBirth(readyPid) : null;
                         synchronized (launchLock) {
                             if (!stopping) {
+                                hostPid = readyPid; hostBirth = readyBirth == null ? "" : readyBirth;
                                 ready = true; status = NativeLocale.text("引擎运行中", "Engine running");
                                 applyOperationState();
-                                appendLog(NativeLocale.text("DSH 服务与 Android 工具已就绪", "DSH service and Android tools are ready"));
+                                appendStartupPhase(NativeLocale.text("DSH 服务与 Android 工具已就绪", "DSH service and Android tools are ready"), startedAt);
                                 updateNotification();
                                 scheduleBackgroundCheck();
                                 DroyNotificationService.processCurrentNotifications(this);
@@ -382,8 +398,12 @@ public final class RuntimeService extends Service {
     }
 
     static synchronized boolean canManageHistory() {
+        return !historyMaintenance && !NativeRuntimeHost.companionMaintenanceActive() && historyIdle();
+    }
+
+    private static boolean historyIdle() {
         Process child = lastProcess;
-        return !historyMaintenance && instance == null && (child == null || !child.isAlive())
+        return instance == null && (child == null || !child.isAlive())
             && !MemoryExecutionQualification.hasActiveProcesses()
             && (lastWorker == null || lastWorker.isTerminated());
     }
@@ -394,8 +414,24 @@ public final class RuntimeService extends Service {
         return true;
     }
 
+    static synchronized boolean beginHistoryChange(Context context) {
+        return !NativeCompanionDeletion.pending(context) && beginHistoryChange();
+    }
+
+    static synchronized boolean beginCompanionHistoryChange() {
+        if (historyMaintenance || !NativeRuntimeHost.companionMaintenanceActive() || !historyIdle()) return false;
+        historyMaintenance = true;
+        return true;
+    }
+
     static synchronized void endHistoryChange() {
         historyMaintenance = false;
+    }
+
+    static synchronized boolean companionMaintenanceHeld() {
+        return historyMaintenance && instance == null && (lastProcess == null || !lastProcess.isAlive())
+            && !MemoryExecutionQualification.hasActiveProcesses()
+            && (lastWorker == null || lastWorker.isTerminated());
     }
 
     private void readOutput(Process source) {
@@ -408,6 +444,10 @@ public final class RuntimeService extends Service {
                 if (code != null) appendLog(NativeLocale.text("运行时提示：", "Runtime notice: ") + code);
             }
         } catch (IOException e) { if (!stopping) appendLog(NativeLocale.text("读取运行日志失败：", "Unable to read runtime logs: ") + e.getClass().getSimpleName()); }
+    }
+
+    private void appendStartupPhase(String label, long startedAt) {
+        appendLog(label + " · " + (android.os.SystemClock.elapsedRealtime() - startedAt) + " ms");
     }
 
     private synchronized void appendLog(String line) {

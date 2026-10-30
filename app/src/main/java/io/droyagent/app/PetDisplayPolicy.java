@@ -7,7 +7,7 @@ final class PetDisplayPolicy {
     private long noticeUntil;
 
     static boolean valid(String value) { return "always".equals(value) || "adaptive".equals(value) || "off".equals(value); }
-    static String initial(boolean internal, boolean legacyEnabled) { return !legacyEnabled || internal ? "off" : "always"; }
+    static String initial(boolean internal, boolean legacyEnabled) { return !legacyEnabled || internal ? "off" : "adaptive"; }
 
     void observe(String identity, boolean active, boolean pending, boolean hasMessage, boolean alreadyRead, long now) {
         if (alreadyRead) noticeUntil = 0;

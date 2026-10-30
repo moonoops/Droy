@@ -264,6 +264,44 @@ test('concurrent creation is refused while the first model request remains activ
   release(); await service.waitForIdle();
 });
 
+test('pendingWork observes the same queued creation and generation Promises through final draft persistence without cancellation', async t => {
+  const available = Promise.withResolvers(), entered = Promise.withResolvers(), generating = Promise.withResolvers(), image = Promise.withResolvers();
+  const generator = mockGenerator(), original = generator.availability; let checks = 0, signal;
+  generator.availability = async () => { if (++checks === 1) { entered.resolve(); await available.promise; } return original(); };
+  generator.generate = async value => { signal = value.signal; generating.resolve(); await image.promise; return png(); };
+  const { service, home } = await fixture(t, generator);
+  assert.deepEqual(service.pendingWork(), []);
+  const caller = service.create(input); await entered.promise;
+  const queued = service.pendingWork(); assert.ok(Object.isFrozen(queued)); assert.deepEqual(queued, [caller]);
+  assert.equal(service.pendingWork()[0], caller);
+  let idle = false; const waiting = service.waitForIdle().then(() => { idle = true; });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(idle, false);
+  available.resolve(); const receipt = await caller; await generating.promise;
+  assert.match(receipt.status, /^generating_/);
+  const pending = service.pendingWork(); assert.equal(pending.length, 1); assert.notEqual(pending[0], caller);
+  assert.equal(service.pendingWork()[0], pending[0]); assert.equal(signal.aborted, false); assert.equal(idle, false);
+  image.resolve(); await waiting;
+  assert.deepEqual(service.pendingWork(), []);
+  const saved = JSON.parse(await readFile(join(home, 'pets', receipt.id, 'draft.json'), 'utf8'));
+  assert.equal(saved.status, 'reference_ready'); assert.equal(saved.referenceReady, true);
+  assert.equal(signal.aborted, false);
+});
+
+test('failed generation and rejected creation remove their real handles after the existing durable failure path completes', async t => {
+  const generating = Promise.withResolvers(), image = Promise.withResolvers(), generator = mockGenerator();
+  generator.generate = async () => { generating.resolve(); return image.promise; };
+  const { service, home } = await fixture(t, generator);
+  const receipt = await service.create(input); await generating.promise;
+  const pending = service.pendingWork()[0]; assert.ok(pending instanceof Promise);
+  image.reject(new Error('synthetic-private-image-failure')); await pending; await service.waitForIdle();
+  assert.deepEqual(service.pendingWork(), []);
+  const saved = JSON.parse(await readFile(join(home, 'pets', receipt.id, 'draft.json'), 'utf8'));
+  assert.equal(saved.status, 'error'); assert.equal(JSON.stringify(saved).includes('synthetic-private-image-failure'), false);
+  const invalid = service.create({ ...input, description: '' });
+  assert.equal(service.pendingWork()[0], invalid); await assert.rejects(invalid); await service.waitForIdle();
+  assert.deepEqual(service.pendingWork(), []);
+});
+
 test('OpenAI adapter binds credentials to official origin, asks for alpha, and uses edit reference', async () => {
   const calls = [];
   const adapter = createOpenAiPetGenerator({ resolveKey: async () => 'fictional-image-key', env: {}, fetchImpl: async (url, options) => {

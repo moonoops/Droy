@@ -13,7 +13,7 @@ class PortraitModeContractTest(unittest.TestCase):
         application = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot().find("application")
         activities = {activity.get(ANDROID + "name"): activity
                       for activity in application.findall("activity")}
-        self.assertIn(".MainActivity", activities)
+        self.assertIn(".NativeAppActivity", activities)
         self.assertIn(".media.ShareReceiveActivity", activities)
         for name, activity in activities.items():
             with self.subTest(activity=name):
@@ -28,3 +28,19 @@ class PortraitModeContractTest(unittest.TestCase):
                       for item in application.findall("property")}
         self.assertEqual("true", properties.get("android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"))
         self.assertEqual("false", properties.get("android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE"))
+
+    def test_native_launcher_and_legacy_component_share_the_native_target(self):
+        application = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot().find("application")
+        launchers = []
+        for entry in application:
+            for filter_ in entry.findall("intent-filter"):
+                categories = {item.get(ANDROID + "name") for item in filter_.findall("category")}
+                if "android.intent.category.LAUNCHER" in categories:
+                    launchers.append(entry.get(ANDROID + "name"))
+        self.assertEqual([".NativeAppActivity"], launchers)
+        native = next(item for item in application.findall("activity") if item.get(ANDROID + "name") == ".NativeAppActivity")
+        self.assertEqual("true", native.get(ANDROID + "exported"))
+        self.assertEqual("singleTask", native.get(ANDROID + "launchMode"))
+        alias = next(item for item in application.findall("activity-alias") if item.get(ANDROID + "name") == ".MainActivity")
+        self.assertEqual(".NativeAppActivity", alias.get(ANDROID + "targetActivity"))
+        self.assertFalse(alias.findall("intent-filter"))

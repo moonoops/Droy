@@ -37,6 +37,20 @@ final class PermissionSetupPlan {
         return ordered;
     }
 
+    static List<String> ordinaryForCapabilities(Set<String> enabled, Set<String> hardware, boolean allSystemPermissions) {
+        return forCapabilities(enabled, hardware, allSystemPermissions).stream()
+            .filter(step -> !Set.of("accessibility", "root", "shizuku").contains(step))
+            .filter(step -> !step.equals("camera") || hardware.contains("camera"))
+            .filter(step -> !step.equals("microphone") || hardware.contains("microphone"))
+            .filter(step -> !step.equals("location") || hardware.contains("location") || hardware.contains("wifi") || hardware.contains("telephony"))
+            .toList();
+    }
+
+    static List<String> ordinaryPermissionNames() {
+        return List.of("notifications", "calendar", "contacts", "microphone", "camera", "location", "bluetooth", "nearbyWifi",
+            "phoneState", "activityRecognition", "bodySensors", "notificationAccess", "usage", "brightness", "petOverlay");
+    }
+
     static String forPreference(String key) {
         return switch (key) {
             case "allowObserve", "allowControl", "allowScreenshot" -> "accessibility";

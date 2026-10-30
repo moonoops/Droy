@@ -97,6 +97,7 @@ async function fixture(t, { active = true, ready = true, execution = true, unava
   return { ctx, llm, pi, store, service, receipts, route, request, send, url,
     setMode: value => { mode = value; }, setReady: value => { readyFlag = value; }, setIdentity: value => { identity = value; },
     setStoreError: value => { storeError = value; },
+    setNativePrompts: value => { host.nativeAccessPrompts = value; },
     setLocale: value => { locale = value; },
     setActive: value => { activeFlag = value; }, setProviders: value => { providers = value; }, config, raw };
 }
@@ -289,7 +290,7 @@ test('actual DSH error chunks preserve privacy codes and follow live Chinese/Eng
   const route = await f.route();
   await assert.rejects(f.service.beforeDisclosure({ sessionId: 'subject', categories: ['memory'], sourceRefs: ['synthetic-source'], route }),
     error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && error.message === error.code);
-  await expect('subject', 'PRIVACY_ENDPOINT_NOT_AUTHORIZED', /记忆设置.*处理授权/, /Processing permissions in Memory settings/);
+  await expect('subject', 'PRIVACY_ENDPOINT_NOT_AUTHORIZED', /记忆访问请求/, /memory access request/);
   await f.service.grantEndpoint(route, { categories: ['memory'] });
   f.setReady(false);
   await expect('subject', 'PRIVACY_EXECUTION_UNVERIFIED', /Root.*保护状态/, /Root permission.*protection status/);
@@ -403,7 +404,7 @@ test('real title executor and compaction summarizer enforce separate purpose gra
   const session = Session.create('subject');
   const title = () => executeSessionTitleLlm(f.ctx, { provider: 'synthetic', model: 'synthetic', maxInputBytes: 8192, maxOutputTokens: 256, timeoutMs: 5000 },
     { session, signal: new AbortController().signal }, 'synthetic-title', { system: 'Create a title.', input: 'SYNTHETIC_PRIVATE_RECORD', messageSeqs: [0], selectReasoningEffort: () => undefined });
-  await assert.rejects(title(), error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && /记忆设置.*处理授权/.test(error.message));
+  await assert.rejects(title(), error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && /记忆访问请求/.test(error.message));
   assert.equal(f.receipts.length, 0);
   await f.service.grantEndpoint(await f.route('session-title'), { categories: ['memory'] });
   assert.equal((await title()).finish.kind, 'stop');
@@ -412,7 +413,7 @@ test('real title executor and compaction summarizer enforce separate purpose gra
   const agent = { options: { provider: 'synthetic', model: 'synthetic' }, session };
   const compact = () => BasicCompactionEngine.prototype.summarize.call(owner,
     { messages: f.request().messages }, agent, new AbortController().signal);
-  await assert.rejects(compact(), error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && /记忆设置.*处理授权/.test(error.message));
+  await assert.rejects(compact(), error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && /记忆访问请求/.test(error.message));
   assert.equal(f.receipts.length, 1);
   await f.service.grantEndpoint(await f.route('compaction'), { categories: ['memory'] });
   assert.equal((await compact()).llmStreamCall, true);
@@ -537,4 +538,73 @@ test('real DSH agent creation awaits protection and its conversation reaches the
   assert.equal(f.receipts.length, 1);
   assert.equal(f.receipts[0].private, true);
   await handle.dispose();
+});
+
+async function waitForAccess(service) {
+  for (let i = 0; i < 100; i++) {
+    const pending = service.pendingEndpointAccess();
+    if (pending.length) return pending[0];
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.fail('Missing endpoint authorization request');
+}
+test('native first use waits for explicit endpoint/category consent then resumes without a second model request', async t => {
+  const f = await fixture(t); f.setNativePrompts(true);
+  const route = await f.route('conversation');
+  const pending = f.service.beforeDisclosure({ sessionId: 'first-use', categories: ['memory', 'location'], sourceRefs: ['memory:fixture'], route });
+  const request = await waitForAccess(f.service);
+  assert.equal(request.url, f.url + '/chat/completions');
+  assert.equal(request.purpose, 'conversation');
+  assert.deepEqual([...request.categories].sort(), ['location', 'memory']);
+  assert.equal(request.configVersion.length, 64); assert.equal(f.receipts.length, 0);
+  assert.equal((await f.store.listGrants()).length, 0);
+  f.service.resolveEndpointAccess(request.id, true); await pending;
+  assert.equal(f.service.pendingEndpointAccess().length, 0);
+  assert.equal((await f.store.listGrants()).length, 1);
+  const result = await f.send(f.request('first-use'));
+  assert.equal(result.at(-1).reason.kind, 'stop'); assert.equal(f.receipts.length, 1);
+});
+test('declining, cancelling and changed routing never create a grant or expose private data', async t => {
+  for (const action of ['decline', 'cancel', 'routing']) {
+    const f = await fixture(t); f.setNativePrompts(true);
+    const route = await f.route('conversation'); const controller = new AbortController();
+    const pending = f.service.beforeDisclosure({ sessionId: action, categories: ['memory'], sourceRefs: ['memory:fixture'], route, signal: controller.signal });
+    const outcome = assert.rejects(pending);
+    const request = await waitForAccess(f.service);
+    if (action === 'cancel') controller.abort();
+    else { if (action === 'routing') f.setIdentity('changed'); f.service.resolveEndpointAccess(request.id, action === 'routing'); }
+    await outcome;
+    assert.equal(f.service.pendingEndpointAccess().length, 0);
+    assert.equal((await f.store.listGrants()).length, 0); assert.equal(f.receipts.length, 0);
+    assert.throws(() => f.service.resolveEndpointAccess(request.id, true), /EXPIRED/);
+  }
+});
+
+test('revocation or changing the protected sources while a prompt is open invalidates approval', async t => {
+  for (const action of ['revoke', 'source']) {
+    const f = await fixture(t); f.setNativePrompts(true);
+    const route = await f.route('conversation');
+    const pending = f.service.beforeDisclosure({ sessionId: 'changed', categories: ['memory'], sourceRefs: ['memory:fixture'], route });
+    const outcome = assert.rejects(pending);
+    const request = await waitForAccess(f.service);
+    if (action === 'revoke') await f.service.revokeEndpoint(route);
+    else {
+      await f.store.protectSession('changed', { categories: ['location'], sourceRefs: ['location:new'] });
+      f.service.resolveEndpointAccess(request.id, true);
+    }
+    await outcome;
+    assert.equal((await f.store.listGrants()).length, 0);
+    assert.equal(f.receipts.length, 0);
+  }
+});
+
+test('granting a new category preserves existing consent for the same endpoint and purpose', async t => {
+  const f = await fixture(t); f.setNativePrompts(true);
+  const route = await f.route('conversation');
+  await f.service.grantEndpoint(route, { categories: ['memory'] });
+  const pending = f.service.beforeDisclosure({ sessionId: 'new-category', categories: ['location'], sourceRefs: ['location:fixture'], route });
+  const request = await waitForAccess(f.service);
+  assert.deepEqual(request.categories, ['location']);
+  f.service.resolveEndpointAccess(request.id, true); await pending;
+  assert.deepEqual((await f.store.listGrants())[0].categories, ['location', 'memory']);
 });

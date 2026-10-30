@@ -401,7 +401,7 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
   }
   function Avatar({ companion, small = false }) {
     return h('span', { className: 'droy-im-avatar' + (small ? ' is-small' : ''), 'aria-hidden': true,
-      'data-portrait-avatar': companion.id === 'maimai' && /\/assets\/maimai\.png(?:[?#]|$)/.test(companion.avatarUrl || '') ? 'true' : undefined },
+      'data-portrait-avatar': companion.templateId === 'maimai' && /\/assets\/maimai\.png(?:[?#]|$)/.test(companion.avatarUrl || '') ? 'true' : undefined },
       companion.avatarUrl ? h('img', { src: companion.avatarUrl, alt: '', draggable: false }) : companion.name?.slice(0, 1));
   }
   const dateFormats = new Map();

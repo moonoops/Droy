@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CompanionStore } from '../companions/store.mjs';
+import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { prepareReply } from '../companions/delivery.mjs';
 import { localTimeContext, isQuietTime } from '../companions/dialogue.mjs';
 import { encodePng } from '../png.mjs';
@@ -39,10 +40,10 @@ async function eventually(read, description, timeout = 1500) {
   assert.fail('Timed out: ' + description);
 }
 
-async function fixture(t, { directory, store: suppliedStore, debounceMs = 1000, learningMessages = 12, stream, failWorkCreation = false,seedKakaModel=true,locale='en',beforeInitialize,withAttachments=false } = {}) {
+async function fixture(t, { directory, store: suppliedStore, legacy = true, debounceMs = 1000, learningMessages = 12, stream, failWorkCreation = false,seedKakaModel=true,locale='en',beforeInitialize,withAttachments=false } = {}) {
   const ownsDirectory = !directory;
   directory ??= await mkdtemp(join(tmpdir(), 'droy-companion-runtime-'));
-  const store = suppliedStore ?? await CompanionStore.open({ directory });
+  const store = suppliedStore ?? await (legacy ? openLegacyCompanionStore({ directory }) : CompanionStore.open({ directory }));
   const ctx = new Context();
   await ctx.plugin(Tools, { mode: 'native' });
   await ctx.plugin(Prompt);
@@ -71,6 +72,7 @@ async function fixture(t, { directory, store: suppliedStore, debounceMs = 1000, 
     },
   });
   ctx.provide('agentDefaultModel', { currentSelection: () => modelA });
+  ctx.provide('droyInitialization',{defaultWorkspaceId:null});
   const originals = {};
   const controller = {};
   for (const name of ['create', 'prompt', 'fork', 'selectModel']) {
@@ -86,6 +88,15 @@ async function fixture(t, { directory, store: suppliedStore, debounceMs = 1000, 
       steer(message) { this.deliveries.push({ mode: 'steer', message }); this.status = 'running'; },
       cancel(reason) { calls.cancelled.push({ id: this.id, reason }); this.status = 'idle'; },
     };
+    let status='idle',activity=Promise.resolve(),retire;
+    Object.defineProperty(agent,'status',{get:()=>status,set(value){
+      const previous=status;
+      if(value==='running'&&previous!=='running')activity=new Promise(resolve=>{retire=resolve;});
+      status=value;
+      if(value==='idle'&&previous!=='idle')retire?.();
+      if(value!==previous)runtimeContext.emit('agent/status',{agent,status:value});
+    }});
+    agent.whenIdle=async()=>{let current;do{await(current=activity);}while(current!==activity);};
     agent.session = { id: agent.id };
     const scope = createScope(runtimeContext, agent); agent.ctx = scope.ctx;
     await input.setup(scope.ctx, agent);
@@ -117,13 +128,15 @@ async function fixture(t, { directory, store: suppliedStore, debounceMs = 1000, 
     async resolveCallConfig(config) { return config; },
   });
   if(withAttachments)await ctx.plugin(MobileAttachments,{dshHome:join(directory,'attachment-host')});
-  await ctx.plugin({ name: 'companion-runtime-fixture', inject: ['tools', 'systemPrompt', 'settings', 'workspaceRegistry', 'workingDirectory', 'agentDefaultModel', 'sessionController', 'agents', 'llm',...(withAttachments?['attachments']:[])],
+  await ctx.plugin({ name: 'companion-runtime-fixture', inject: ['tools', 'systemPrompt', 'settings', 'workspaceRegistry', 'workingDirectory', 'agentDefaultModel', 'droyInitialization', 'sessionController', 'agents', 'llm',...(withAttachments?['attachments']:[])],
     apply(scope) { runtimeContext = scope; } });
   const runtime = new CompanionRuntime({ ctx: runtimeContext, store, directory, options: { debounceMs, learningMessages }, notify: value => calls.notifications.push(value) });
   await beforeInitialize?.({ctx:runtimeContext,store,directory});
   await runtime.initialize();
-  if(seedKakaModel)await store.updateProfile('kaka',{model:modelA});
-  await store.updateProfile('maimai', { model: modelB });
+  for (const profile of await store.profiles()) {
+    if (seedKakaModel && profile.id === 'kaka') await store.updateProfile(profile.id, { model: modelA });
+    if (profile.id === 'maimai') await store.updateProfile(profile.id, { model: modelB });
+  }
   let closed = false;
   const close = async () => {
     if (closed) return; closed = true;
@@ -270,13 +283,220 @@ test('each companion uses its own model and resumes its durable chat identity', 
   assert.deepEqual(restored.options, modelA);
 });
 
-test('first use adopts the completed setup model and later work-default changes do not replace it',async t=>{
+test('new instances remain lazy and first concurrent use creates one durable private workspace and chat', async t => {
+  const f = await fixture(t, { legacy: false, seedKakaModel: false });
+  const initial = (await f.store.profiles())[0];
+  await f.runtime.start();
+  assert.equal(f.workspaces.size, 1); assert.equal(initial.workspaceId, null);
+  assert.equal(f.calls.agents.length, 0); assert.equal(f.calls.llm.length, 0);
+  const created = await f.store.createProfile({ requestId: 'lazy-create', templateId: 'maimai', name: 'Fictional second instance', model: null });
+  await Promise.all([f.runtime.startInstance(created.profile.id), f.runtime.startInstance(created.profile.id)]);
+  assert.equal(f.workspaces.size, 1); assert.equal(f.calls.agents.length, 0);
+  const [first, second] = await Promise.all([f.runtime.agent(created.profile.id), f.runtime.agent(created.profile.id)]);
+  assert.equal(first, second); assert.equal(f.calls.agents.length, 1); assert.equal(f.workspaces.size, 2);
+  const profile = await f.store.getProfile(created.profile.id);
+  assert.equal(profile.chatSessionId, first.id); assert.equal(profile.model, null);
+  assert.equal(f.workspaces.get(profile.workspaceId).path, join(f.directory, profile.id, 'work'));
+  assert.deepEqual((await f.store.listSessions(profile.id)).map(owner => owner.sessionId), [first.id]);
+  assert.equal((await f.runtime.identityForAgent(first)).appearanceId, 'maimai');
+  const originalWorkspace = profile.workspaceId;
+  await f.runtime.close();
+  const resumed = new CompanionRuntime({ ctx: f.ctx, store: f.store, directory: f.directory });
+  t.after(() => resumed.close()); await resumed.initialize();
+  const restored = await resumed.agent(profile.id);
+  assert.equal(restored.id, first.id); assert.equal((await f.store.getProfile(profile.id)).workspaceId, originalWorkspace);
+  assert.equal(f.workspaces.size, 2); assert.equal(f.calls.agents.at(-1).resumed, true);
+});
+
+test('missing saved workspace bindings surface an error without inventing a replacement identity', async t => {
+  const f = await fixture(t, { legacy: false, seedKakaModel: false }), profile = (await f.store.profiles())[0];
+  await f.store.updateProfile(profile.id, { workspaceId: 'missing-durable-workspace' });
+  const count = f.workspaces.size;
+  await assert.rejects(f.runtime.agent(profile.id), code('COMPANION_WORKSPACE_NOT_FOUND'));
+  assert.equal((await f.store.getProfile(profile.id)).workspaceId, 'missing-durable-workspace');
+  assert.equal(f.workspaces.size, count); assert.equal(f.calls.agents.length, 0);
+  await f.runtime.close();
+  const reopened = new CompanionRuntime({ ctx: f.ctx, store: f.store, directory: f.directory });
+  t.after(() => reopened.close());
+  await assert.rejects(reopened.initialize(), code('COMPANION_WORKSPACE_NOT_FOUND'));
+  assert.equal((await f.store.getProfile(profile.id)).workspaceId, 'missing-durable-workspace');
+});
+
+test('same-template instances keep Planner, Replyer, memory, media, work, notifications and stop state isolated', async t => {
+  const f = await fixture(t, { legacy: false, seedKakaModel: false, withAttachments: true, learningMessages: 1,
+    stream: async function* (call) {
+      let input; try { input = JSON.parse(call.input.messages[0].content[0].text); } catch {}
+      const text = input?.stage ? '[]' : input?.suppliedMemories ? JSON.stringify({ impressions: [], expressions: [], jargon: [], memories: [] })
+        : input?.candidates ? JSON.stringify({ recordIds: input.candidates.map(item => item.recordId) }) : 'A fictional scoped reply.';
+      yield { type: 'text-delta', text }; yield { type: 'finish', reason: { kind: 'stop' } };
+    } });
+  const alpha = (await f.store.createProfile({ requestId: 'same-template-alpha', templateId: 'kaka', name: 'Fictional Alpha',
+    personalityOverride: 'Fictional Alpha persona', model: null,
+    settings: { proactiveEnabled: true, quietHours: { enabled: false, start: '22:00', end: '09:00' } } })).profile;
+  const beta = (await f.store.createProfile({ requestId: 'same-template-beta', templateId: 'kaka', name: 'Fictional Beta',
+    personalityOverride: 'Fictional Beta persona', model: modelA })).profile;
+  assert.equal(alpha.templateId, beta.templateId); assert.notEqual(alpha.id, beta.id);
+  await Promise.all([f.runtime.startInstance(alpha.id), f.runtime.startInstance(beta.id)]);
+  const [a, b] = await Promise.all([f.runtime.agent(alpha.id), f.runtime.agent(beta.id)]);
+  const aOwner = await f.store.sessionOwner(a.id), bOwner = await f.store.sessionOwner(b.id);
+  assert.notEqual(a.id, b.id); assert.notEqual(aOwner.workspaceId, bOwner.workspaceId);
+  assert.equal(aOwner.companionId, alpha.id); assert.equal(bOwner.companionId, beta.id);
+  const file = Buffer.from('Fictional Alpha-only file content');
+  const ref = await f.ctx.attachments.saveFile({ data: file, name: 'alpha.txt' });
+  const upload = { id: 'alpha-private-file', name: ref.name, mediaType: 'text/plain', bytes: ref.bytes, ref,
+    url: `/droy/companions/${alpha.id}/attachments/alpha-private-file` };
+  await f.store.putUpload(alpha.id, upload);
+  await f.runtime.submit(alpha.id, { clientId: 'alpha-source', text: 'Fictional Alpha-only conversation', attachments: [upload] });
+  await f.runtime.submit(beta.id, { clientId: 'beta-source', text: 'Fictional Beta-only conversation' });
+  await Promise.all([f.runtime.flush(alpha.id), f.runtime.flush(beta.id)]);
+  for (const [agent, own, other] of [[a, 'Alpha-only', 'Beta-only'], [b, 'Beta-only', 'Alpha-only']]) {
+    const assembly = await f.ctx.systemPrompt.assemble({ agent, scope: agent });
+    assert.ok(assembly.sections.some(section => section.text.includes(own.split('-')[0] + ' persona')));
+    assert.match(JSON.stringify(assembly.contexts), new RegExp(own));
+    assert.doesNotMatch(JSON.stringify(assembly.contexts), new RegExp(other));
+  }
+  const exec = agent => ({ agent, signal: new AbortController().signal });
+  const saved = await f.ctx.tools.get('companion_remember', a).execute({ text: 'Fictional Alpha preference', sourceIds: ['alpha-source'] }, exec(a));
+  assert.equal(saved.record.companionId, alpha.id);
+  assert.deepEqual(saved.record.sourceRefs, [`im:${alpha.id}:alpha-source`]);
+  assert.equal((await (await f.runtime.memory(beta.id)).query()).total, 0);
+  await assert.rejects(f.ctx.tools.get('companion_remember', b).execute({ text: 'Borrowed fictional fact', sourceIds: ['alpha-source'] }, exec(b)), code('COMPANION_LEARNING_SOURCE_REQUIRED'));
+  const read = await f.ctx.tools.get('companion_attachment', a).execute({ attachmentId: upload.id }, exec(a));
+  assert.equal(read.text, file.toString()); assert.equal(read.integrityVerified, true);
+  await assert.rejects(f.ctx.tools.get('companion_attachment', b).execute({ attachmentId: upload.id }, exec(b)), code('COMPANION_ATTACHMENT_SCOPE'));
+  assert.equal((await f.runtime.learner.maintain(alpha.id)).learned, true);
+  assert.ok(!JSON.stringify(await f.store.getState(beta.id)).includes('alpha-source'));
+  f.ctx.agentDefaultModel.currentSelection = () => modelB;
+  await f.runtime.reply(aOwner, { msg_id: 'alpha-source', reply_reference: 'Respond to Alpha only.' });
+  assert.deepEqual(f.calls.llm.at(-1).config, modelB);
+  assert.match(f.calls.llm.at(-1).input.system, /Fictional Alpha persona/);
+  assert.doesNotMatch(JSON.stringify(f.calls.llm.at(-1).input), /Beta-only/);
+  await f.runtime.reply(bOwner, { msg_id: 'beta-source', reply_reference: 'Respond to Beta only.' });
+  assert.deepEqual(f.calls.llm.at(-1).config, modelA);
+  assert.deepEqual(f.calls.notifications.map(value => [value.companionId, value.name]), [[alpha.id, alpha.name], [beta.id, beta.name]]);
+  assert.equal((await f.store.getProfile(alpha.id)).model, null);
+  assert.deepEqual((await f.store.getProfile(beta.id)).model, modelA);
+  const [aTask, bTask] = await Promise.all([
+    f.runtime.startWork(alpha.id, { title: 'Fictional Alpha work', goal: 'Alpha-only goal' }),
+    f.runtime.startWork(beta.id, { title: 'Fictional Beta work', goal: 'Beta-only goal' }),
+  ]);
+  assert.equal((await f.store.sessionOwner(aTask.sessionId)).companionId, alpha.id);
+  assert.equal((await f.store.sessionOwner(bTask.sessionId)).companionId, beta.id);
+  const bDeliveries = b.deliveries.length;
+  await f.runtime.cancel(alpha.id);
+  await eventually(() => f.runtime.chatExecution(alpha.id).quiescent, 'Alpha chat stopped');
+  assert.equal(f.runtime.chatExecution(beta.id).quiescent, false);
+  assert.equal(b.status, 'running'); assert.equal(b.deliveries.length, bDeliveries);
+  assert.equal(f.ctx.agents.get(aTask.sessionId).status, 'running');
+  assert.equal(f.ctx.agents.get(bTask.sessionId).status, 'running');
+  await f.runtime.wake(alpha.id, { kind: 'proactive' });
+  assert.equal(a.deliveries.length, 2); assert.equal(b.deliveries.length, bDeliveries);
+  await f.runtime.wake(beta.id, { kind: 'proactive' });
+  assert.equal(b.deliveries.length, bDeliveries, 'Beta retains its own proactive permission');
+  for (const profile of [alpha, beta]) {
+    const current = await f.store.getProfile(profile.id);
+    await assert.rejects(f.ctx.sessionController.create({ workspaceId: current.workspaceId }), code('COMPANION_WORKSPACE_MANAGED'));
+    await assert.rejects(f.ctx.sessionController.prompt({ sessionId: current.chatSessionId, prompt: 'Ordinary entry' }), code('COMPANION_SESSION_MANAGED'));
+  }
+});
+
+test('an inherited model stays null and an existing Planner follows each current global selection',async t=>{
   const f=await fixture(t,{seedKakaModel:false});assert.equal((await f.store.getProfile('kaka')).model,null);
   f.ctx.agentDefaultModel.currentSelection=()=>modelB;
   const agent=await f.runtime.agent('kaka');assert.deepEqual(agent.options,modelB);
+  const request=async()=>{
+    await f.ctx.systemPrompt.assemble({agent,scope:agent});
+    return agent.ctx.waterfall('agent/request',{},()=>Promise.resolve(agent.options));
+  };
+  assert.deepEqual(await request(),modelB);
+  assert.equal((await f.store.getProfile('kaka')).model,null);
   f.ctx.agentDefaultModel.currentSelection=()=>modelA;
-  assert.deepEqual((await f.store.getProfile('kaka')).model,modelB);
+  assert.deepEqual(await request(),modelA);
+  assert.equal((await f.store.getProfile('kaka')).model,null);
   assert.equal(await f.runtime.agent('kaka'),agent);
+});
+
+test('existing saved references remain explicit and clearing the override resumes inheritance',async t=>{
+  const f=await fixture(t),agent=await f.runtime.agent('kaka');
+  f.ctx.agentDefaultModel.currentSelection=()=>modelB;
+  const request=async()=>{
+    await f.ctx.systemPrompt.assemble({agent,scope:agent});
+    return agent.ctx.waterfall('agent/request',{},()=>Promise.resolve(agent.options));
+  };
+  assert.deepEqual(await request(),modelA);
+  assert.deepEqual((await f.store.getProfile('kaka')).model,modelA,'A pre-existing non-null reference remains an explicit selection');
+  await f.store.updateProfile('kaka',{model:null});
+  assert.deepEqual(await request(),modelB);
+  assert.equal((await f.store.getProfile('kaka')).model,null);
+  f.ctx.agentDefaultModel.currentSelection=()=>modelA;
+  assert.deepEqual(await request(),modelA);
+  assert.equal(await f.runtime.agent('kaka'),agent,'Changing the source does not replace the durable chat identity');
+});
+
+test('an in-flight prepared request keeps its model snapshot and the next request resolves the new default',async t=>{
+  const started=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  const f=await fixture(t,{seedKakaModel:false,stream:async function*(){started.resolve();await release.promise;
+    yield {type:'text-delta',text:'Fictional stable request'};yield {type:'finish',reason:{kind:'stop'}};}});
+  const selection=structuredClone(modelA);f.ctx.agentDefaultModel.currentSelection=()=>selection;
+  const profile=await f.store.getProfile('kaka'),first=f.runtime.generate(profile,'Fictional system','Fictional input');
+  await started.promise;Object.assign(selection,modelB);
+  assert.deepEqual(f.calls.llm[0].config,modelA);
+  assert.equal(f.calls.llm[0].input.provider,modelA.provider);assert.equal(f.calls.llm[0].input.model,modelA.model);
+  release.resolve();await first;
+  await f.runtime.generate(profile,'Fictional system','A new fictional input');
+  assert.deepEqual(f.calls.llm[1].config,modelB);
+  assert.equal((await f.store.getProfile('kaka')).model,null);
+});
+
+test('inherited Replyer and emoji requests resolve the current global without saving an override',async t=>{
+  const f=await fixture(t,{seedKakaModel:false,stream:async function*(call){
+    yield {type:'text-delta',text:call.input.system.includes('emoji_index')?JSON.stringify({emoji_index:1}):'Fictional inherited reply'};
+    yield {type:'finish',reason:{kind:'stop'}};
+  }}),agent=await f.runtime.agent('kaka'),owner=await f.store.sessionOwner(agent.id);
+  await f.store.appendMessage('kaka',{id:'inherited-reply-source',role:'user',text:'Fictional inherited source'});
+  await f.runtime.reply(owner,{msg_id:'inherited-reply-source',reply_reference:'Fictional answer'});
+  assert.deepEqual(f.calls.llm.at(-1).config,modelA);
+  f.ctx.agentDefaultModel.currentSelection=()=>modelB;
+  await f.runtime.sendEmoji(owner,{msg_id:'inherited-reply-source'});
+  assert.deepEqual(f.calls.llm.at(-1).config,modelB);
+  assert.equal((await f.store.getProfile('kaka')).model,null);
+});
+
+test('inherited learning and context compaction use current models while raw memory guards remain authoritative',async t=>{
+  let f;
+  f=await fixture(t,{seedKakaModel:false,learningMessages:1,stream:async function*(call){
+    const input=JSON.parse(call.input.messages[0].content[0].text);
+    const text=input.stage?'[]':input.suppliedMemories?JSON.stringify({impressions:[],expressions:[],jargon:[],memories:[]}):'A fictional compacted context';
+    if(input.suppliedMemories)f.ctx.agentDefaultModel.currentSelection=()=>modelB;
+    yield {type:'text-delta',text};yield {type:'finish',reason:{kind:'stop'}};
+  }});
+  await f.store.appendMessage('kaka',{id:'inherited-learning-source',role:'user',text:'Fictional inherited learning evidence'});
+  const learned=await f.runtime.learner.maintain('kaka');
+  assert.equal(learned.learned,true);
+  assert.deepEqual(f.calls.llm[0].config,modelA);
+  assert.ok(f.calls.llm.slice(1).every(call=>call.config.provider===modelB.provider));
+  await f.store.updateProfile('kaka',{settings:{memoryEnabled:false}});
+  Object.assign(f.runtime.learner.options,{compactAfter:4,retainMessages:1,batchMessages:8});
+  for(let index=0;index<4;index++)await f.store.appendMessage('kaka',{id:'inherited-compaction-'+index,role:'user',text:'Fictional context '+index});
+  const context=await f.runtime.learner.contextMessages('kaka');
+  assert.equal(context.state.summary,'A fictional compacted context');
+  assert.deepEqual(f.calls.llm.at(-1).config,modelB);
+  assert.equal((await f.store.getProfile('kaka')).model,null);
+});
+
+test('proactive inherited companions can wake while a missing model still rejects explicit sending',async t=>{
+  const f=await fixture(t,{seedKakaModel:false});
+  f.ctx.agentDefaultModel.currentSelection=()=>undefined;
+  assert.equal((await f.runtime.learner.maintain('kaka')).skipped,'model_required');
+  await assert.rejects(f.runtime.submit('kaka',{clientId:'no-effective-model',text:'Fictional missing-model input'}),code('COMPANION_MODEL_REQUIRED'));
+  assert.equal((await f.store.listMessages('kaka')).messages.length,0);
+  f.ctx.agentDefaultModel.currentSelection=()=>modelB;
+  await f.store.updateProfile('kaka',{settings:{proactiveEnabled:true,quietHours:{enabled:false,start:'22:00',end:'09:00'}}});
+  await f.store.updateState('kaka',{lastUserAt:new Date(0).toISOString()});
+  f.runtime.scheduleProactive('kaka',new Date().toISOString());
+  await eventually(()=>f.calls.agents.some(call=>call.agent.deliveries.length),'inherited proactive dispatch');
+  assert.deepEqual(f.calls.agents[0].agent.options,modelB);
+  assert.equal((await f.store.getProfile('kaka')).model,null);
 });
 
 test('separate work requests create separate restricted sessions and preserve task ownership', async t => {
@@ -539,6 +759,191 @@ test('real DSH aborted-turn reasons remain cancellation rather than failed tasks
   assert.equal(f.runtime.state('kaka').error,undefined);
 });
 
+test('chat cancellation confirms a pure queue and a scheduled wait without creating an Agent',async t=>{
+  const f=await fixture(t);
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:true,cancelRequested:false});
+  await f.runtime.submit('kaka',{clientId:'cancel-queued-only',text:'Fictional queued input'});
+  assert.equal(f.runtime.chatExecution('kaka').quiescent,false);
+  assert.deepEqual(await f.runtime.cancel('kaka'),{cancelRequested:true});
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:true,cancelRequested:true});
+  assert.deepEqual((await f.store.getState('kaka')).pendingMessageIds,[]);
+  const saved={waitingUntil:new Date(Date.now()+60000).toISOString(),pendingIntent:{kind:'wait',sessionId:'unopened-chat'}};
+  await f.store.updateState('kaka',saved);f.runtime.scheduleWait('kaka',saved);
+  assert.equal(f.runtime.chatExecution('kaka').quiescent,false);
+  await f.runtime.cancel('kaka');
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:true,cancelRequested:true});
+  assert.equal((await f.store.getState('kaka')).waitingUntil,null);
+  assert.equal(f.calls.agents.length,0);
+  await f.runtime.submit('kaka',{clientId:'after-cancel-new-input',text:'A new fictional input'});
+  assert.equal(f.runtime.chatExecution('kaka').cancelRequested,false);
+});
+
+test('a send still persisting at cancellation prevents an unsupported quiescent observation',async t=>{
+  const started=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  const f=await fixture(t),append=f.store.appendMessage.bind(f.store);
+  f.store.appendMessage=async(id,input)=>{started.resolve();await release.promise;return append(id,input);};
+  const sending=f.runtime.submit('kaka',{clientId:'persisting-send-source',text:'Fictional input being persisted'});
+  await started.promise;await f.runtime.cancel('kaka');
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:false,cancelRequested:true});
+  release.resolve();await sending;
+  assert.equal(f.runtime.chatExecution('kaka').quiescent,false);
+  await f.runtime.cancel('kaka');
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:true,cancelRequested:true});
+  assert.equal(f.calls.agents.length,0);
+});
+
+test('idle phase and Agent status do not confirm cancellation until public whenIdle resolves',async t=>{
+  const f=await fixture(t),agent=await f.runtime.agent('kaka'),gate=Promise.withResolvers(),events=[];
+  await eventually(()=>f.runtime.chatExecution('kaka').quiescent,'initial public idle observation');
+  agent.whenIdle=()=>gate.promise;
+  const stop=f.runtime.subscribe(event=>events.push(event));
+  assert.deepEqual(await f.runtime.cancel('kaka'),{cancelRequested:true});
+  assert.equal(agent.status,'idle');assert.equal(f.runtime.state('kaka').phase,'idle');
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:false,cancelRequested:true});
+  assert.ok(events.every(event=>!event.status.chatExecution.quiescent));
+  gate.resolve();
+  await eventually(()=>f.runtime.chatExecution('kaka').quiescent,'public activity retirement');
+  stop();assert.deepEqual(events.at(-1).status.chatExecution,{quiescent:true,cancelRequested:true});
+});
+
+test('a rejected cancel remains unconfirmed while its real Agent is running',async t=>{
+  const f=await fixture(t);
+  await f.runtime.submit('kaka',{clientId:'rejected-cancel-source',text:'Fictional active input'});await f.runtime.flush('kaka');
+  const agent=await f.runtime.agent('kaka'),cancel=agent.cancel.bind(agent);
+  agent.cancel=()=>{throw Object.assign(new Error('Fictional cancellation rejection'),{code:'FIXTURE_CANCEL_REJECTED'});};
+  await assert.rejects(f.runtime.cancel('kaka'),code('FIXTURE_CANCEL_REJECTED'));
+  assert.equal(agent.status,'running');
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:false,cancelRequested:true});
+  agent.cancel=cancel;cancel({kind:'user'});
+  await eventually(()=>f.runtime.chatExecution('kaka').quiescent,'late retirement after refused cancellation');
+});
+
+test('a failing public idle observation cannot become a successful stop confirmation',async t=>{
+  const f=await fixture(t),agent=await f.runtime.agent('kaka');
+  await eventually(()=>f.runtime.chatExecution('kaka').quiescent,'initial public idle observation');
+  const whenIdle=agent.whenIdle;
+  agent.whenIdle=async()=>{throw new Error('Fictional retirement observation failure');};
+  await f.runtime.cancel('kaka');
+  await eventually(()=>f.runtime.state('kaka').chatStopUnconfirmed,'failed public observation');
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:false,cancelRequested:true});
+  agent.whenIdle=whenIdle;
+  await f.runtime.cancel('kaka');
+  await eventually(()=>f.runtime.chatExecution('kaka').quiescent,'a subsequent valid observation');
+});
+
+test('an aborted Replyer that settles late keeps cancellation pending even with an idle Agent',async t=>{
+  const started=Promise.withResolvers(),release=Promise.withResolvers();let signal;
+  const f=await fixture(t,{stream:async function*(call){signal=call.input.signal;started.resolve();await release.promise;
+    yield {type:'text-delta',text:'A fictional late reply'};yield {type:'finish',reason:{kind:'stop'}};}});
+  const agent=await f.runtime.agent('kaka'),owner=await f.store.sessionOwner(agent.id);
+  await f.store.appendMessage('kaka',{id:'late-reply-source',role:'user',text:'Fictional source'});
+  const reply=f.runtime.reply(owner,{msg_id:'late-reply-source',reply_reference:'Fictional answer'}).then(value=>({value}),error=>({error}));
+  await started.promise;
+  await f.runtime.cancel('kaka');
+  assert.equal(agent.status,'idle');assert.equal(signal.aborted,true);
+  assert.deepEqual(f.runtime.status('kaka').chatExecution,{quiescent:false,cancelRequested:true});
+  release.resolve();assert.ok((await reply).error);
+  await eventually(()=>f.runtime.chatExecution('kaka').quiescent,'aborted Replyer promise settlement');
+  assert.equal((await f.store.listMessages('kaka')).messages.some(message=>message.role==='assistant'),false);
+});
+
+test('cancellation observes an unopened recovery and prevents its saved reply from being published later',async t=>{
+  const f=await fixture(t),started=Promise.withResolvers(),release=Promise.withResolvers();
+  await f.store.appendMessage('kaka',{id:'recovery-cancel-source',role:'user',text:'Fictional recovery source',status:'received'});
+  await prepareReply({store:f.store,companionId:'kaka',sourceMessageIds:['recovery-cancel-source'],parts:['A saved fictional reply']});
+  const getState=f.store.getState.bind(f.store);let blocked=false;
+  f.store.getState=async id=>{const saved=await getState(id);if(!blocked){blocked=true;started.resolve();await release.promise;}return saved;};
+  const recovery=f.runtime.recoverReply('kaka');await started.promise;
+  await f.runtime.cancel('kaka');
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:false,cancelRequested:true});
+  release.resolve();await recovery;
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:true,cancelRequested:true});
+  assert.equal((await f.store.listMessages('kaka')).messages.some(message=>message.role==='assistant'),false);
+  assert.equal(f.calls.agents.length,0);
+});
+
+test('a chat Agent that finishes opening after cancellation never receives the cancelled batch',async t=>{
+  const f=await fixture(t),started=Promise.withResolvers(),release=Promise.withResolvers();
+  const create=f.ctx.agents.create.bind(f.ctx.agents);
+  f.ctx.agents.create=async input=>{started.resolve();await release.promise;return create(input);};
+  await f.runtime.submit('kaka',{clientId:'late-opening-source',text:'Fictional input cancelled during opening'});
+  const flushing=f.runtime.flush('kaka');await started.promise;
+  await f.runtime.cancel('kaka');
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:false,cancelRequested:true});
+  release.resolve();await flushing;
+  await eventually(()=>f.runtime.chatExecution('kaka').quiescent,'late opening settles without a driver');
+  assert.deepEqual(f.calls.agents[0].agent.deliveries,[]);
+  assert.deepEqual(f.runtime.state('kaka').pending,[]);
+  assert.deepEqual((await f.store.getState('kaka')).pendingMessageIds,[]);
+});
+
+test('a rejected late opening cannot put a cancelled batch back into the pending queue',async t=>{
+  const f=await fixture(t),started=Promise.withResolvers(),release=Promise.withResolvers();
+  f.ctx.agents.create=async()=>{started.resolve();await release.promise;throw new Error('Fictional late opening rejection');};
+  await f.runtime.submit('kaka',{clientId:'rejected-opening-source',text:'Fictional input cancelled during opening'});
+  const flushing=f.runtime.flush('kaka').then(value=>({value}),error=>({error}));await started.promise;
+  await f.runtime.cancel('kaka');assert.equal(f.runtime.chatExecution('kaka').quiescent,false);
+  release.resolve();assert.ok((await flushing).error);
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:true,cancelRequested:true});
+  assert.deepEqual(f.runtime.state('kaka').pending,[]);
+});
+
+test('chat stop confirmation does not claim that an independent work task has stopped',async t=>{
+  const f=await fixture(t),task=await f.runtime.startWork('kaka',{title:'Independent fictional work',goal:'Continue independent work'});
+  const worker=f.ctx.agents.get(task.sessionId);
+  assert.equal(worker.status,'running');
+  await f.runtime.cancel('kaka');
+  assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:true,cancelRequested:true});
+  assert.equal(worker.status,'running');
+  assert.equal((await f.store.getMessage('kaka',task.taskId)).task.state,'running');
+});
+
+test('authenticated list, message snapshots and SSE distinguish cancellation acknowledgement from quiescence',{timeout:8000},async t=>{
+  const gate=Promise.withResolvers();t.after(()=>gate.resolve());
+  const f=await fixture(t),agent=await f.runtime.agent('kaka');
+  await eventually(()=>f.runtime.chatExecution('kaka').quiescent,'initial public idle observation');
+  agent.whenIdle=()=>gate.promise;
+  const token='fictional-companion-stop-observation-token',previousToken=process.env.DROY_WEB_TOKEN;
+  process.env.DROY_WEB_TOKEN=token;
+  const handler=createCompanionHandler({ctx:f.ctx,runtime:f.runtime,store:f.store}),abort=new AbortController();
+  const server=createServer((req,res)=>handler(req,res));
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{
+    abort.abort();gate.resolve();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
+    if(previousToken===undefined)delete process.env.DROY_WEB_TOKEN;else process.env.DROY_WEB_TOKEN=previousToken;
+  });
+  const base='http://127.0.0.1:'+server.address().port+'/droy/companions',headers={cookie:'droy_session='+token,'content-type':'application/json'};
+  const api=async(path='',options={})=>{const response=await fetch(base+path,{headers,...options}),value=await response.json();
+    assert.equal(response.status,200,JSON.stringify(value));return value;};
+  assert.equal((await fetch(base+'/kaka/messages')).status,401);
+  const events=await fetch(base+'/events',{headers,signal:AbortSignal.any([abort.signal,AbortSignal.timeout(5000)])});
+  const reader=events.body.getReader();await reader.read();
+  let buffered='';const decoder=new TextDecoder();
+  const nextStatus=async quiescent=>{
+    for(;;){
+      let end;
+      while((end=buffered.indexOf('\n\n'))>=0){
+        const frame=buffered.slice(0,end);buffered=buffered.slice(end+2);
+        if(frame.startsWith('data: ')){
+          const event=JSON.parse(frame.slice(6));
+          if(event.companionId==='kaka'&&event.status?.chatExecution.quiescent===quiescent)return event.status;
+        }
+      }
+      const part=await reader.read();assert.equal(part.done,false);buffered+=decoder.decode(part.value,{stream:true});
+    }
+  };
+  assert.deepEqual(await api('/kaka/cancel',{method:'POST',body:'{}'}),{cancelRequested:true});
+  assert.deepEqual((await nextStatus(false)).chatExecution,{quiescent:false,cancelRequested:true});
+  const pending=await api('/kaka/messages'),listed=await api();
+  assert.equal(pending.status.phase,'idle');
+  assert.deepEqual(pending.status.chatExecution,{quiescent:false,cancelRequested:true});
+  assert.deepEqual(listed.companions.find(profile=>profile.id==='kaka').status.chatExecution,pending.status.chatExecution);
+  gate.resolve();
+  assert.deepEqual((await nextStatus(true)).chatExecution,{quiescent:true,cancelRequested:true});
+  assert.deepEqual((await api('/kaka/messages')).status.chatExecution,{quiescent:true,cancelRequested:true});
+  abort.abort();
+});
+
 test('restart completes an older saved multi-part reply without replaying the user',async t=>{
   const f=await fixture(t);
   await f.runtime.submit('kaka',{clientId:'partial-reply',text:'Fictional request'});await f.runtime.flush('kaka');
@@ -558,10 +963,12 @@ test('restart completes an older saved multi-part reply without replaying the us
   assert.deepEqual((await f.store.getState('kaka')).pendingMessageIds,[]);
 });
 
-test('an unrecognized voice remains playable but only starts understanding after its original message is transcribed',async t=>{
+test('an unrecognized voice is admitted with empty text and remains playable',async t=>{
   const f=await fixture(t);
   await f.runtime.submit('kaka',{clientId:'voice-message',text:'',voice:{attachmentId:'fictional-audio',url:'/fictional-audio',transcriptionState:'failed'}});
-  assert.equal(f.runtime.state('kaka').pending.length,0);assert.equal(f.calls.agents.length,0);
+  assert.equal(f.runtime.state('kaka').pending.length,1);
+  assert.equal((await f.store.getMessage('kaka','voice-message')).text,'');
+  assert.equal((await f.store.getMessage('kaka','voice-message')).voice.transcriptionState,'failed');
   await f.runtime.transcribeVoice('kaka','voice-message','Fictional recovered transcript');await f.runtime.flush('kaka');
   assert.equal((await f.store.listMessages('kaka')).messages.length,1);
   assert.equal((await f.store.getMessage('kaka','voice-message')).text,'Fictional recovered transcript');
@@ -816,4 +1223,23 @@ test('authenticated HTTP attachment and memory access remain scoped to the addre
   const own = await request('/maimai/memories');
   assert.equal(own.status, 200);
   assert.equal((await own.json()).items[0].payload.text, 'Fictional Maimai-only memory');
+});
+
+test('deleting a locally rejected message does not need memory or change another message', async t => {
+  const f = await fixture(t);
+  await f.store.appendMessage('kaka', { id: 'kept-message', role: 'user', text: 'Keep this fictional message.' });
+  f.runtime.memory = () => { throw new Error('A missing message has no memory to clean'); };
+  assert.deepEqual(await f.runtime.removeMessage('kaka', 'never-admitted'), { removed: true });
+  assert.equal((await f.store.getMessage('kaka', 'kept-message')).text, 'Keep this fictional message.');
+});
+
+test('reply transport headers never enter delivered text or notifications',async t=>{
+  const raw='[msg_id=12345678-1234-1234-1234-123456789abc 2026-10-30T02:21:58.247Z reply_target=87654321-4321-4321-4321-cba987654321]\nFictional reply';
+  const f=await fixture(t,{stream:async function*(){yield {type:'text-delta',text:raw};yield {type:'finish',reason:{kind:'stop'}};}});
+  await f.runtime.submit('kaka',{clientId:'header-source',text:'Fictional question'});
+  await f.runtime.flush('kaka');
+  const agent=await f.runtime.agent('kaka');
+  const result=await f.runtime.reply(await f.store.sessionOwner(agent.id),{msg_id:'header-source',reply_reference:'Reply naturally.'});
+  assert.equal(result.text,'Fictional reply');
+  assert.equal((await f.store.getMessage('kaka',result.messageIds[0])).text,'Fictional reply');
 });

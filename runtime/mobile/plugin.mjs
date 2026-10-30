@@ -20,6 +20,8 @@ import { resolveMobileLocale } from './locale.mjs';
 import { translateBackendText } from './backend-i18n.mjs';
 import { protectHardwareDisclosure } from './hardware-disclosure.mjs';
 import { installCompanions } from './companions/host.mjs';
+import { installNativeApi } from './native-api.mjs';
+import { installCompanionMaintenanceHost } from './companions/maintenance-host.mjs';
 
 export const name = 'droy-android-use';
 export const inject = ['tools', 'llm', 'attachments', 'webServer', 'settings', 'agents', 'userQuestions', 'systemPrompt', 'droyPluginPolicy'];
@@ -31,6 +33,8 @@ export function apply(ctx) {
   const message = text => translateBackendText(text, getLocale());
   const bridge = createBridge({ getLocale });
   installCompanions(ctx,bridge);
+  installNativeApi(ctx);
+  installCompanionMaintenanceHost(ctx);
   installSetupServices(ctx, bridge);
   const audio = installAudioServices(ctx, bridge);
   installCompanionIdentity(ctx, bridge);
@@ -40,7 +44,8 @@ export function apply(ctx) {
   ctx.on('session/event', (session, event) => progress.sessionEvent(session, event));
   ctx.effect(() => () => progress.dispose());
   installPetInteractions(ctx, progress);
-  installPetGeneration(ctx);
+  const petGeneration = installPetGeneration(ctx);
+  ctx.provide('droyPetGeneration', petGeneration);
   installNotificationManagement(ctx, bridge, defineTool);
   installNotificationControl(ctx);
   installDroySkills(ctx);
@@ -63,7 +68,7 @@ export function apply(ctx) {
       && ctx.get('droyCompanionStartup')?.phase==='ready'
       && definitions.every(tool => tools.includes(tool.name));
     res.writeHead(ready ? 200 : 503, {'Content-Type':'application/json','Cache-Control':'no-store'});
-    res.end(JSON.stringify({ready,...runtimeVersions,...(!ready?{pendingServices,companions:ctx.get('droyCompanionStartup')}:{})}));
+    res.end(JSON.stringify({ready,hostPid:process.pid,...runtimeVersions,...(!ready?{pendingServices,companions:ctx.get('droyCompanionStartup')}:{})}));
   } });
   ctx.webServer.register({ kind:'exact', path:'/droy/preferences', async handler(req,res) {
     if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }

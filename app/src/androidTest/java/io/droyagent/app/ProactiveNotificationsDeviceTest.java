@@ -23,7 +23,7 @@ import static org.junit.Assert.*;
 /** Native publication and permissions with fictional recipients; no messages leave the device. */
 @RunWith(AndroidJUnit4.class)
 public class ProactiveNotificationsDeviceTest {
-    private static final String[] KEYS = {"notifyLocalEnabled", "notifyAppsEnabled", "notifyAllowedApps", "proactiveNotificationRecords", "toolsStopped", "allowRoot"};
+    private static final String[] KEYS = {"notifyMessagesEnabled", "notifyTasksEnabled", "notifyLocalEnabled", "notifyAppsEnabled", "notifyAllowedApps", "proactiveNotificationRecords", "toolsStopped", "allowRoot"};
     private Context context;
     private SharedPreferences preferences;
     private ProactiveNotifications notices;
@@ -42,6 +42,7 @@ public class ProactiveNotificationsDeviceTest {
         preferences.edit().putBoolean("notifyLocalEnabled", true).putBoolean("notifyAppsEnabled", false).putString("notifyAllowedApps", "[]").putBoolean("toolsStopped", false).commit();
         notices = ProactiveNotifications.get(context);
         notices.request(new JSONObject().put("operation", "activate").put("enabled", true));
+        notices.request(new JSONObject().put("operation", "configure").put("messagesEnabled", true).put("tasksEnabled", true));
         task = "fictional-notice-" + java.util.UUID.randomUUID();
     }
 
@@ -75,46 +76,17 @@ public class ProactiveNotificationsDeviceTest {
     }
 
     @Test public void aDisabledLocalChannelCanBeExplicitlyRetriedAfterEnabling() throws Exception {
-        notices.request(new JSONObject().put("operation", "configure").put("localEnabled", false));
+        notices.request(new JSONObject().put("operation", "configure").put("tasksEnabled", false));
         assertEquals("failed", result(send("1", "result", "system", "虚构结果")).getString("status"));
-        notices.request(new JSONObject().put("operation", "configure").put("localEnabled", true));
+        notices.request(new JSONObject().put("operation", "configure").put("tasksEnabled", true));
         assertEquals("published", result(send("1", "result", "system", "虚构结果")).getString("status"));
     }
 
-    @Test public void appPreparationIsNotSendingAndRevocationStopsSubsequentOperations() throws Exception {
-        String pkg = context.getPackageName() + ".test";
-        JSONObject request = send("1", "app-message", "app", "仅存在本地的虚构消息");
-        request.getJSONArray("destinations").getJSONObject(0).put("packageName", pkg).put("target", "虚构测试会话");
-        assertEquals("failed", result(request).getString("status"));
-        notices.request(new JSONObject().put("operation", "configure").put("appsEnabled", true)
-            .put("allowedApps", new JSONArray().put(new JSONObject().put("packageName", pkg).put("target", "虚构测试会话"))));
-        JSONObject prepared = result(request);
-        assertEquals("requires_action", prepared.getString("status"));
-        notices.checkAppOperation(task);
-        notices.appActionDispatched(task);
-        notices.request(new JSONObject().put("operation", "configure").put("appsEnabled", false));
-        try { notices.checkAppOperation(task); fail("Revoked app notification continued"); }
-        catch (IllegalStateException expected) { assertTrue(expected.getMessage().contains("关闭")); }
-        notices.end(task);
-        assertEquals("unknown", result(request).getString("status"));
-        assertTrue(result(request).getBoolean("duplicate"));
-    }
-
-    @Test public void multiChannelRetryKeepsTheAlreadyPublishedDestinationQuiet() throws Exception {
-        String pkg = context.getPackageName() + ".test";
-        JSONObject request = send("1", "urgent-matter", "system", "虚构紧急重要事项").put("attention", "urgent");
-        request.getJSONArray("destinations").put(new JSONObject().put("channel", "app")
-            .put("packageName", pkg).put("target", "虚构测试会话"));
-        JSONArray first = notices.request(request).getJSONArray("results");
-        assertEquals("published", first.getJSONObject(0).getString("status"));
-        assertEquals("task_urgent", find(first.getJSONObject(0).getString("noticeId")).getNotification().getChannelId());
-        assertEquals("failed", first.getJSONObject(1).getString("status"));
-        notices.request(new JSONObject().put("operation", "configure").put("appsEnabled", true)
-            .put("allowedApps", new JSONArray().put(new JSONObject().put("packageName", pkg).put("target", "虚构测试会话"))));
-        JSONArray retried = notices.request(request).getJSONArray("results");
-        assertEquals(first.getJSONObject(0).getString("noticeId"), retried.getJSONObject(0).getString("noticeId"));
-        assertTrue("Do not alert the successful channel again", retried.getJSONObject(0).getBoolean("duplicate"));
-        assertEquals("requires_action", retried.getJSONObject(1).getString("status"));
+    @Test public void retiredExternalDestinationsAreRejectedBeforeAnyPublication() throws Exception {
+        JSONObject request = send("1", "retired-app", "system", "Synthetic local result");
+        request.getJSONArray("destinations").put(new JSONObject().put("channel", "app"));
+        try { notices.request(request); fail("Retired external notification destination accepted"); }
+        catch (IllegalArgumentException expected) { }
     }
 
     @Test public void androidPauseDoesNotDisableLocalPublicationAndPluginDisableDoes() throws Exception {
@@ -130,7 +102,7 @@ public class ProactiveNotificationsDeviceTest {
         preferences.edit().putBoolean("allowRoot", false).putBoolean("toolsStopped", true).commit();
         JSONObject first = notices.request(companion("kaka", "first", "First fictional IM message"));
         assertEquals("published", first.getString("status")); assertTrue(first.getBoolean("published"));
-        assertEquals("task_attention", findCompanion("kaka").getNotification().getChannelId());
+        assertEquals("companion_messages", findCompanion("kaka").getNotification().getChannelId());
         assertEquals("First fictional IM message", findCompanion("kaka").getNotification().extras.getCharSequence("android.text").toString());
         notices.request(companion("kaka", "second", "Updated fictional IM message"));
         assertEquals("Updated fictional IM message", findCompanion("kaka").getNotification().extras.getCharSequence("android.text").toString());
@@ -141,20 +113,18 @@ public class ProactiveNotificationsDeviceTest {
         assertFalse(preferences.getBoolean("notifyAppsEnabled", false));
     }
 
-    @Test public void companionDisabledNotificationsAreNormalResultsAndNeverAppActions() throws Exception {
-        notices.request(new JSONObject().put("operation", "configure").put("localEnabled", false));
-        JSONObject disabled = notices.request(companion("kaka", "local-disabled", "Fictional message"));
-        assertEquals("disabled", disabled.getString("status")); assertFalse(disabled.getBoolean("published"));
-        assertEquals("local_disabled", disabled.getString("reason"));
+    @Test public void companionToggleIsIndependentFromTaskPlugin() throws Exception {
+        notices.request(new JSONObject().put("operation", "configure").put("messagesEnabled", false));
+        JSONObject disabled = notices.request(companion("kaka", "messages-disabled", "Fictional message"));
+        assertEquals("disabled", disabled.getString("status"));
+        assertEquals("messages_disabled", disabled.getString("reason"));
+        notices.request(new JSONObject().put("operation", "configure").put("messagesEnabled", true));
         notices.request(new JSONObject().put("operation", "activate").put("enabled", false));
-        assertEquals("plugin_disabled", notices.request(companion("maimai", "plugin-disabled", "Fictional message")).getString("reason"));
-        assertNull(findCompanion("kaka")); assertNull(findCompanion("maimai"));
+        assertTrue(notices.request(companion("maimai", "plugin-disabled", "Fictional message")).getBoolean("published"));
         JSONObject app = companion("kaka", "invalid-channel", "Fictional message").put("destinations",
             new JSONArray().put(new JSONObject().put("channel", "app")));
         try { notices.request(app); fail("Companion publication accepted an app destination"); }
-        catch (IllegalArgumentException expected) { /* Fixed local-only contract. */ }
-        try { notices.request(companion("other", "invalid-owner", "Fictional message")); fail("Unknown companion accepted"); }
-        catch (IllegalArgumentException expected) { /* Stable product identity, not display name. */ }
+        catch (IllegalArgumentException expected) { }
     }
 
     private JSONObject companion(String id, String messageId, String text) throws Exception {

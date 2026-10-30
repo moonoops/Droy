@@ -17,27 +17,17 @@ final class VoiceRuntime {
         String operation = args.optString("operation");
         if (operation.startsWith("wake.")) return VoiceWake.get(context).request(args);
         if (operation.equals("dispose")) {
+            VoiceWake.stopIfCreated("plugin_disabled");
             VoiceWake.get(context).request(new JSONObject().put("operation", "wake.suspend"));
             return VoiceMedia.get(context).request(args);
         }
         if (operation.equals("start")) {
             if (!args.optString("mode", "standard").equals("standard"))
                 throw new IllegalStateException(io.droyagent.app.NativeLocale.text("实时音视频对话暂未开放", "Live audio/video chat is not available yet"));
-            VoiceWake.get(context).claimForVoice();
-            try {
-                if (args.has("wakeEventId")) VoiceWake.get(context).requireStartingEvent(args.getLong("wakeEventId"));
-                return VoiceMedia.get(context).request(args);
-            } catch (Exception failure) {
-                VoiceWake.get(context).releaseVoice();
-                throw failure;
-            }
-        }
-        if (operation.equals("stop")) {
-            try { return VoiceMedia.get(context).request(args); }
-            finally { VoiceWake.get(context).releaseVoice(); }
+            return VoiceMedia.get(context).request(args);
         }
         if ((operation.equals("speak") || operation.equals("play")) && args.has("wakeEventId"))
-            VoiceWake.get(context).requireStartingEvent(args.getLong("wakeEventId"));
+            VoiceWake.get(context).requireStartingEvent(args.getLong("wakeEventId"), VoiceSessionOwnership.owner(args.has("voiceOperationId") ? args.get("voiceOperationId") : null));
         return VoiceMedia.get(context).request(args);
     }
 
@@ -51,11 +41,15 @@ final class VoiceRuntime {
     }
 
     static void resume(Context context) {
+        resume(context, NativeAppActivity.class);
+    }
+
+    static void resume(Context context, Class<? extends android.app.Activity> activityClass) {
         Context app = context.getApplicationContext();
         VoiceWake wake = VoiceWake.get(app);
         wake.setWakeListener((eventId, target) -> {
             if (!wake.validWakeEvent(eventId)) return;
-            Intent open = new Intent(app, MainActivity.class)
+            Intent open = new Intent(app, activityClass)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
                 .putExtra("voiceWakeEventId", eventId).putExtra("voiceWakeTarget", target);
             if (!BackgroundRuntime.visible()) {

@@ -35,8 +35,8 @@ final class VoiceWake {
         VoiceWake current;
         synchronized (VoiceWake.class) { current = instance; }
         if (current == null) return;
-        current.pausedForVoice = true; current.voiceClaimed = false;
-        current.clearPendingEvent(); current.models.cancel(); current.stopAsync(reason);
+        synchronized (current) { current.pausedForVoice = true; current.voiceClaims.endCurrent(); current.clearPendingEvent(); }
+        current.models.cancel(); current.stopAsync(reason);
     }
 
     static boolean hasActiveWork(Context ignored) {
@@ -44,12 +44,22 @@ final class VoiceWake {
         synchronized (VoiceWake.class) { current = instance; }
         return current != null && (current.active != null || current.models.preparing());
     }
+    static void retireIfCreated(String owner) {
+        VoiceWake current;
+        synchronized (VoiceWake.class) { current = instance; }
+        if (current != null) current.voiceClaims.retire(owner);
+    }
+    static void releaseIfCreated(VoiceSessionOwnership.Lease claim) {
+        VoiceWake current;
+        synchronized (VoiceWake.class) { current = instance; }
+        if (current != null) current.releaseVoice(claim);
+    }
 
     static void captureReleasedIfCreated(String owner) {
         if (WAKE_OWNER.equals(owner) || "droy-voice-enrollment".equals(owner)) return;
         VoiceWake current;
         synchronized (VoiceWake.class) { current = instance; }
-        if (current == null || current.pluginSuspended || current.voiceClaimed
+        if (current == null || current.pluginSuspended || current.voiceClaims.active()
             || BackgroundRuntime.explicitlyStopped(current.context) || ProductPermissions.stopped(current.context)
             || VoiceMedia.hasActiveWork(current.context)) return;
         current.resumeIfEnabled();
@@ -77,13 +87,8 @@ final class VoiceWake {
     private String timing() { return preferences.getString("timing", "screen_on"); }
     private boolean listeningAllowed() { return timingAllows(timing(), screenAvailable(context), BackgroundRuntime.visible()); }
     private String timingMessage() { return timing().equals("foreground") ? io.droyagent.app.NativeLocale.text("回到 Droy 并解锁后继续监听", "Return to Droy and unlock to continue listening") : io.droyagent.app.NativeLocale.text("亮屏并解锁后继续监听", "Turn on the screen and unlock to continue listening"); }
-    private boolean useCompanionName() { return preferences.getBoolean("useCompanionName", false); }
     private String[] effectiveKeywords() {
-        return effectiveKeywords(useCompanionName(), preferences.getString("chinese", "你好小黑"), preferences.getString("english", "Hey Droy"));
-    }
-    private String[] effectiveKeywords(boolean bound, String chinese, String english) {
-        String name = PetOverlay.name(context).strip();
-        return bound ? new String[]{"你好" + name, "Hi " + name} : new String[]{chinese, english};
+        return new String[]{preferences.getString("chinese", "你好Droy"), preferences.getString("english", "Hey Dory")};
     }
     private String encodedKeywords() throws Exception {
         String[] values = effectiveKeywords();
@@ -125,39 +130,28 @@ final class VoiceWake {
     private final VoiceModels models;
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile Run active;
-    private volatile boolean pausedForVoice, voiceClaimed, pluginSuspended = true;
+    private volatile boolean pausedForVoice, pluginSuspended = true;
+    private final VoiceSessionOwnership voiceClaims = new VoiceSessionOwnership();
     private volatile String state = "off", message = "", error;
     private volatile float level;
     private long sequence;
-    private volatile long pendingEventId, startingEventId, screenEpoch;
+    private volatile long pendingEventId, screenEpoch;
     private volatile String lastKeyword = "";
 
     private final BroadcastReceiver screenChanged = new BroadcastReceiver() {
         @Override public void onReceive(Context unused, Intent intent) { availabilityChanged(); }
     };
 
-    private final SharedPreferences.OnSharedPreferenceChangeListener companionChanged = this::companionPreferenceChanged;
-
-    private void companionPreferenceChanged(SharedPreferences prefs, String key) {
-        if (!"petName".equals(key) || !useCompanionName()) return;
-        // Never leave the previous name's keyword detector running after a rename.
-        synchronized (this) { ++screenEpoch; clearPendingEvent(); }
-        stopAsync("renamed");
-        new Thread(() -> {
-            try {
-                stopAndWait(active, "renamed");
-                if (models.ready()) encodedKeywords();
-                error = null;
-                resumeIfEnabled();
-            } catch (Exception failure) { fail(failure); }
-        }, "droy-wake-name").start();
-    }
-
     private VoiceWake(Context context) {
         this.context = context;
         preferences = context.getSharedPreferences("droy-voice-wake", Context.MODE_PRIVATE);
         models = new VoiceModels(context);
-        context.getSharedPreferences("product", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(companionChanged);
+        // Freeze an existing name binding once; later pet renames no longer change wake words.
+        if (preferences.getBoolean("useCompanionName", false)) {
+            String name = PetOverlay.name(context).strip();
+            preferences.edit().putString("chinese", "你好" + name).putString("english", "Hi " + name)
+                .remove("useCompanionName").apply();
+        }
         IntentFilter filter = new IntentFilter(Intent.ACTION_SCREEN_OFF);
         filter.addAction(Intent.ACTION_SCREEN_ON); filter.addAction(Intent.ACTION_USER_PRESENT);
         if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(screenChanged, filter, Context.RECEIVER_NOT_EXPORTED);
@@ -167,18 +161,23 @@ final class VoiceWake {
 
     JSONObject request(JSONObject args) throws Exception {
         String operation = args.getString("operation");
+        String owner = VoiceSessionOwnership.owner(args.has("voiceOperationId") ? args.get("voiceOperationId") : null);
         if (operation.startsWith("wake.enroll_")) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("声纹功能暂未开放", "Voiceprint is not available yet"));
         switch (operation) {
             case "wake.status": return status();
             case "wake.prepare":
                 checkPreparationAllowed(); prepareModels(); return status();
             case "wake.configure": return configure(args);
-            case "wake.consume": return new JSONObject().put("consumed", consumeWakeEvent(args.getLong("eventId"))).put("target", "standard");
-            case "wake.claim": claimForVoice(); return status();
-            case "wake.release": releaseVoice(); return status();
+            case "wake.consume": {
+                if (VoiceMedia.retiredOperation(owner)) throw new VoiceSessionOwnership.Failure("VOICE_OWNER_MISMATCH");
+                boolean consumed = consumeWakeEvent(args.getLong("eventId"), owner);
+                return status().put("consumed", consumed).put("target", "standard");
+            }
+            case "wake.claim": claimForVoice(owner); return status();
+            case "wake.release": releaseVoice(owner); return status();
             case "wake.pause": pauseForVoice(); return status();
             case "wake.suspend":
-                pluginSuspended = true; voiceClaimed = false; clearPendingEvent(); models.cancel();
+                pluginSuspended = true; clearPendingEvent(); models.cancel();
                 stopAndWait(active, "suspended"); state = "paused"; message = io.droyagent.app.NativeLocale.text("Droy Voice 已关闭", "Droy Voice is disabled"); return status();
             case "wake.resume": pluginSuspended = false; resumeIfEnabled(); return status();
             default: throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("未知唤醒操作", "Unknown wake-up operation"));
@@ -186,14 +185,13 @@ final class VoiceWake {
     }
 
     private JSONObject configure(JSONObject args) throws Exception {
-        String chinese = cleanKeyword(args.optString("chinese", preferences.getString("chinese", "你好小黑")), true);
-        String english = cleanKeyword(args.optString("english", preferences.getString("english", "Hey Droy")), false);
+        String chinese = cleanKeyword(args.optString("chinese", preferences.getString("chinese", "你好Droy")), true);
+        String english = cleanKeyword(args.optString("english", preferences.getString("english", "Hey Dory")), false);
         String timing = args.optString("timing", timing());
         if (!timing.equals("screen_on") && !timing.equals("foreground"))
             throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("暂不支持该唤醒时机", "This wake-up timing is not supported yet"));
-        boolean bound = args.optBoolean("useCompanionName", useCompanionName());
         boolean enabled = args.optBoolean("enabled", preferences.getBoolean("enabled", false));
-        String[] effective = effectiveKeywords(bound, chinese, english);
+        String[] effective = new String[]{chinese, english};
         if (enabled) {
             checkAllowed();
             VoiceModels.keywordSegments(effective[0]); VoiceModels.keywordSegments(effective[1]);
@@ -201,13 +199,13 @@ final class VoiceWake {
         }
         pauseForVoice(); clearPendingEvent();
         preferences.edit().putString("chinese", chinese).putString("english", english)
-            .putString("timing", timing).putBoolean("useCompanionName", bound)
+            .putString("timing", timing).remove("useCompanionName")
             .putString("target", "standard").putBoolean("enabled", enabled).apply();
         error = null;
         if (enabled) {
             if (models.ready()) resumeIfEnabled(); else prepareModels();
         } else {
-            models.cancel(); pausedForVoice = voiceClaimed; state = "off"; message = "";
+            models.cancel(); pausedForVoice = voiceClaims.active(); state = "off"; message = "";
         }
         return status();
     }
@@ -230,13 +228,38 @@ final class VoiceWake {
     }
 
     /** A conversation keeps this claim while its microphone is temporarily muted. */
-    void claimForVoice() throws Exception {
-        voiceClaimed = true;
+    void claimForVoice() throws Exception { claimForVoice(null); }
+    VoiceSessionOwnership.Lease claimForVoice(String owner) throws Exception {
+        VoiceSessionOwnership.Lease claim;
+        synchronized (this) {
+            checkPreparationAllowed();
+            if (VoiceMedia.retiredOperation(owner)) throw new VoiceSessionOwnership.Failure("VOICE_OWNER_MISMATCH");
+            claim = voiceClaims.begin(owner, "voice");
+            if (!voiceClaims.active(claim)) throw new VoiceSessionOwnership.Failure("VOICE_OWNER_MISMATCH");
+        }
         try { pauseForVoice(); }
-        catch (Exception failure) { voiceClaimed = false; throw failure; }
+        catch (Exception failure) { synchronized (this) { voiceClaims.end(claim); } throw failure; }
+        return claim;
     }
 
-    void releaseVoice() { clearPendingEvent(); voiceClaimed = false; resumeIfEnabled(); }
+    void releaseVoice() {
+        VoiceSessionOwnership.Lease claim = voiceClaims.current();
+        if (claim != null && claim.owner == null) releaseVoice(claim);
+    }
+    void releaseVoice(VoiceSessionOwnership.Lease claim) {
+        synchronized (this) {
+            if (!voiceClaims.end(claim)) return;
+            if (java.util.Objects.equals(voiceClaims.eventOwner(), claim.owner)) clearPendingEvent();
+        }
+        resumeIfEnabled();
+    }
+    private void releaseVoice(String owner) {
+        synchronized (this) {
+            if (!voiceClaims.release(owner)) return;
+            if (voiceClaims.eventId() == 0) { pendingEventId = 0; VoiceRuntime.clearWakeNotification(context); }
+        }
+        resumeIfEnabled();
+    }
 
     /** Called off the UI thread before a deliberate microphone consumer claims it. */
     void pauseForVoice() throws Exception {
@@ -253,7 +276,7 @@ final class VoiceWake {
             message = state.equals("paused") ? io.droyagent.app.NativeLocale.text("Droy 已停止，语音唤醒已暂停", "Droy has stopped. Voice wake-up is paused") : "";
             return;
         }
-        if (voiceClaimed) {
+        if (voiceClaims.active()) {
             pausedForVoice = true;
             state = preferences.getBoolean("enabled", false) ? "paused" : "off";
             message = state.equals("paused") ? io.droyagent.app.NativeLocale.text("麦克风正在使用", "Microphone is in use") : "";
@@ -282,25 +305,31 @@ final class VoiceWake {
             && !BackgroundRuntime.explicitlyStopped(context);
     }
 
-    private synchronized boolean consumeWakeEvent(long id) {
+    private synchronized boolean consumeWakeEvent(long id, String owner) {
+        if (voiceClaims.eventId() == id && java.util.Objects.equals(voiceClaims.eventOwner(), owner)) {
+            requireStartingEvent(id, owner); return true;
+        }
         if (!validWakeEvent(id)) { if (!listeningAllowed()) clearPendingEvent(); return false; }
-        pendingEventId = 0; startingEventId = id;
+        voiceClaims.bindEvent(id, owner);
+        pendingEventId = 0;
         VoiceRuntime.clearWakeNotification(context);
         return true;
     }
 
-    synchronized void requireStartingEvent(long id) {
-        if (id == 0 || startingEventId != id || !listeningAllowed() || pluginSuspended
+    synchronized void requireStartingEvent(long id) { requireStartingEvent(id, null); }
+    synchronized void requireStartingEvent(long id, String owner) {
+        voiceClaims.requireEvent(id, owner);
+        if (!listeningAllowed() || pluginSuspended
                 || !preferences.getBoolean("enabled", false) || ProductPermissions.stopped(context)
                 || BackgroundRuntime.explicitlyStopped(context))
             throw new IllegalStateException(io.droyagent.app.NativeLocale.text("本次唤醒已结束，请亮屏解锁后重新唤醒", "This wake-up has ended. Turn on the screen and unlock to wake up again"));
     }
 
     private synchronized boolean hasPendingEvent() { return pendingEventId != 0; }
-    private synchronized void clearPendingEvent() { pendingEventId = 0; startingEventId = 0; VoiceRuntime.clearWakeNotification(context); }
+    private synchronized void clearPendingEvent() { pendingEventId = 0; voiceClaims.clearEvent(); VoiceRuntime.clearWakeNotification(context); }
 
     private synchronized void launch() throws Exception {
-        if (active != null || voiceClaimed || !listeningAllowed()) return;
+        if (active != null || voiceClaims.active() || voiceClaims.eventId() != 0 || !listeningAllowed()) return;
         // An existing microphone service can continue outside the app, but a new one needs a visible activity.
         if (!BackgroundRuntime.visible()) { state = "paused"; message = io.droyagent.app.NativeLocale.text("打开 Droy 后继续监听", "Open Droy to continue listening"); return; }
         Run run = new Run(screenEpoch);
@@ -346,7 +375,7 @@ final class VoiceWake {
             catch (Exception failure) { error = io.droyagent.app.NativeLocale.text("麦克风释放失败：", "Microphone release failed: ") + failure.getMessage(); state = "paused"; fired = false; }
             long issued = 0;
             synchronized (this) {
-                if (fired && run.stopReason.equals("triggered") && run.screenEpoch == screenEpoch && listeningAllowed() && !pluginSuspended && !voiceClaimed
+                if (fired && run.stopReason.equals("triggered") && run.screenEpoch == screenEpoch && listeningAllowed() && !pluginSuspended && !voiceClaims.active()
                         && preferences.getBoolean("enabled", false) && !ProductPermissions.stopped(context)
                         && !BackgroundRuntime.explicitlyStopped(context)) {
                     issued = ++sequence; pendingEventId = issued;
@@ -439,19 +468,21 @@ final class VoiceWake {
             throw new SecurityException(io.droyagent.app.NativeLocale.text("Droy 已停止，语音唤醒已暂停", "Droy has stopped. Voice wake-up is paused"));
     }
 
-    private JSONObject status() throws Exception {
+    private synchronized JSONObject status() throws Exception {
         if (!listeningAllowed()) clearPendingEvent();
         Run run = active;
         return new JSONObject().put("enabled", preferences.getBoolean("enabled", false))
-            .put("chineseKeyword", preferences.getString("chinese", "你好小黑"))
-            .put("englishKeyword", preferences.getString("english", "Hey Droy"))
-            .put("timing", timing()).put("useCompanionName", useCompanionName()).put("companionName", PetOverlay.name(context))
+            .put("chineseKeyword", preferences.getString("chinese", "你好Droy"))
+            .put("englishKeyword", preferences.getString("english", "Hey Dory"))
+            .put("timing", timing()).put("useCompanionName", false)
             .put("effectiveChinese", effectiveKeywords()[0]).put("effectiveEnglish", effectiveKeywords()[1])
             .put("target", "standard").put("hasVoiceprint", false).put("sampleCount", 0)
-            .put("suspended", pluginSuspended).put("pausedForVoice", pausedForVoice).put("voiceClaimed", voiceClaimed)
+            .put("suspended", pluginSuspended).put("pausedForVoice", pausedForVoice).put("voiceClaimed", voiceClaims.active())
+            .put("voiceOperationId", voiceClaims.active() && voiceClaims.owner() != null ? voiceClaims.owner() : JSONObject.NULL)
+            .put("startingVoiceOperationId", voiceClaims.eventOwner() == null ? JSONObject.NULL : voiceClaims.eventOwner())
             .put("screenAvailable", screenAvailable(context)).put("preparation", models.status()).put("state", state)
             .put("message", message).put("error", error == null ? JSONObject.NULL : error)
-            .put("eventId", pendingEventId).put("startingEventId", startingEventId).put("keyword", lastKeyword).put("level", level)
+            .put("eventId", pendingEventId).put("startingEventId", voiceClaims.eventId()).put("keyword", lastKeyword).put("level", level)
             .put("captureId", run == null ? JSONObject.NULL : run.captureId);
     }
 
