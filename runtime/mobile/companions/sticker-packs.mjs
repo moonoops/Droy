@@ -7,12 +7,22 @@ import { crc32 } from '../png.mjs';
 import { moodTags, sampleRows, searchRows } from './vendor/dsh-meme/search.mjs';
 
 export const STICKER_PACK_LIMITS = Object.freeze({ archiveBytes: 20 * 1024 * 1024, expandedBytes: 64 * 1024 * 1024,
-  imageBytes: 8 * 1024 * 1024, images: 500, pixels: 16_000_000, dimension: 8192 });
+  imageBytes: 8 * 1024 * 1024, images: 500, pixels: 16_000_000, dimension: 8192,
+  gifFrames: 500, gifFramePixels: 128_000_000 });
 export const BUILTIN_STICKER_PACK_ID = 'droy-default';
+// Same-version market archives must not reuse earlier imports that discarded GIFs.
+export const MARKET_STICKER_IMPORT_CAPABILITY = 'gif-v1';
+export const ONLINE_STICKER_PACK_ID = 'pack-' + createHash('sha256').update('droy-online-stickers-v1').digest('hex').slice(0, 40);
 const invalid = () => { throw Object.assign(new Error('COMPANION_STICKER_PACK_INVALID'), { code: 'COMPANION_STICKER_PACK_INVALID' }); };
 const tooLarge = () => { throw Object.assign(new Error('COMPANION_STICKER_PACK_TOO_LARGE'), { code: 'COMPANION_STICKER_PACK_TOO_LARGE' }); };
 const unsupported = () => { throw Object.assign(new Error('COMPANION_STICKER_PACK_UNSUPPORTED'), { code: 'COMPANION_STICKER_PACK_UNSUPPORTED' }); };
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const metadataLimit = 2 * 1024 * 1024;
+function metadataBytes(pack) {
+  const bytes = Buffer.from(JSON.stringify(pack));
+  if (bytes.length > metadataLimit) tooLarge();
+  return bytes;
+}
 const packPattern = /^pack-[a-f0-9]{40}$/u, stickerPattern = /^meme-[a-f0-9]{40}$/u;
 const stagingPattern = /^\.import-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const builtinMoods = Object.freeze({ 'test-sticker-ok': 'happy', 'test-sticker-happy': 'happy',
@@ -146,14 +156,83 @@ function webpInfo(data) {
   if (p !== data.length || !image) invalid();
   return { mediaType: 'image/webp', extension: 'webp' };
 }
+function gifInfo(data) {
+  if (data.length < 14 || !['GIF87a', 'GIF89a'].includes(data.toString('ascii', 0, 6))) invalid();
+  const width = data.readUInt16LE(6), height = data.readUInt16LE(8);
+  dimensions(width, height);
+  const globalColors = data[10] & 0x80 ? 1 << ((data[10] & 7) + 1) : 0;
+  let p = 13 + globalColors * 3, frameCount = 0, control = null;
+  // Some market encoders use an unused 0xff background index with a smaller palette.
+  // Check color-table byte bounds here; background rendering belongs to the decoder.
+  if (p >= data.length) invalid();
+  const subBlocks = (required = false) => {
+    let bytes = 0;
+    while (p < data.length) {
+      const size = data[p++];
+      if (!size) { if (required && !bytes) invalid(); return; }
+      if (p + size > data.length) invalid();
+      bytes += size; p += size;
+    }
+    invalid();
+  };
+  while (p < data.length) {
+    const block = data[p++];
+    if (block === 0x3b) {
+      if (!frameCount || p !== data.length || control) invalid();
+      return { mediaType: 'image/gif', extension: 'gif', animated: frameCount > 1, frameCount };
+    }
+    if (block === 0x21) {
+      if (p >= data.length) invalid();
+      const label = data[p++];
+      if (label === 0xf9) {
+        if (p + 6 > data.length || data[p] !== 4 || data[p + 5] !== 0 || data[p + 1] & 0xe0
+          || (data[p + 1] >> 2 & 7) > 3 || control) invalid();
+        control = { transparent: !!(data[p + 1] & 1), index: data[p + 4] }; p += 6;
+      } else if (label === 0xff) {
+        if (p + 12 > data.length || data[p] !== 11) invalid();
+        p += 12; subBlocks();
+      } else if (label === 0xfe) subBlocks();
+      else if (label === 0x01) {
+        if (p + 13 > data.length || data[p] !== 12 || !globalColors || !data[p + 9] || !data[p + 10]
+          || data[p + 11] >= globalColors || data[p + 12] >= globalColors
+          || data.readUInt16LE(p + 1) + data.readUInt16LE(p + 5) > width
+          || data.readUInt16LE(p + 3) + data.readUInt16LE(p + 7) > height) invalid();
+        if (control?.transparent && control.index >= globalColors) invalid();
+        p += 13; subBlocks(); control = null;
+      } else invalid();
+      continue;
+    }
+    if (block !== 0x2c || p + 9 > data.length) invalid();
+    const left = data.readUInt16LE(p), top = data.readUInt16LE(p + 2), frameWidth = data.readUInt16LE(p + 4), frameHeight = data.readUInt16LE(p + 6), packed = data[p + 8];
+    dimensions(frameWidth, frameHeight);
+    if (left + frameWidth > width || top + frameHeight > height || packed & 0x18) invalid();
+    const localColors = packed & 0x80 ? 1 << ((packed & 7) + 1) : 0;
+    const colors = localColors || globalColors;
+    p += 9 + localColors * 3;
+    if (!colors || p >= data.length || data[p] < 2 || data[p] > 8 || control?.transparent && control.index >= colors) invalid();
+    p++;
+    subBlocks(true); control = null;
+    // Limit repeated canvas work as well as compressed bytes; many tiny frames can otherwise be expensive.
+    frameCount++;
+    if (frameCount > STICKER_PACK_LIMITS.gifFrames || width * height * frameCount > STICKER_PACK_LIMITS.gifFramePixels) tooLarge();
+  }
+  invalid();
+}
 function imageInfo(data) {
   if (!data.length) invalid();
   if (data.length > STICKER_PACK_LIMITS.imageBytes) tooLarge();
   if (data.length >= 8 && data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) return pngInfo(data);
   if (data.length >= 4 && data[0] === 0xff && data[1] === 0xd8) return jpegInfo(data);
   if (data.length >= 12 && data.toString('ascii', 0, 4) === 'RIFF' && data.toString('ascii', 8, 12) === 'WEBP') return webpInfo(data);
-  if (data.toString('ascii', 0, 6).startsWith('GIF8')) unsupported();
+  if (data.toString('ascii', 0, 3) === 'GIF') return gifInfo(data);
   invalid();
+}
+/** Validate the entire archive before exposing a single indexed image. */
+export function stickerArchiveImage(bytes, path) {
+  const entry = parseZip(bytes).get(safePath(path));
+  if (!entry || entry.directory) invalid();
+  imageInfo(entry.bytes);
+  return Buffer.from(entry.bytes);
 }
 async function readIndex(bytes, staging, entries) {
   const path = join(staging, 'source-index.db');
@@ -199,17 +278,19 @@ export class StickerPackLibrary {
       const folder = join(this.directory, name), folderInfo = await lstat(folder);
       if (!folderInfo.isDirectory() || folderInfo.isSymbolicLink()) invalid();
       const raw = await readFile(join(folder, 'metadata.json'));
-      if (raw.length > 2 * 1024 * 1024) tooLarge();
+      if (raw.length > metadataLimit) tooLarge();
       let pack;
       try { pack = JSON.parse(raw); } catch { invalid(); }
       if (!plain(pack) || pack.schemaVersion !== 1 || pack.id !== name || !Array.isArray(pack.items)
         || !pack.items.length || pack.items.length > STICKER_PACK_LIMITS.images) invalid();
-      text(pack.name, 80); text(pack.license, 200); text(pack.source, 1000); text(pack.description, 500); const seen = new Set();
+      text(pack.name, 80); text(pack.license, 200); text(pack.source, 1000); text(pack.description, 500);
+      text(pack.originId, 200); text(pack.originVersion, 100); text(pack.importCapability, 80); const seen = new Set();
       for (const item of pack.items) {
         if (!stickerPattern.test(item.id) || seen.has(item.id) || !/^[a-f0-9]{64}$/u.test(item.digest)
-          || !['image/png', 'image/jpeg', 'image/webp'].includes(item.mediaType)
-          || !['png', 'jpg', 'webp'].includes(item.extension)) invalid();
+          || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(item.mediaType)
+          || !['png', 'jpg', 'webp', 'gif'].includes(item.extension)) invalid();
         seen.add(item.id); text(item.label, 200); text(item.description, 200); text(item.tag, 80); text(item.keywords, 1000);
+        text(item.source, 1000); text(item.license, 200);
         const info = await lstat(join(folder, item.id + '.' + item.extension));
         if (!info.isFile() || info.isSymbolicLink() || info.size !== item.bytes || info.size > STICKER_PACK_LIMITS.imageBytes) invalid();
       }
@@ -219,8 +300,12 @@ export class StickerPackLibrary {
   }
   packs(locale = 'zh') {
     return [{ id: BUILTIN_STICKER_PACK_ID, name: locale === 'en' ? 'Droy stickers' : 'Droy 表情', count: this.builtinCatalog(locale).length, builtin: true },
-      ...[...this.imported.values()].map(pack => ({ id: pack.id, name: pack.name, count: pack.items.length, builtin: false,
-        license: pack.license ?? '', source: pack.source ?? '', description: pack.description ?? '' }))];
+      ...[...this.imported.values()].map(pack => ({ id: pack.id,
+        name: pack.kind === 'online' ? (locale === 'en' ? 'Online stickers' : '联网表情') : pack.name,
+        count: pack.items.length, builtin: false, license: pack.license ?? '', source: pack.source ?? '', description: pack.description ?? '',
+        ...(pack.originId ? { originId: pack.originId, originVersion: pack.originVersion ?? '' } : {}),
+        ...(pack.importCapability ? { importCapability: pack.importCapability } : {}),
+        ...(pack.skippedAnimated ? { skippedAnimated: pack.skippedAnimated } : {}) }))];
   }
   catalog(locale = 'zh', { packIds } = {}) {
     const enabled = packIds === undefined ? null : new Set(packIds);
@@ -229,7 +314,8 @@ export class StickerPackLibrary {
     for (const pack of this.imported.values()) {
       if (enabled && !enabled.has(pack.id)) continue;
       result.push(...pack.items.map(item => ({ id: item.id, url: '/droy/companions/sticker-media/' + item.id, label: item.label,
-        description: item.description, tags: [item.tag, ...item.keywords.split(/[\s,，、;；/|]+/u)].filter(Boolean), packId: pack.id })));
+        description: item.description, tags: [item.tag, ...item.keywords.split(/[\s,，、;；/|]+/u)].filter(Boolean), packId: pack.id,
+        ...(item.source ? { source: item.source } : {}), ...(item.license ? { license: item.license } : {}) })));
     }
     return structuredClone(result);
   }
@@ -242,23 +328,32 @@ export class StickerPackLibrary {
     const found = String(query).trim() ? searchRows(rows, query, n) : sampleRows(rows, n);
     return found.map(({ tag, caption, keywords, file_name, ...item }) => item);
   }
-  async importZip(input, { name, signal } = {}) {
+  async importZip(input, { name, signal, skipUnsupported = false, provenance = {} } = {}) {
     signal?.throwIfAborted();
     const bytes = Buffer.from(input ?? []);
-    const work = this.queue.then(() => this.install(bytes, name, signal));
+    const work = this.queue.then(() => this.install(bytes, name, signal, { skipUnsupported, provenance }));
     this.queue = work.catch(() => {}); return work;
   }
-  async install(bytes, suppliedName, signal) {
+  async install(bytes, suppliedName, signal, { skipUnsupported = false, provenance = {} } = {}) {
     signal?.throwIfAborted();
-    const entries = parseZip(bytes), id = 'pack-' + digest(bytes).slice(0, 40);
+    const entries = parseZip(bytes), id = 'pack-' + digest(skipUnsupported
+      ? Buffer.concat([Buffer.from(MARKET_STICKER_IMPORT_CAPABILITY + '\0'), bytes]) : bytes).slice(0, 40);
     if (this.imported.has(id)) return this.packs().find(pack => pack.id === id);
     const images = [...entries].filter(([path, entry]) => !entry.directory && imageExtension.test(path));
     if (!images.length) invalid();
     if (images.length > STICKER_PACK_LIMITS.images) tooLarge();
-    const infos = new Map(images.map(([path, entry]) => {
-      if (/\.(?:gif|apng)$/iu.test(path)) unsupported();
-      return [path, imageInfo(entry.bytes)];
-    }));
+    const infos = new Map();
+    let skippedAnimated = 0;
+    for (const [path, entry] of images) {
+      try {
+        if (/\.apng$/iu.test(path)) unsupported();
+        infos.set(path, imageInfo(entry.bytes));
+      } catch (error) {
+        if (!skipUnsupported || error.code !== 'COMPANION_STICKER_PACK_UNSUPPORTED') throw error;
+        skippedAnimated++;
+      }
+    }
+    if (!infos.size) unsupported();
     let manifest = {};
     if (entries.has('manifest.json')) {
       if (entries.get('manifest.json').bytes.length > 65536) tooLarge();
@@ -278,20 +373,115 @@ export class StickerPackLibrary {
       const items = [];
       for (const row of rows) {
         signal?.throwIfAborted();
+        if (!infos.has(row.source)) continue;
         const data = entries.get(row.source).bytes, info = infos.get(row.source), stickerId = 'meme-' + digest(id + '\0' + row.source).slice(0, 40);
         const item = { id: stickerId, label: text(row.label, 200), description: text(row.description, 200), tag: text(row.tag, 80),
           keywords: text(row.keywords, 1000), ...info, bytes: data.length, digest: digest(data) };
         await durableWrite(join(staging, item.id + '.' + info.extension), data); items.push(item);
       }
-      const pack = { schemaVersion: 1, id, name, items, license: text(manifest.license, 200),
-        source: text(manifest.source, 1000), description: text(manifest.description, 500) };
-      await durableWrite(join(staging, 'metadata.json'), JSON.stringify(pack));
+      if (!items.length) unsupported();
+      const pack = { schemaVersion: 1, id, name, items, license: text(manifest.license, 200, text(provenance.license, 200)),
+        source: text(manifest.source, 1000, text(provenance.source, 1000)), description: text(manifest.description, 500),
+        ...(provenance.originId ? { originId: text(provenance.originId, 200), originVersion: text(provenance.originVersion, 100) } : {}),
+        ...(skipUnsupported ? { importCapability: MARKET_STICKER_IMPORT_CAPABILITY } : {}),
+        ...(skippedAnimated ? { skippedAnimated } : {}) };
+      await durableWrite(join(staging, 'metadata.json'), metadataBytes(pack));
       signal?.throwIfAborted();
       await rename(staging, join(this.directory, id));
       const fd = await open(this.directory, 'r'); try { await fd.sync(); } finally { await fd.close(); }
       this.imported.set(id, pack);
-      return { id, name, count: items.length, builtin: false, license: pack.license, source: pack.source, description: pack.description };
+      return this.packs().find(pack => pack.id === id);
     } finally { await rm(staging, { recursive: true, force: true }); }
+  }
+  async importOnlineImage(input, { signal, locale = 'zh' } = {}) {
+    signal?.throwIfAborted();
+    const bytes = Buffer.from(input.bytes ?? []), info = imageInfo(bytes), hash = digest(bytes);
+    const metadata = { label: text(input.label, 200), description: text(input.description, 200), tag: text(input.tag, 80),
+      keywords: text(input.keywords, 1000), source: text(input.source, 1000), license: text(input.license, 200) };
+    const work = this.queue.then(async () => {
+      signal?.throwIfAborted();
+      const previous = this.imported.get(ONLINE_STICKER_PACK_ID), duplicate = previous?.items.find(item => item.digest === hash);
+      if (duplicate) return { pack: this.packs(locale).find(pack => pack.id === ONLINE_STICKER_PACK_ID),
+        sticker: this.catalog(locale, { packIds: [ONLINE_STICKER_PACK_ID] }).find(item => item.id === duplicate.id) };
+      const items = previous?.items ?? [];
+      if (items.length >= STICKER_PACK_LIMITS.images || items.reduce((sum, item) => sum + item.bytes, bytes.length) > STICKER_PACK_LIMITS.expandedBytes) tooLarge();
+      const id = 'meme-' + digest(ONLINE_STICKER_PACK_ID + '\0' + hash).slice(0, 40);
+      const item = { id, ...metadata, ...info, bytes: bytes.length, digest: hash };
+      const pack = { schemaVersion: 1, id: ONLINE_STICKER_PACK_ID, kind: 'online', name: 'Online stickers',
+        license: '', source: '', description: '', items: [...items, item] };
+      const folder = join(this.directory, pack.id), staging = join(this.directory, '.import-' + randomUUID());
+      await mkdir(staging, { mode: 0o700 });
+      let imagePublished = false, committed = false;
+      try {
+        await durableWrite(join(staging, id + '.' + info.extension), bytes);
+        await durableWrite(join(staging, 'metadata.json'), metadataBytes(pack));
+        signal?.throwIfAborted();
+        if (!previous) await rename(staging, folder);
+        else {
+          await rename(join(staging, id + '.' + info.extension), join(folder, id + '.' + info.extension));
+          imagePublished = true;
+          signal?.throwIfAborted();
+          await rename(join(staging, 'metadata.json'), join(folder, 'metadata.json'));
+        }
+        committed = true;
+        this.imported.set(pack.id, pack);
+        const fd = await open(folder, 'r'); try { await fd.sync(); } finally { await fd.close(); }
+        return { pack: this.packs(locale).find(row => row.id === pack.id),
+          sticker: this.catalog(locale, { packIds: [pack.id] }).find(row => row.id === id) };
+      } finally {
+        if (imagePublished && !committed) await rm(join(folder, id + '.' + info.extension), { force: true });
+        if (!previous && !committed) await rm(folder, { recursive: true, force: true });
+        await rm(staging, { recursive: true, force: true });
+      }
+    });
+    this.queue = work.catch(() => {});
+    return work;
+  }
+  async importRemotePack(images, { name, signal, provenance = {} } = {}) {
+    signal?.throwIfAborted();
+    if (!Array.isArray(images) || !images.length) invalid();
+    if (images.length > STICKER_PACK_LIMITS.images) tooLarge();
+    let size = 0, skippedAnimated = 0;
+    const rows = [];
+    for (const input of images) {
+      const bytes = Buffer.from(input.bytes ?? []);
+      size += bytes.length;
+      if (size > STICKER_PACK_LIMITS.expandedBytes) tooLarge();
+      let info;
+      try { info = imageInfo(bytes); }
+      catch (error) { if (error.code !== 'COMPANION_STICKER_PACK_UNSUPPORTED') throw error; skippedAnimated++; continue; }
+      rows.push({ data: bytes, digest: digest(bytes), info, label: text(input.label, 200), description: text(input.description, 200),
+        tag: text(input.tag, 80), keywords: text(input.keywords, 1000), source: text(input.source, 1000), license: text(input.license, 200) });
+    }
+    if (!rows.length) unsupported();
+    const details = { name: text(name, 80), license: text(provenance.license, 200), source: text(provenance.source, 1000),
+      originId: text(provenance.originId, 200), originVersion: text(provenance.originVersion, 100),
+      importCapability: MARKET_STICKER_IMPORT_CAPABILITY, skippedAnimated };
+    const id = 'pack-' + digest(JSON.stringify({ ...details, images: rows.map(({ data, info, ...row }) => row) })).slice(0, 40);
+    const work = this.queue.then(async () => {
+      signal?.throwIfAborted();
+      if (this.imported.has(id)) return this.packs().find(pack => pack.id === id);
+      const staging = join(this.directory, '.import-' + randomUUID());
+      await mkdir(staging, { mode: 0o700 });
+      try {
+        const items = [];
+        for (const [index, row] of rows.entries()) {
+          signal?.throwIfAborted();
+          const { data, info, ...metadata } = row;
+          const stickerId = 'meme-' + digest(id + '\0' + index).slice(0, 40);
+          await durableWrite(join(staging, stickerId + '.' + info.extension), data);
+          items.push({ id: stickerId, ...metadata, ...info, bytes: data.length });
+        }
+        const pack = { schemaVersion: 1, id, ...details, description: '', items };
+        await durableWrite(join(staging, 'metadata.json'), metadataBytes(pack));
+        signal?.throwIfAborted();
+        await rename(staging, join(this.directory, id));
+        this.imported.set(id, pack);
+        const fd = await open(this.directory, 'r'); try { await fd.sync(); } finally { await fd.close(); }
+        return this.packs().find(pack => pack.id === id);
+      } finally { await rm(staging, { recursive: true, force: true }); }
+    });
+    this.queue = work.catch(() => {}); return work;
   }
   async read(stickerId) {
     if (typeof stickerId !== 'string' || !stickerPattern.test(stickerId)) return null;

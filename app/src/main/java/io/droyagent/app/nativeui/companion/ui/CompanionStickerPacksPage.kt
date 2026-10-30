@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewModelScope
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.companion.data.*
 import io.droyagent.app.nativeui.ui.DroyIcon
@@ -23,12 +24,24 @@ internal fun CompanionStickerPacksPage(companion: NativeCompanion, state: Native
     val original = companion.settings.stickerPackIds ?: listOf("droy-default")
     var selected by rememberSaveable(companion.id, original) { mutableStateOf(ArrayList(original)) }
     var importOwner by rememberSaveable { mutableStateOf<String?>(null) }
+    var marketOpen by rememberSaveable(companion.id) { mutableStateOf(false) }
     val dirty = selected.toSet() != original.toSet()
     val enabled = state.runtime.ready && !state.profileSaving && !state.stickerPackImporting
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val owner = importOwner
         importOwner = null
         if (uri != null && owner != null) model.importStickerPack(owner, uri)
+    }
+    if (marketOpen) {
+        val controller = remember(companion.id, model) {
+            NativeCompanionStickerMarketController(model.viewModelScope, companion.id, onInstalled = model::refresh)
+        }
+        val marketState by controller.state.collectAsState()
+        DisposableEffect(controller) { onDispose { controller.close() } }
+        LaunchedEffect(controller) { controller.search() }
+        CompanionStickerMarketPage(companion.name, marketState, enabled,
+            controller::query, controller::search, controller::install, controller::retry, { marketOpen = false })
+        return
     }
     CompanionEditorScaffold(stringResource(R.string.native_companion_sticker_packs), dirty, enabled,
         onSave = { onSave(selected.toList()) }, onClose = onClose, tag = "native-companion-sticker-packs-save",
@@ -50,6 +63,16 @@ internal fun CompanionStickerPacksPage(companion: NativeCompanion, state: Native
                 }
             }
             if (selected.isEmpty()) Text(stringResource(R.string.native_companion_sticker_packs_none_selected),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            HorizontalDivider()
+            Text(stringResource(R.string.native_companion_market_entry_scope), style = MaterialTheme.typography.bodyMedium)
+            FilledTonalButton(onClick = { marketOpen = true }, enabled = enabled && !dirty,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("native-companion-sticker-market")) {
+                DroyIcon(R.drawable.native_settings_search, null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.native_companion_market_entry))
+            }
+            if (dirty) Text(stringResource(R.string.native_companion_market_save_first),
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             HorizontalDivider()
             Text(stringResource(R.string.native_companion_sticker_packs_import_scope), style = MaterialTheme.typography.bodyMedium)

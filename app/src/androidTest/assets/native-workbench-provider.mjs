@@ -9,6 +9,7 @@ import { once } from 'node:events';
 export const name = 'droy-native-workbench-fixture';
 export const inject = ['llm', 'tools', 'approval', 'userQuestions', 'credentialsController'];
 export async function apply(ctx) {
+  await installNativeProxyFixture(ctx);
   const transcriptFixture = await installNativeTranscriptFixture(ctx);
   const { LlmAdapter } = await import(pathToFileURL(join(process.env.DROY_RUNTIME_DIR,
     'node_modules/@deepseek-ai/dsh-llm/lib/index.js')).href);
@@ -89,6 +90,28 @@ export async function apply(ctx) {
         const pending = await runtime.store.pendingMessages(owner.companionId);
         const signature = pending.map(message => message.id).join(':');
         const latest = pending.at(-1);
+        if (latest?.text === 'NATIVE_COMPANION_ONLINE_STICKER') {
+          const prefix = 'native-online-sticker:' + latest.id + ':';
+          const previous = options.messages.findLast(message => message.role === 'tool' && message.toolCallId?.startsWith(prefix));
+          if (previous?.isError) throw new Error('Native online sticker tool failed: ' + textOf(previous).slice(0, 300));
+          const result = previous ? JSON.parse(textOf(previous)) : null;
+          let name, args;
+          if (!result) { name = 'companion_sticker_search'; args = { query: '比心', kind: 'stickers', format: 'gif' }; }
+          else if (Array.isArray(result.items)) {
+            if (!result.items.length) throw new Error('Public online sticker search returned no matching image');
+            name = 'companion_sticker_download'; args = { stickerId: result.items[0].id };
+          } else if (result.downloaded && result.sticker?.id) {
+            name = 'companion_emoji'; args = { msg_id: latest.id, stickerId: result.sticker.id };
+          } else if (result.delivered) { name = 'companion_quiet'; args = {}; }
+          else throw new Error('Unexpected native online sticker tool result');
+          await appendFile(join(process.env.DSH_HOME, 'native-fixture-companion.jsonl'), JSON.stringify({
+            kind: 'online-sticker-tool', name, args,
+          }) + '\n');
+          for (const chunk of toolChunks(prefix + ++companionCall, name, args)) {
+            options.signal?.throwIfAborted(); yield chunk;
+          }
+          return;
+        }
         const reply = !!signature && companionReplies.get(options.sessionId) !== signature;
         if (reply) companionReplies.set(options.sessionId, signature);
         const reference = latest?.text?.includes('NATIVE_COMPANION_HOLD')
@@ -260,6 +283,23 @@ export async function apply(ctx) {
   }
   ctx.llm.registerAdapter(['droy-native-fixture'], new NativeFixture());
   await writeFile(join(process.env.DSH_HOME, 'native-fixture-ready.json'), '{"ready":true}');
+}
+
+/** An explicitly selected adb-reversed loopback port reuses the host's existing proxy for public-source tests. */
+async function installNativeProxyFixture(ctx) {
+  const home = process.env.DSH_HOME;
+  let input;
+  try { input = JSON.parse(await readFile(join(home, 'native-fixture-proxy.json'), 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  const ownership = JSON.parse(await readFile(join(dirname(home), 'native-workbench-fixture.json'), 'utf8'));
+  if (ownership.fixture !== 'native-isolated-runtime-v1' || ownership.phase !== 'running'
+    || input.version !== 1 || Object.keys(input).length !== 2 || !Number.isInteger(input.port) || input.port < 1024 || input.port > 65535)
+    throw new Error('Invalid isolated proxy fixture ownership');
+  const { installProxyFromEnvironment } = await import(pathToFileURL(join(process.env.DROY_RUNTIME_DIR,
+    'node_modules/@deepseek-ai/dsh-http-proxy/lib/index.js')).href);
+  const environment = new Map(['HTTP_PROXY', 'HTTPS_PROXY'].map(key => [key, { value: 'http://127.0.0.1:' + input.port }]));
+  const dispose = await installProxyFromEnvironment(environment, () => {});
+  ctx.effect(() => dispose);
 }
 
 /** Only the explicitly owned isolated Android fixture may materialize these cold logs. */

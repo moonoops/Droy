@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_companion_market_title">Sticker market</string>
+    <string name="native_companion_market_entry">Browse sticker market</string>
+    <string name="native_companion_market_entry_scope">Find packs online and download them for this chat. Companions can also find and download stickers themselves.</string>
+    <string name="native_companion_market_save_first">Save your pack selection before opening the market.</string>
+    <string name="native_companion_market_scope">Downloads join the shared library and are enabled for %1$s. Static PNG/JPEG/WebP images and GIF animations are supported; other animated formats are skipped. Pack names and descriptions come from their sources.</string>
+    <string name="native_companion_market_search_label">Pack name or description</string>
+    <string name="native_companion_market_search">Search market</string>
+    <string name="native_companion_market_loading">Loading sticker packs…</string>
+    <string name="native_companion_market_empty">No matching packs found.</string>
+    <string name="native_companion_market_install">Download and enable</string>
+    <string name="native_companion_market_installing">Downloading…</string>
+    <string name="native_companion_market_downloaded">Enabled</string>
+    <string name="native_companion_market_pack_count">%1$d images</string>
+    <string name="native_companion_market_pack_unknown_count">Count available after download</string>
+    <string name="native_companion_market_pack_size">%1$d images · %2$s</string>
+    <string name="native_companion_market_license">License: %1$s</string>
+    <string name="native_companion_market_license_unknown">Not specified</string>
+    <string name="native_companion_market_installed">%1$s: %2$d images downloaded and enabled.</string>
+    <string name="native_companion_market_installed_static">%1$s: %2$d images downloaded and enabled; %3$d unsupported animated images skipped.</string>
+    <string name="native_companion_market_retry">Retry</string>
+    <string name="native_companion_market_runtime_unavailable">The local service is unavailable or under maintenance. Return when it is ready.</string>
+    <string name="native_companion_market_error_network">Could not reach the sticker source. Check your connection and retry.</string>
+    <string name="native_companion_market_error_timeout">The sticker request timed out. Please retry.</string>
+    <string name="native_companion_market_error_not_found">This pack is no longer available. Search the market again.</string>
+    <string name="native_companion_market_error_checksum">The downloaded pack could not be verified. Please retry.</string>
+    <string name="native_companion_market_error_large">This pack exceeds the download or import limit. Choose a smaller pack.</string>
+    <string name="native_companion_market_error_unsupported">This pack has no supported images. Use static PNG/JPEG/WebP images or GIF animations.</string>
+    <string name="native_companion_market_error_invalid">The sticker source returned an invalid pack or response.</string>
+    <string name="native_companion_market_error_generic">The sticker operation did not finish. Please retry.</string>
+</resources>

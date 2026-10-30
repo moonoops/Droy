@@ -27,6 +27,13 @@ function send(res,status,data) {
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});
   res.end(JSON.stringify(data));
 }
+async function whileConnected(req,res,operation) {
+  const abort=new AbortController(),cancel=()=>{if(!res.writableEnded)abort.abort();};
+  req.once('aborted',cancel);res.once('close',cancel);
+  if(req.aborted||res.destroyed)abort.abort();
+  try {return await operation(abort.signal);}
+  finally {req.off('aborted',cancel);res.off('close',cancel);}
+}
 function attachmentUrl(id,attachmentId) {
   return base+'/'+encodeURIComponent(id)+'/attachments/'+encodeURIComponent(attachmentId);
 }
@@ -77,6 +84,15 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         if(!image)fail('COMPANION_NOT_FOUND');
         res.writeHead(200,{'Content-Type':image.mediaType,'Cache-Control':'private, max-age=86400',
           'X-Content-Type-Options':'nosniff','Content-Length':image.data.length});res.end(image.data);return;
+      }
+      if(path.length===1&&['sticker-market','sticker-search'].includes(path[0])&&req.method==='GET') {
+        if([...url.searchParams.keys()].some(key=>!['query','tag','format'].includes(key)))fail('COMPANION_INVALID_INPUT');
+        const result=await whileConnected(req,res,signal=>runtime.searchOnlineStickers(null,{
+          query:url.searchParams.get('query')??'',tag:url.searchParams.get('tag')??'',
+          format:url.searchParams.get('format')??'any',
+          kind:path[0]==='sticker-market'?'packs':'stickers',signal,
+        }));
+        return send(res,200,result);
       }
       if(!path.length && req.method==='GET') {
         const profiles=await store.profiles(),catalog=await ctx.sessionController.modelCatalog();
@@ -144,6 +160,13 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         return send(res,405,{error:'METHOD_NOT_ALLOWED'});
       }
       const id=path[0],profile=await store.getProfile(id);
+      if(path.length===2&&['sticker-market','sticker-search'].includes(path[1])&&req.method==='POST') {
+        const input=await body(req,4096),key=path[1]==='sticker-market'?'packId':'stickerId';
+        if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).length!==1||!Object.hasOwn(input,key))
+          fail('COMPANION_INVALID_INPUT');
+        const result=await whileConnected(req,res,signal=>runtime.downloadOnlineSticker(id,input,{signal}));
+        return send(res,201,result);
+      }
       if(path[1]==='sticker-packs'&&path.length===2&&req.method==='POST') {
         const input=await body(req,28*1024*1024+4096);
         if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['name','base64'].includes(key))
@@ -241,8 +264,10 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
       }
       return send(res,405,{error:'METHOD_NOT_ALLOWED'});
     } catch(error) {
+      if(res.destroyed)return;
       if(res.headersSent) {res.destroy(error);return;}
-      const locale=resolveMobileLocale(ctx),raw=error.code;
+      const online=path.some(part=>['sticker-market','sticker-search'].includes(part));
+      const locale=resolveMobileLocale(ctx),raw=online&&error.name==='TimeoutError'?'COMPANION_STICKER_ONLINE_NETWORK':error.code;
       const code=typeof raw==='string'&&(/^(?:COMPANION_[A-Z_]+)$/.test(raw)
         ||['INVALID_IMAGE','UNSUPPORTED_IMAGE_TYPE','IMAGE_TOO_LARGE','IMAGE_TOO_MANY_PIXELS','IMAGE_DIMENSION_TOO_LARGE'].includes(raw))?raw:'COMPANION_OPERATION_FAILED';
       const copy=dialoguePrompts[locale];
@@ -255,9 +280,13 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         :code==='COMPANION_STICKER_PACK_INVALID'?copy.stickerPackInvalid
         :code==='COMPANION_STICKER_PACK_TOO_LARGE'?copy.stickerPackTooLarge
         :code==='COMPANION_STICKER_PACK_UNSUPPORTED'?copy.stickerPackUnsupported
+        :code==='COMPANION_STICKER_ONLINE_NETWORK'?copy.stickerOnlineNetwork
+        :code==='COMPANION_STICKER_ONLINE_INVALID'?copy.stickerOnlineInvalid
+        :code==='COMPANION_STICKER_ONLINE_NOT_FOUND'?copy.stickerOnlineNotFound
+        :code==='COMPANION_STICKER_ONLINE_CHECKSUM'?copy.stickerOnlineChecksum
         :generation?copy.generationFailed:copy.operationFailed;
       ctx.logger.warn('COMPANION_HTTP_FAILED: '+code);
-      return send(res,code==='COMPANION_OPERATION_FAILED'?500:/NOT_FOUND/.test(code)?404:/CONFLICT|MANAGED|DRAFT_CLOSED/.test(code)?409:400,{
+      return send(res,code==='COMPANION_OPERATION_FAILED'?500:code==='COMPANION_STICKER_ONLINE_NETWORK'?503:/NOT_FOUND/.test(code)?404:/CONFLICT|MANAGED|DRAFT_CLOSED/.test(code)?409:400,{
         error:code,message});
     }
   };

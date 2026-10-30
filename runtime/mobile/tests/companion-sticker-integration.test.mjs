@@ -6,8 +6,11 @@ import { join } from 'node:path';
 import { createRequire, registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { StickerPackLibrary } from '../companions/sticker-packs.mjs';
+import { OnlineStickerService, ONLINE_STICKER_CATALOG_URL, ONLINE_STICKER_INDEX_URL } from '../companions/online-stickers.mjs';
 import { stickerCatalog, stickerContext } from '../companions/media.mjs';
 import { prepareReply } from '../companions/delivery.mjs';
 import { buildReplyerRequest } from '../companions/maibot-prompts.mjs';
@@ -26,6 +29,9 @@ const [{ CompanionRuntime }, { createCompanionHandler }] = await Promise.all([
 ]);
 const token = 'fictional-sticker-pack-integration-token';
 const png = () => encodePng({ width: 2, height: 2, channels: 4, pixels: Buffer.alloc(16, 190) });
+const gif = () => Buffer.from('47494638396101000100800000000000ffffff21ff0b4e45545343415045322e300301000000'
+  + '21f904000a0000002c0000000001000100000202440100'
+  + '21f904000a0000002c00000000010001000002024c01003b', 'hex');
 function imageZip(names) {
   const files = [], central = []; let offset = 0;
   for (const path of names) {
@@ -55,7 +61,11 @@ async function fixture(t, { locale = 'en' } = {}) {
     options: { getClock: async () => ({ now: Date.parse('2026-10-30T04:00:00Z'), timeZone: 'Asia/Shanghai' }) } });
   const previousToken = process.env.DROY_WEB_TOKEN; process.env.DROY_WEB_TOKEN = token;
   const handler = createCompanionHandler({ ctx, runtime, store });
-  const server = createServer((req, res) => handler(req, res).catch(error => { res.writeHead(500); res.end(String(error)); }));
+  const handled = [];
+  const server = createServer((req, res) => {
+    const done = handler(req, res).catch(error => { res.writeHead(500); res.end(String(error)); });
+    handled.push({ req, res, done });
+  });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {
     server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
@@ -68,7 +78,46 @@ async function fixture(t, { locale = 'en' } = {}) {
     ...(value === undefined ? {} : { body: JSON.stringify(value) }) });
   const api = async (...args) => { const response = await request(...args); return { status: response.status, value: await response.json() }; };
   const owner = { kind: 'chat', companionId: 'kaka', sessionId: 'fictional-session' };
-  return { directory, store, runtime, library, owner, api, request, url };
+  return { directory, store, runtime, library, owner, api, request, url, handled };
+}
+
+function publicStickerFixture(f, { checksum = true, status = 200, imageData = png(), extension = 'png' } = {}) {
+  const packId = 'fictional-waves', archiveUrl = 'https://stickers.example.org/waves.zip', imageUrl = 'https://stickers.example.org/wave.' + extension;
+  const archive = imageZip(['daily/Fictional-wave.png', 'happy/Fictional-cheer.png']);
+  const pack = { id: packId, name: 'Fictional waves', description: 'Friendly fictional greetings', count: 2, bytes: archive.length,
+    version: '1.0.0', license: 'CC0', archiveUrl, sha256: checksum ? createHash('sha256').update(archive).digest('hex') : '0'.repeat(64) };
+  const catalog = { schemaVersion: 1, packs: [pack] };
+  const index = { schemaVersion: 1, packs: { [packId]: pack }, stickers: [{ id: packId + '/daily/wave', pack: packId,
+    name: 'Fictional-wave', description: 'A fictional friend waves hello', tag: 'daily', keywords: ['wave', 'hello'],
+    caption: 'A fictional friend waves hello', path: 'memes/daily/wave.' + extension, imageUrl }] };
+  const calls = [];
+  f.runtime.onlineStickers = new OnlineStickerService({ library: f.library,
+    allowedHosts: ['raw.githubusercontent.com', 'stickers.example.org'],
+    resolve: async () => [{ address: '93.184.216.34', family: 4 }],
+    fetchImpl: async (url, options) => {
+      calls.push({ url, signal: options.signal });
+      assert.equal(options.headers.cookie, undefined);
+      assert.equal(options.headers.authorization, undefined);
+      if (status !== 200) return new Response('Fictional source failure', { status });
+      if (url === ONLINE_STICKER_CATALOG_URL) return Response.json(catalog);
+      if (url === ONLINE_STICKER_INDEX_URL) return Response.json(index);
+      if (url === archiveUrl) return new Response(archive);
+      if (url === imageUrl) return new Response(imageData);
+      assert.fail('Unregistered public request: ' + url);
+    },
+  });
+  return { calls, packId, archiveUrl, imageUrl };
+}
+
+async function eventually(read, description) {
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) { if (await read()) return; await delay(5); }
+  assert.fail('Timed out: ' + description);
+}
+
+async function downloadedImage(f) {
+  return f.library.importOnlineImage({ bytes: png(), label: 'Fictional-wave', description: 'A fictional friend waves hello',
+    tag: 'daily', keywords: 'wave hello', source: 'https://stickers.example.org/wave.png', license: 'CC0' });
 }
 
 test('authenticated ZIP import shares storage but enables only the importing companion; disabling retains history', async t => {
@@ -214,4 +263,249 @@ test('skipping a middle sticker preserves text/image message IDs in the reply re
   assert.deepEqual(reply.parts.map(part => part.messageId), reply.messageIds);
   for (const part of reply.parts) assert.equal((await f.store.getMessage('kaka', part.messageId)).type, part.type);
   assert.equal((await f.store.getState('kaka')).replyDraft, null);
+});
+
+test('online image search downloads one reusable local sticker, enables only its owner and sends that exact ID', async t => {
+  const f = await fixture(t), remote = publicStickerFixture(f), other = await f.store.getProfile('maimai');
+  const search = await f.api('/sticker-search?query=wave&tag=daily&format=static');
+  assert.equal(search.status, 200, JSON.stringify(search.value));
+  assert.equal(search.value.items.length, 1);
+  const candidate = search.value.items[0];
+  assert.equal(candidate.format, 'static');
+  assert.equal(candidate.license, 'CC0'); assert.match(candidate.description, /waves hello/);
+  assert.equal(f.library.packs().length, 1, 'Search does not install images');
+
+  const result = await f.api('/kaka/sticker-search', 'POST', { stickerId: candidate.id });
+  assert.equal(result.status, 201, JSON.stringify(result.value));
+  assert.equal(result.value.downloaded, true);
+  const { pack, sticker } = result.value;
+  assert.equal(pack.count, 1);
+  assert.equal(sticker.source, remote.imageUrl);
+  assert.ok(f.runtime.stickers(await f.store.getProfile('kaka'), { query: 'wave' }).some(row => row.id === sticker.id));
+  assert.deepEqual((await f.store.getProfile('maimai')).settings.stickerPackIds, other.settings.stickerPackIds);
+  assert.ok(!f.runtime.stickers(other, { all: true }).some(row => row.id === sticker.id));
+
+  f.runtime.generate = async () => assert.fail('Sending an exact downloaded ID must not choose a different sticker');
+  const sent = await f.runtime.sendEmoji(f.owner, { stickerId: sticker.id });
+  assert.equal(sent.delivered, true); assert.equal(sent.stickerId, sticker.id);
+  assert.equal((await f.store.listMessages('kaka')).messages[0].stickerId, sticker.id);
+  const repeated = await f.api('/kaka/sticker-search', 'POST', { stickerId: candidate.id });
+  assert.equal(repeated.status, 201); assert.equal(repeated.value.sticker.id, sticker.id);
+  assert.equal(repeated.value.pack.count, 1); assert.equal(f.library.packs().length, 2);
+
+  await f.api('/kaka', 'PATCH', { settings: { stickerPackIds: [] } });
+  await assert.rejects(f.runtime.sendEmoji(f.owner, { stickerId: sticker.id }), error => error.code === 'COMPANION_INVALID_STICKER');
+  const historical = await f.request('/sticker-media/' + sticker.id);
+  assert.equal(historical.status, 200); assert.deepEqual(Buffer.from(await historical.arrayBuffer()), png());
+});
+
+test('online GIFs retain original animation bytes, owner scope and historical meaning after disabling the pack', async t => {
+  const f = await fixture(t), image = gif(), remote = publicStickerFixture(f, { imageData: image, extension: 'gif' });
+  const other = await f.store.getProfile('maimai');
+  const search = await f.api('/sticker-search?query=wave&tag=daily&format=gif');
+  assert.equal(search.status, 200, JSON.stringify(search.value));
+  assert.equal(search.value.items.length, 1, 'An animated GIF in the public index remains discoverable');
+  assert.equal(search.value.items[0].format, 'gif');
+  const staticOnly = await f.api('/sticker-search?query=wave&tag=daily&format=static');
+  assert.equal(staticOnly.status, 200); assert.deepEqual(staticOnly.value.items, [], 'A GIF is excluded from static-only search');
+  const downloaded = await f.api('/kaka/sticker-search', 'POST', { stickerId: search.value.items[0].id });
+  assert.equal(downloaded.status, 201, JSON.stringify(downloaded.value));
+  const { pack, sticker } = downloaded.value;
+  assert.equal(sticker.source, remote.imageUrl);
+  assert.ok((await f.store.getProfile('kaka')).settings.stickerPackIds.includes(pack.id));
+  assert.deepEqual((await f.store.getProfile('maimai')).settings.stickerPackIds, other.settings.stickerPackIds);
+  assert.ok(!f.runtime.stickers(other, { all: true }).some(row => row.id === sticker.id));
+  const media = await f.request('/sticker-media/' + sticker.id);
+  assert.equal(media.status, 200); assert.equal(media.headers.get('content-type'), 'image/gif');
+  assert.deepEqual(Buffer.from(await media.arrayBuffer()), image, 'Downloading does not flatten the GIF to a frame');
+
+  f.runtime.generate = async () => assert.fail('The chosen local GIF ID must be sent directly');
+  const sent = await f.runtime.sendEmoji(f.owner, { stickerId: sticker.id });
+  assert.equal(sent.delivered, true); assert.equal(sent.stickerId, sticker.id);
+  const message = await f.store.getMessage('kaka', sent.messageIds[0]);
+  await f.api('/kaka', 'PATCH', { settings: { stickerPackIds: [] } });
+  assert.deepEqual(f.runtime.stickers(await f.store.getProfile('kaka')), []);
+  assert.equal(stickerContext(message, 'en', f.runtime.catalog()).sticker.description, 'A fictional friend waves hello');
+  const historical = await f.request('/sticker-media/' + sticker.id);
+  assert.equal(historical.headers.get('content-type'), 'image/gif');
+  assert.deepEqual(Buffer.from(await historical.arrayBuffer()), image);
+});
+
+test('exact sticker sends honor caller cancellation and runtime closure without creating a reply or message', async t => {
+  for (const reason of ['cancelled', 'closed']) await t.test(reason, async child => {
+    const f = await fixture(child), abort = new AbortController();
+    const before = (await f.store.getState('kaka')).replyDraft;
+    f.runtime.generate = async () => assert.fail('An exact sticker does not call the selector');
+    if (reason === 'cancelled') abort.abort();
+    else await f.runtime.close();
+    await assert.rejects(f.runtime.sendEmoji(f.owner, { stickerId: 'test-sticker-ok' }, abort.signal), error => error.name === 'AbortError');
+    assert.equal((await f.store.listMessages('kaka')).messages.length, 0);
+    assert.equal((await f.store.getState('kaka')).replyDraft, before);
+  });
+});
+
+test('market download verifies and installs one pack while duplicate installs preserve the library and other companions', async t => {
+  const f = await fixture(t), remote = publicStickerFixture(f), other = await f.store.getProfile('maimai');
+  const market = await f.api('/sticker-market?query=waves');
+  assert.equal(market.status, 200); assert.equal(market.value.packs[0].id, remote.packId);
+  const first = await f.api('/kaka/sticker-market', 'POST', { packId: remote.packId });
+  assert.equal(first.status, 201, JSON.stringify(first.value));
+  assert.equal(first.value.installed, 2); assert.equal(first.value.pack.count, 2); assert.equal(first.value.skippedAnimated, 0);
+  assert.equal(first.value.pack.originId, remote.packId);
+  assert.ok((await f.store.getProfile('kaka')).settings.stickerPackIds.includes(first.value.pack.id));
+  assert.deepEqual((await f.store.getProfile('maimai')).settings, other.settings);
+  const second = await f.api('/kaka/sticker-market', 'POST', { packId: remote.packId });
+  assert.equal(second.status, 201); assert.equal(second.value.pack.id, first.value.pack.id);
+  assert.equal(f.library.packs().length, 2);
+  assert.equal(remote.calls.filter(call => call.url === remote.archiveUrl).length, 1);
+});
+
+test('online routes authenticate before reading sources and reject invalid queries or arbitrary download URLs', async t => {
+  const f = await fixture(t), remote = publicStickerFixture(f);
+  assert.equal((await fetch(f.url + '/sticker-market')).status, 401);
+  assert.equal((await fetch(f.url + '/kaka/sticker-search', { method: 'POST' })).status, 401);
+  for (const path of ['/sticker-search', '/sticker-search?query=%20', '/sticker-search?query=wave&url=https://example.org',
+    '/sticker-search?query=' + 'x'.repeat(201), '/sticker-search?query=wave&format=video',
+    '/sticker-market?query=wave&format=gif']) assert.equal((await f.api(path)).status, 400);
+  for (const value of [{}, { url: 'https://example.org/picture.png' }, { stickerId: 'a', packId: 'b' }, { stickerId: '' }, null])
+    assert.equal((await f.api('/kaka/sticker-search', 'POST', value)).status, 400);
+  assert.equal((await f.api('/kaka/sticker-search', 'POST', { stickerId: 'https://example.org/picture.png' })).status, 404);
+  assert.equal((await f.api('/kaka/sticker-market', 'POST', { packId: 'https://example.org/pack.zip' })).status, 404);
+  assert.equal(remote.calls.length, 0, 'Rejected inputs must not cause remote requests');
+  assert.equal(f.library.packs().length, 1);
+});
+
+test('network and checksum failures have paired language messages and leave existing packs unchanged', async t => {
+  for (const locale of ['zh', 'en']) await t.test(locale, async child => {
+    const f = await fixture(child, { locale });
+    publicStickerFixture(f, { status: 503 });
+    const network = await f.api('/sticker-market');
+    assert.equal(network.status, 503); assert.equal(network.value.error, 'COMPANION_STICKER_ONLINE_NETWORK');
+    assert.match(network.value.message, locale === 'zh' ? /网络/ : /connection/);
+
+    const remote = publicStickerFixture(f, { checksum: false });
+    const checksum = await f.api('/kaka/sticker-market', 'POST', { packId: remote.packId });
+    assert.equal(checksum.status, 400); assert.equal(checksum.value.error, 'COMPANION_STICKER_ONLINE_CHECKSUM');
+    assert.match(checksum.value.message, locale === 'zh' ? /校验/ : /verification/);
+    assert.equal(f.library.packs().length, 1);
+    assert.deepEqual((await f.store.getProfile('kaka')).settings.stickerPackIds ?? ['droy-default'], ['droy-default']);
+  });
+});
+
+test('HTTP disconnect cancels the ongoing download and cannot enable a late result', async t => {
+  const f = await fixture(t), saved = await downloadedImage(f), entered = Promise.withResolvers(), release = Promise.withResolvers();
+  t.after(() => release.resolve());
+  f.runtime.onlineStickers = { async download(_id, { signal }) { entered.resolve(signal); await release.promise; return saved; } };
+  const abort = new AbortController();
+  const response = fetch(f.url + '/kaka/sticker-search', { method: 'POST', signal: abort.signal,
+    headers: { cookie: 'droy_session=' + token, 'content-type': 'application/json' }, body: JSON.stringify({ stickerId: 'fictional-id' }) })
+    .then(value => ({ value }), error => ({ error }));
+  const signal = await entered.promise;
+  abort.abort();
+  assert.equal((await response).error?.name, 'AbortError');
+  await eventually(() => signal.aborted, 'the server observes the disconnected request');
+  release.resolve(); await f.runtime.maintenance.drainMemorySpace('kaka');
+  assert.deepEqual((await f.store.getProfile('kaka')).settings.stickerPackIds ?? ['droy-default'], ['droy-default']);
+});
+
+test('a POST disconnected during its initial profile read cannot start or enable a later download', async t => {
+  const f = await fixture(t), saved = await downloadedImage(f), entered = Promise.withResolvers(), release = Promise.withResolvers();
+  const original = f.store.getProfile.bind(f.store); let reads = 0, downloads = 0;
+  const before = (await original('kaka')).settings.stickerPackIds;
+  t.after(() => { release.resolve(); f.store.getProfile = original; });
+  f.store.getProfile = async id => {
+    const profile = await original(id);
+    if (id === 'kaka' && ++reads === 1) { entered.resolve(); await release.promise; }
+    return profile;
+  };
+  f.runtime.onlineStickers = { async download() { downloads++; return saved; } };
+  const download = f.runtime.downloadOnlineSticker.bind(f.runtime); let receivedSignal;
+  f.runtime.downloadOnlineSticker = (id, input, options) => { receivedSignal = options.signal; return download(id, input, options); };
+  const abort = new AbortController();
+  const response = fetch(f.url + '/kaka/sticker-search', { method: 'POST', signal: abort.signal,
+    headers: { cookie: 'droy_session=' + token, 'content-type': 'application/json' }, body: JSON.stringify({ stickerId: 'fictional-id' }) })
+    .then(value => ({ value }), error => ({ error }));
+  await entered.promise;
+  const request = f.handled[0].req, buffered = [];
+  for await (const chunk of request) buffered.push(chunk);
+  // A buffered body reaches cancellation admission; a destroyed unread stream
+  // would fail earlier and would not exercise the late-listener boundary.
+  request[Symbol.asyncIterator] = async function* () { yield Buffer.concat(buffered); };
+  abort.abort();
+  assert.equal((await response).error?.name, 'AbortError');
+  await eventually(() => f.handled[0].res.destroyed, 'the response closes while the initial profile read is pending');
+  release.resolve(); await f.handled[0].done;
+  assert.equal(receivedSignal?.aborted, true, 'The download boundary observes the already disconnected response');
+  assert.equal(downloads, 0);
+  assert.deepEqual((await original('kaka')).settings.stickerPackIds, before);
+});
+
+test('cancellation, host close and a superseding user message cannot enable a completed download', async t => {
+  for (const reason of ['cancel', 'close', 'message']) await t.test(reason, async child => {
+    const f = await fixture(child), saved = await downloadedImage(f), entered = Promise.withResolvers(), release = Promise.withResolvers();
+    child.after(() => release.resolve());
+    f.runtime.onlineStickers = { async download(_id, { signal }) { entered.resolve(signal); await release.promise; return saved; } };
+    const abort = new AbortController();
+    const pending = f.runtime.downloadOnlineSticker('kaka', { stickerId: 'fictional-id' }, { signal: abort.signal, owner: f.owner })
+      .then(value => ({ value }), error => ({ error }));
+    const signal = await entered.promise;
+    if (reason === 'cancel') abort.abort();
+    else if (reason === 'close') await f.runtime.close();
+    else {
+      f.runtime.options.debounceMs = 60000;
+      await f.runtime.submit('kaka', { clientId: 'fictional-new-message', text: 'Please stop looking for that sticker.' });
+    }
+    if (reason !== 'message') assert.equal(signal.aborted, true);
+    release.resolve();
+    const result = await pending;
+    assert.equal(result.error?.[reason === 'message' ? 'code' : 'name'], reason === 'message' ? 'COMPANION_REPLY_SUPERSEDED' : 'AbortError');
+    assert.deepEqual((await f.store.getProfile('kaka')).settings.stickerPackIds ?? ['droy-default'], ['droy-default']);
+  });
+});
+
+test('maintenance drain waits for a companion download through library publication and profile enablement', async t => {
+  const f = await fixture(t), saved = await downloadedImage(f), entered = Promise.withResolvers(), release = Promise.withResolvers();
+  t.after(() => release.resolve());
+  f.runtime.onlineStickers = { async download() { entered.resolve(); await release.promise; return saved; } };
+  const downloading = f.runtime.downloadOnlineSticker('kaka', { stickerId: 'fictional-id' });
+  await entered.promise;
+  let drained = false;
+  const drain = f.runtime.maintenance.drainMemorySpace('kaka').then(() => { drained = true; });
+  await delay(0); assert.equal(drained, false);
+  release.resolve(); await downloading; await drain;
+  assert.ok((await f.store.getProfile('kaka')).settings.stickerPackIds.includes(saved.pack.id));
+});
+
+test('a user message arriving during the final profile read cannot enable the downloaded pack', async t => {
+  const f = await fixture(t), saved = await downloadedImage(f), entered = Promise.withResolvers(), release = Promise.withResolvers();
+  const original = f.store.getProfile.bind(f.store); let reads = 0;
+  t.after(() => { release.resolve(); f.store.getProfile = original; });
+  f.runtime.onlineStickers = { async download() { return saved; } };
+  f.store.getProfile = async id => {
+    const profile = await original(id);
+    if (id === 'kaka' && ++reads === 2) { entered.resolve(); await release.promise; }
+    return profile;
+  };
+  const pending = f.runtime.downloadOnlineSticker('kaka', { stickerId: 'fictional-id' }, { owner: f.owner })
+    .then(value => ({ value }), error => ({ error }));
+  await entered.promise;
+  f.runtime.state('kaka').revision++;
+  release.resolve();
+  assert.equal((await pending).error?.code, 'COMPANION_REPLY_SUPERSEDED');
+  assert.deepEqual((await original('kaka')).settings.stickerPackIds ?? ['droy-default'], ['droy-default']);
+});
+
+test('agent download budget is bounded per conversation revision while manual downloads remain available', async t => {
+  const f = await fixture(t), saved = await downloadedImage(f); let downloads = 0;
+  f.runtime.onlineStickers = { async download() { downloads++; return saved; } };
+  for (let i = 0; i < 3; i++) assert.equal((await f.runtime.downloadOnlineSticker('kaka', { stickerId: 'fictional-id' }, { owner: f.owner })).downloaded, true);
+  const limited = await f.runtime.downloadOnlineSticker('kaka', { stickerId: 'fictional-id' }, { owner: f.owner });
+  assert.equal(limited.downloaded, false); assert.equal(limited.reason, 'turn_download_limit'); assert.equal(downloads, 3);
+  assert.equal((await f.api('/kaka/sticker-search', 'POST', { stickerId: 'fictional-id' })).status, 201);
+  f.runtime.options.debounceMs = 60000;
+  await f.runtime.submit('kaka', { clientId: 'fictional-next-turn', text: 'Find a different expression now.' });
+  assert.equal((await f.runtime.downloadOnlineSticker('kaka', { stickerId: 'fictional-id' }, { owner: f.owner })).downloaded, true);
+  assert.equal(downloads, 5);
+  await assert.rejects(f.runtime.downloadOnlineSticker('kaka', { stickerId: 'fictional-id' }, { owner: { ...f.owner, kind: 'work' } }),
+    error => error.code === 'COMPANION_TOOL_NOT_ALLOWED');
 });

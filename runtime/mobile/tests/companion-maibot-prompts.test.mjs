@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { defaultProfiles, COMPANION_PERSONAS, LEGACY_COMPANION_PERSONAS } from '../companions/profiles.mjs';
+import { dialoguePrompts } from '../companions/dialogue-prompts.mjs';
 import { buildPlannerPrompt, buildReplyerRequest, buildWaitReminder, buildAttentionDriftPrompt,
   readMaiBotPrompt, renderMaiBotPrompt, MAIBOT_DEFAULT_OPTIONS, replyToolDescriptions } from '../companions/maibot-prompts.mjs';
 
@@ -100,6 +101,43 @@ test('unavailable memory and work tools are omitted; attached emoji requires ena
   const p = profile(); p.settings.memoryEnabled = false;
   assert.doesNotMatch(buildPlannerPrompt({ profile: p, availableTools: ['companion_reply', 'companion_wait', 'companion_quiet'] }), /companion_recall|companion_work|companion_emoji/);
   assert.match(buildPlannerPrompt({ profile: profile(), options: { useNewSendLogic: true } }), /attach_emoji/);
+});
+
+test('online sticker guidance requires both online tools and remains in the current language', () => {
+  const online = ['companion_sticker_search', 'companion_sticker_download'], local = ['companion_stickers', 'companion_emoji'];
+  for (const locale of ['zh', 'en']) {
+    const available = [...local, ...online, 'companion_reply'];
+    const prompt = buildPlannerPrompt({ profile: profile(), locale, availableTools: available });
+    assert.match(prompt, /companion_sticker_search\(query, tag, kind\)/);
+    assert.match(prompt, /format=gif/);
+    assert.match(prompt, /companion_sticker_download/); assert.match(prompt, /companion_emoji\(stickerId\)/);
+    assert.match(prompt, locale === 'zh' ? /优先下载一张/ : /Prefer downloading one/);
+    assert.match(prompt, locale === 'zh' ? /不发送整段聊天或用户隐私/ : /never private details or the whole conversation/);
+    assert.match(prompt, locale === 'zh' ? /本轮最多三次下载/ : /at most three downloads/);
+    assert.match(prompt, locale === 'zh' ? /当前请求中明确指定/ : /current user request explicitly specifies/);
+    for (const missing of online) {
+      const restricted = buildPlannerPrompt({ profile: profile(), locale, availableTools: available.filter(name => name !== missing) });
+      assert.doesNotMatch(restricted, /companion_sticker_search|companion_sticker_download/);
+    }
+    const work = buildPlannerPrompt({ profile: profile(), locale, kind: 'work', availableTools: available });
+    assert.doesNotMatch(work, /companion_sticker_search|companion_sticker_download/);
+  }
+});
+
+test('online sticker tool and failure descriptions are paired and distinguish search, download and sending', () => {
+  const keys = ['stickerSearchDescription', 'stickerDownloadDescription', 'stickerDownloadLimit',
+    'stickerOnlineNetwork', 'stickerOnlineInvalid', 'stickerOnlineNotFound', 'stickerOnlineChecksum'];
+  for (const key of keys) {
+    assert.equal(typeof dialoguePrompts.zh[key], 'string'); assert.ok(dialoguePrompts.zh[key].length);
+    assert.equal(typeof dialoguePrompts.en[key], 'string'); assert.ok(dialoguePrompts.en[key].length);
+    assert.notEqual(dialoguePrompts.zh[key], dialoguePrompts.en[key]);
+  }
+  for (const locale of ['zh', 'en']) {
+    const copy = dialoguePrompts[locale];
+    assert.match(copy.stickerSearchDescription, /query/); assert.match(copy.stickerSearchDescription, /stickers/); assert.match(copy.stickerSearchDescription, /packs/);
+    assert.match(copy.stickerDownloadDescription, /stickerId/); assert.match(copy.stickerDownloadDescription, /packId/);
+    assert.match(copy.stickerDownloadDescription, /companion_emoji/); assert.match(copy.emojiDescription, /stickerId/);
+  }
 });
 
 test('Replyer history remains user/assistant messages and reference, target and length are separate', () => {

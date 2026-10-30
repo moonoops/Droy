@@ -93,7 +93,7 @@ After setup, try:
 | Voice | Hold to talk, local speech recognition, voice conversations and optional readout. |
 | Companion | Built-in pixel-art black cat, marmot and alpaca, with custom artwork and task updates. |
 | Chat companion presets | Choose Kaka, Maimai, Dafeiyu or Lady Claude. A fresh installation starts with one Kaka; add other companions from the preset picker. Each keeps its own persona, conversations and memory, with an independently configurable model. |
-| Companion chat stickers | Import static ZIP packs into a shared local library and choose enabled packs for each companion. [Usage](runtime/mobile/companions/STICKERS.md). |
+| Companion chat stickers | Companions can search public sticker sources, download individual images, and install marketplace packs, including animated GIFs. ZIP imports and per-companion pack selections share one local library. [Usage](runtime/mobile/companions/STICKERS.md). |
 | Notifications | Content rules, model-assisted analysis and reminders. |
 | Personal memory | Optional local records and retrieval, with separate source and processing controls. |
 | Extensions | Skills, plugins, MCP and automations through DSH. |

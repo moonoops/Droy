@@ -8,9 +8,9 @@
     <string name="native_companion_sticker_packs_none_enabled">尚未启用图包，可在伙伴资料中选择。</string>
     <string name="native_companion_sticker_packs_import">导入 ZIP 图包</string>
     <string name="native_companion_sticker_packs_importing">正在导入…</string>
-    <string name="native_companion_sticker_packs_import_scope">支持 dsh-meme 图包或包含静态 PNG、JPEG、WebP 图片的 ZIP，最大 20 MB。导入后加入共享素材库，并立即为当前伙伴启用。暂不支持动图。</string>
+    <string name="native_companion_sticker_packs_import_scope">支持 dsh-meme 图包或包含 PNG、JPEG、静态 WebP、GIF 动图的 ZIP，最大 20 MB。导入后加入共享素材库，并立即为当前伙伴启用。暂不支持其他动图格式。</string>
     <string name="native_companion_sticker_packs_save_before_import">请先保存当前选择，再导入图包。</string>
-    <string name="native_companion_sticker_pack_invalid">无法导入这个图包，请选择有效的 dsh-meme 图包或包含静态图片的 ZIP。</string>
+    <string name="native_companion_sticker_pack_invalid">无法导入这个图包，请选择有效的 dsh-meme 图包，或包含静态图片或 GIF 的 ZIP。</string>
     <string name="native_companion_sticker_pack_too_large">图包超出导入限制。ZIP 最大 20 MB，最多 500 张图片，单张最大 8 MB，解压后合计最大 64 MB。</string>
-    <string name="native_companion_sticker_pack_unsupported">图包包含暂不支持的图片，请使用静态 PNG、JPEG 或 WebP。</string>
+    <string name="native_companion_sticker_pack_unsupported">图包包含暂不支持的图片，请使用静态 PNG、JPEG、WebP 或 GIF。暂不支持其他动图格式。</string>
 </resources>

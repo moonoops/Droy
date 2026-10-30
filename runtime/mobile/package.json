@@ -45,6 +45,8 @@
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/dsh-attachment-local": "0.2.1-rc.5",
     "@deepseek-ai/dsh-tools": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-http-proxy": "0.2.1-rc.5",
+    "undici": "8.11.2",
     "@deepseek-ai/dsh-scope": "0.2.1-rc.5",
     "@deepseek-ai/dsh-attachment": "0.2.1-rc.5",
     "@deepseek-ai/dsh-skill": "0.2.1-rc.5",

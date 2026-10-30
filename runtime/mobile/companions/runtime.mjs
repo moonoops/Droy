@@ -13,6 +13,7 @@ import { CompanionMemorySpaces } from './memory-spaces.mjs';
 import { consumeCompanionMemoryAuthorization } from './memory-management.mjs';
 import { CompanionLearning } from './learning.mjs';
 import { installCompanionMaintenance } from './maintenance-runtime.mjs';
+import { OnlineStickerService } from './online-stickers.mjs';
 import { stickerCatalog,stickerContext,readSharedAttachment,replyAttachment } from './media.mjs';
 import { prepareReply,publishReply } from './delivery.mjs';
 import { localizedProfile, profileName } from './profiles.mjs';
@@ -26,8 +27,9 @@ import { MOBILE_PROMPT_SECTION, COMPANION_PROMPT_SECTION } from '../prompt.mjs';
 
 export const COMPANION_TOOLS = new Set(['web_search','web_fetch','companion_reply','companion_wait',
   'companion_quiet','companion_work','companion_recall','companion_remember','companion_forget','companion_attachment',
-  'companion_stickers','companion_emoji']);
-const CHAT_ONLY_TOOLS=new Set(['companion_wait','companion_quiet','companion_work','companion_stickers','companion_emoji']);
+  'companion_stickers','companion_emoji','companion_sticker_search','companion_sticker_download']);
+const CHAT_ONLY_TOOLS=new Set(['companion_wait','companion_quiet','companion_work','companion_stickers','companion_emoji',
+  'companion_sticker_search','companion_sticker_download']);
 function replyParameters(parameters,locale) {
   const descriptions=replyToolDescriptions(locale),result=structuredClone(parameters);
   for(const [key,schema] of Object.entries(result))if(descriptions[key])schema.description=descriptions[key];
@@ -49,8 +51,9 @@ const memorySourceIds=(id,records)=>records.flatMap(record=>[
 ]);
 
 export class CompanionRuntime {
-  constructor({ctx,store,directory,stickerLibrary,options = {},notify = () => {}}) {
+  constructor({ctx,store,directory,stickerLibrary,onlineStickers,options = {},notify = () => {}}) {
     this.ctx = ctx; this.store = store; this.directory = directory; this.notify = notify; this.stickerLibrary=stickerLibrary;
+    this.onlineStickers=onlineStickers??(stickerLibrary?new OnlineStickerService({library:stickerLibrary}):undefined);
     this.options = {historyMessages:80,learningMessages:6,
       proactiveIntervalMs:1800000,proactiveIdleMs:900000,...options};
     this.owners = new Map(); this.live = new Map(); this.memories = new Map(); this.states = new Map();
@@ -419,6 +422,7 @@ export class CompanionRuntime {
       const descriptions={companion_reply:'replyDescription',companion_wait:'waitDescription',companion_quiet:'stopDescription',
         companion_work:'workDescription',companion_recall:'recallDescription',companion_remember:'rememberDescription',companion_forget:'forgetDescription',
         companion_attachment:'attachmentDescription',companion_stickers:'stickersDescription',companion_emoji:'emojiDescription',
+        companion_sticker_search:'stickerSearchDescription',companion_sticker_download:'stickerDownloadDescription',
         web_search:'searchDescription',web_fetch:'fetchDescription'};
       assembly.tools = assembly.tools.filter(tool=>availableTools.includes(tool.name)).map(tool=>({...tool,
         ...(descriptions[tool.name]?{description:dialoguePrompts[locale][descriptions[tool.name]]}:{}),
@@ -435,7 +439,7 @@ export class CompanionRuntime {
       execute:async (args,exec) => this.maintenance.run('tool:'+name,()=>{
         exec.signal?.throwIfAborted();
         const state=this.state(owner.companionId);
-        if(owner.kind==='chat'&&['companion_reply','companion_emoji','companion_work'].includes(name)) {
+        if(owner.kind==='chat'&&['companion_reply','companion_emoji','companion_work','companion_sticker_download'].includes(name)) {
           if(state.pending.length||state.dispatching) {
             exec.concludeTurn?.();return {superseded:true,reason:'new_messages_pending'};
           }
@@ -521,7 +525,14 @@ export class CompanionRuntime {
       return this.startWork(owner.companionId,args);
     });
     register('companion_stickers','stickersDescription',{query:{type:'string'},tag:{type:'string'}},async args=>({items:this.stickers(await this.store.getProfile(owner.companionId),args)}));
-    register('companion_emoji','emojiDescription',{msg_id:{type:'string'},quoteReply:{type:'boolean'},query:{type:'string'},tag:{type:'string'}},async(args,exec)=>{
+    register('companion_sticker_search','stickerSearchDescription',{
+      query:{type:'string',required:true},tag:{type:'string'},kind:{type:'string',enum:['stickers','packs']},
+      format:{type:'string',enum:['any','gif','static']},
+    },(args,exec)=>this.searchOnlineStickers(owner.companionId,{...args,signal:exec.signal}));
+    register('companion_sticker_download','stickerDownloadDescription',{
+      stickerId:{type:'string'},packId:{type:'string'},
+    },(args,exec)=>this.downloadOnlineSticker(owner.companionId,args,{signal:exec.signal,owner}));
+    register('companion_emoji','emojiDescription',{msg_id:{type:'string'},quoteReply:{type:'boolean'},query:{type:'string'},tag:{type:'string'},stickerId:{type:'string'}},async(args,exec)=>{
       const proactive=!!this.state(owner.companionId).proactiveIntent;
       const result=await this.sendEmoji(owner,args,exec.signal);if(proactive)exec.concludeTurn();return result;
     });
@@ -726,33 +737,87 @@ export class CompanionRuntime {
       this.emit(id,'profile');return pack;
     },id);
   }
+  async searchOnlineStickers(id,{query='',tag='',kind='stickers',format='any',signal}={}) {
+    return this.maintenance.run('sticker-online-search',async()=>{
+      if(this.closed)fail('COMPANION_CLOSED');
+      if(!this.onlineStickers)fail('COMPANION_STICKER_PACK_UNSUPPORTED');
+      if(typeof query!=='string'||query.length>200||!query.isWellFormed()||typeof tag!=='string'||tag.length>80
+        ||!['stickers','packs'].includes(kind)||!['any','gif','static'].includes(format)
+        ||kind==='packs'&&format!=='any'||kind==='stickers'&&!query.trim())fail('COMPANION_INVALID_INPUT');
+      const combined=signal?AbortSignal.any([signal,this.lifetime.signal]):this.lifetime.signal;
+      combined.throwIfAborted();
+      if(id)await this.store.getProfile(id);
+      const input={query:query.trim(),tag:tag.trim(),format,limit:12,signal:combined,locale:this.locale()};
+      const result=await (kind==='packs'?this.onlineStickers.market(input):this.onlineStickers.search(input));
+      combined.throwIfAborted();return result;
+    },id);
+  }
+  async downloadOnlineSticker(id,input,{signal,owner}={}) {
+    return this.maintenance.run('sticker-online-download',async()=>{
+      if(this.closed)fail('COMPANION_CLOSED');
+      if(!this.onlineStickers)fail('COMPANION_STICKER_PACK_UNSUPPORTED');
+      if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['stickerId','packId'].includes(key))
+        ||Number(input.stickerId!==undefined)+Number(input.packId!==undefined)!==1)fail('COMPANION_INVALID_INPUT');
+      const key=input.stickerId??input.packId;
+      if(typeof key!=='string'||!key.trim()||key.length>1024||!key.isWellFormed())fail('COMPANION_INVALID_INPUT');
+      const combined=signal?AbortSignal.any([signal,this.lifetime.signal]):this.lifetime.signal;
+      const state=this.state(id),revision=state.revision;
+      combined.throwIfAborted();await this.store.getProfile(id);
+      if(owner) {
+        if(owner.kind!=='chat'||owner.companionId!==id)fail('COMPANION_TOOL_NOT_ALLOWED');
+        if(revision!==state.revision)fail('COMPANION_REPLY_SUPERSEDED');
+        if(state.stickerDownloadRevision!==revision) {state.stickerDownloadRevision=revision;state.stickerDownloads=0;}
+        if(state.stickerDownloads>=3)return {downloaded:false,reason:'turn_download_limit',message:this.copy().stickerDownloadLimit};
+        state.stickerDownloads++;
+      }
+      const options={signal:combined,locale:this.locale()};
+      const result=await (input.packId!==undefined?this.onlineStickers.install(key,options):this.onlineStickers.download(key,options));
+      combined.throwIfAborted();
+      // A new user message may supersede a download without removing shared media
+      // already saved for another conversation or historical message.
+      if(owner&&revision!==state.revision)fail('COMPANION_REPLY_SUPERSEDED');
+      const current=await this.store.getProfile(id);
+      combined.throwIfAborted();
+      if(owner&&revision!==state.revision)fail('COMPANION_REPLY_SUPERSEDED');
+      await this.store.updateProfile(id,{settings:{stickerPackIds:[...new Set([...(current.settings.stickerPackIds??['droy-default']),result.pack.id])]}});
+      this.emit(id,'profile');return {...result,downloaded:true};
+    },id);
+  }
   async sendEmoji(owner,args,signal) {
     if(owner.kind==='work')fail('COMPANION_TOOL_NOT_ALLOWED');
+    const combined=signal?AbortSignal.any([signal,this.lifetime.signal]):this.lifetime.signal;
+    combined.throwIfAborted();
     const finish=this.beginChat(owner.companionId);
     try {
     const id=owner.companionId,state=this.state(id),revision=state.revision,profile=await this.profileForUse(id),locale=this.locale();
-    const context=await this.context(id,owner,signal);
+    const context=await this.context(id,owner,combined);
     const enabled=this.stickers(profile,{all:true});
     const query=args.query??(enabled.length>12?context.messages.findLast(item=>item.role==='user'&&item.text?.trim())?.text.slice(0,2000)??'':'');
-    const items=this.stickers(profile,{query,tag:args.tag??''}).map((item,index)=>({...item,emoji_id:index+1}));
+    const exact=args.stickerId===undefined?null:enabled.find(item=>item.id===args.stickerId);
+    if(args.stickerId!==undefined&&!exact)fail('COMPANION_INVALID_STICKER');
+    const items=(exact?[exact]:this.stickers(profile,{query,tag:args.tag??''})).map((item,index)=>({...item,emoji_id:index+1}));
     if(!items.length)return {delivered:false,reason:enabled.length?'no_matching_sticker':'no_available_stickers',message:this.copy().noStickers};
     const target=context.messages.find(item=>item.id===args.msg_id);
     if(args.msg_id&&!target)fail('COMPANION_REPLY_SOURCE_REQUIRED');
     if(args.quoteReply!==undefined&&typeof args.quoteReply!=='boolean')fail('COMPANION_INVALID_INPUT');
     if(args.quoteReply===true&&(!target||!['user','assistant'].includes(target.role)||target.type==='task'))fail('COMPANION_REPLY_SOURCE_REQUIRED');
-    const system=renderMaiBotPrompt('emoji_selection',locale,{emoji_count:items.length,grid_rows:1,grid_columns:items.length});
-    const raw=await this.generate(profile,system,{conversation:context.messages.slice(-20),msg_id:args.msg_id??'',
-      candidateFormat:this.copy().emojiCandidates,items:items.map(({emoji_id,label,description,tags})=>({emoji_index:emoji_id,label,description,tags}))},
-    {signal,sessionId:owner.sessionId});
-    const selection=JSON.parse(raw.trim().replace(/^```(?:json)?\s*/u,'').replace(/\s*```$/u,''));
-    const selected=items.find(item=>item.emoji_id===selection.emoji_index);
+    let selected=exact;
+    if(!selected) {
+      const system=renderMaiBotPrompt('emoji_selection',locale,{emoji_count:items.length,grid_rows:1,grid_columns:items.length});
+      const raw=await this.generate(profile,system,{conversation:context.messages.slice(-20),msg_id:args.msg_id??'',
+        candidateFormat:this.copy().emojiCandidates,items:items.map(({emoji_id,label,description,tags})=>({emoji_index:emoji_id,label,description,tags}))},
+      {signal:combined,sessionId:owner.sessionId});
+      const selection=JSON.parse(raw.trim().replace(/^```(?:json)?\s*/u,'').replace(/\s*```$/u,''));
+      selected=items.find(item=>item.emoji_id===selection.emoji_index);
+    }
     if(!selected)fail('COMPANION_INVALID_STICKER');
     if(!this.stickers(await this.store.getProfile(id),{all:true}).some(item=>item.id===selected.id))
       return {delivered:false,reason:'sticker_no_longer_available',message:this.copy().noStickers};
+    combined.throwIfAborted();
     if(revision!==state.revision)fail('COMPANION_REPLY_SUPERSEDED');
     const parts=[{type:'sticker',text:'',stickerId:selected.id,quoteReply:args.quoteReply===true,...this.contextSources.get(owner.sessionId),...(args.msg_id?{replyTo:args.msg_id}:{})}];
     const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts,proactive:state.proactiveIntent});
-    const delivered=await this.publish(id,draft,signal);
+    const delivered=await this.publish(id,draft,combined);
     if(delivered.suppressed){state.phase='idle';this.emit(id,'status');return {delivered:false,reason:delivered.reason??'proactive_no_longer_appropriate'};}
     state.turnAction='emoji';state.delivered++;this.emit(id,'status');
     return {delivered:true,messageIds:delivered.messageIds,stickerId:selected.id,description:selected.description};

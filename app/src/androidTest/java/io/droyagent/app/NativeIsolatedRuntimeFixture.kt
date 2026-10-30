@@ -82,6 +82,11 @@ class NativeIsolatedRuntimeFixture(private val destination: String = "workbench"
                 .put(JSONObject().put("id", "agent-default-model").put("config", JSONObject().put("provider", "droy-native-fixture").put("model", "native-local")))
                 .put(JSONObject().put("id", "locale").put("config", JSONObject().put("preference", fixtureLocale)))
                 .put(JSONObject().put("insert", JSONArray().put(JSONObject().put("id", "native-local-fixture").put("name", plugin.absolutePath)))).toString())
+            InstrumentationRegistry.getArguments().getString("nativeFixtureProxyPort")?.let { value ->
+                val port = value.toIntOrNull()
+                require(port != null && port in 1024..65535) { "The isolated fixture proxy must be a loopback port" }
+                File(home, "native-fixture-proxy.json").writeText(JSONObject().put("version", 1).put("port", port).toString())
+            }
             changedPreferences = true
             preferences.keys.forEach { assertTrue(context.getSharedPreferences(it, 0).edit().clear().commit()) }
             assertTrue(context.getSharedPreferences("installation", 0).edit().putBoolean("completed", true).commit())

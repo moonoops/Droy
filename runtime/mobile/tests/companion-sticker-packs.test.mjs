@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { deflateRawSync } from 'node:zlib';
-import { StickerPackLibrary, STICKER_PACK_LIMITS, BUILTIN_STICKER_PACK_ID } from '../companions/sticker-packs.mjs';
+import { StickerPackLibrary, STICKER_PACK_LIMITS, BUILTIN_STICKER_PACK_ID, ONLINE_STICKER_PACK_ID } from '../companions/sticker-packs.mjs';
 import { stickerCatalog } from '../companions/media.mjs';
 import { crc32, encodePng } from '../png.mjs';
 
 const png = () => encodePng({ width: 2, height: 2, channels: 4, pixels: Buffer.alloc(16, 200) });
+const gif = () => Buffer.from('47494638396101000100800000000000ffffff21f904000a0000002c000000000100010000020244010021f904000a0000002c00000000010001000002024c01003b', 'hex');
 const errorCode = expected => error => error.code === 'COMPANION_STICKER_PACK_' + expected;
 function zip(rows, { deflate = false } = {}) {
   const body = [], central = []; let offset = 0;
@@ -149,9 +150,9 @@ test('enforces compressed, expanded, per-image and count limits before publicati
   assert.deepEqual(await readdir(join(directory, 'packs')), []);
 });
 
-test('rejects GIF, APNG, animated WebP and bogus image bytes', async t => {
+test('rejects damaged GIF, APNG, animated WebP and bogus image bytes', async t => {
   const { library } = await fixture(t);
-  await assert.rejects(library.importZip(zip([{ name: 'cat.gif', data: Buffer.from('GIF89a') }])), errorCode('UNSUPPORTED'));
+  await assert.rejects(library.importZip(zip([{ name: 'cat.gif', data: Buffer.from('GIF89a') }])), errorCode('INVALID'));
   const bytes = png(), animation = Buffer.alloc(20); animation.writeUInt32BE(8); animation.write('acTL', 4);
   animation.writeUInt32BE(crc32(animation.subarray(4, 16)), 16);
   const apng = Buffer.concat([bytes.subarray(0, 33), animation, bytes.subarray(33)]);
@@ -159,6 +160,73 @@ test('rejects GIF, APNG, animated WebP and bogus image bytes', async t => {
   const webp = Buffer.alloc(30); webp.write('RIFF'); webp.writeUInt32LE(22, 4); webp.write('WEBPVP8X', 8); webp.writeUInt32LE(10, 16); webp[20] = 2;
   await assert.rejects(library.importZip(zip([{ name: 'cat.webp', data: webp }])), errorCode('UNSUPPORTED'));
   await assert.rejects(library.importZip(zip([{ name: 'cat.png', data: Buffer.from('<script>not an image</script>') }])), errorCode('INVALID'));
+});
+
+test('market imports preserve GIF and skip APNG or animated WebP, while malformed images still fail', async t => {
+  const { library } = await fixture(t), bytes = png();
+  const animation = Buffer.alloc(20); animation.writeUInt32BE(8); animation.write('acTL', 4);
+  animation.writeUInt32BE(crc32(animation.subarray(4, 16)), 16);
+  const apng = Buffer.concat([bytes.subarray(0, 33), animation, bytes.subarray(33)]);
+  const webp = Buffer.alloc(30); webp.write('RIFF'); webp.writeUInt32LE(22, 4); webp.write('WEBPVP8X', 8); webp.writeUInt32LE(10, 16); webp[20] = 2;
+  const rows = [{ name: 'static.png', data: bytes }, { name: 'animated.gif', data: gif() },
+    { name: 'animated.png', data: apng }, { name: 'animated.webp', data: webp }];
+  const pack = await library.importZip(zip(rows), { skipUnsupported: true, provenance: { originId: 'fictional-market', originVersion: '1' } });
+  assert.equal(pack.count, 2); assert.equal(pack.skippedAnimated, 2); assert.equal(pack.originId, 'fictional-market');
+  await assert.rejects(library.importZip(zip(rows)), errorCode('UNSUPPORTED'));
+  await assert.rejects(library.importZip(zip(rows.slice(2)), { skipUnsupported: true }), errorCode('UNSUPPORTED'));
+  await assert.rejects(library.importZip(zip([...rows, { name: 'broken.png', data: Buffer.from('not an image') }]), { skipUnsupported: true }), errorCode('INVALID'));
+  assert.equal(library.packs().length, 2);
+});
+
+test('manual ZIP and online collection keep multi-frame GIF bytes and media types after restart', async t => {
+  const { library, directory } = await fixture(t), bytes = gif();
+  const pack = await library.importZip(zip([{ name: 'happy/虚构摇摆.gif', data: bytes }]));
+  const [sticker] = library.catalog('zh', { packIds: [pack.id] });
+  assert.deepEqual(await library.read(sticker.id), { data: bytes, mediaType: 'image/gif' });
+  const metadata = JSON.parse(await readFile(join(directory, 'packs', pack.id, 'metadata.json'), 'utf8'));
+  assert.equal(metadata.items[0].frameCount, 2); assert.equal(metadata.items[0].animated, true); assert.equal(metadata.items[0].extension, 'gif');
+  const online = await library.importOnlineImage({ bytes, label: '摇摆', description: '虚构黑白方块交替', tag: 'happy' });
+  const reopened = await new StickerPackLibrary(join(directory, 'packs'), { builtinCatalog: stickerCatalog }).open();
+  assert.deepEqual(await reopened.read(sticker.id), { data: bytes, mediaType: 'image/gif' });
+  assert.deepEqual(await reopened.read(online.sticker.id), { data: bytes, mediaType: 'image/gif' });
+  const still = Buffer.from('47494638376101000100800000000000ffffff2c00000000010001000002024401003b', 'hex');
+  const gif87 = await library.importZip(zip([{ name: 'single.gif', data: still }]));
+  assert.deepEqual((await library.read(library.catalog('en', { packIds: [gif87.id] })[0].id)).data, still);
+});
+
+test('GIF rejects truncated color tables, frames, extensions, image sub-blocks and canvas or frame excess', async t => {
+  const { library } = await fixture(t), bytes = gif();
+  const invalid = [bytes.subarray(0, 12), bytes.subarray(0, 17), bytes.subarray(0, -1), Buffer.concat([bytes, Buffer.from([0])])];
+  const noFrame = Buffer.concat([bytes.subarray(0, 19), Buffer.from([0x3b])]); invalid.push(noFrame);
+  const badFrame = Buffer.from(bytes); badFrame.writeUInt16LE(2, 32); invalid.push(badFrame);
+  const badControl = Buffer.from(bytes); badControl[21] = 3; invalid.push(badControl);
+  const reservedControl = Buffer.from(bytes); reservedControl[22] = 0xe0; invalid.push(reservedControl);
+  const badCodeSize = Buffer.from(bytes); badCodeSize[37] = 1; invalid.push(badCodeSize);
+  const badSubBlock = Buffer.from(bytes); badSubBlock[38] = 255; invalid.push(badSubBlock);
+  const noColors = Buffer.from(bytes); noColors[10] = 0; invalid.push(noColors);
+  for (const data of invalid) await assert.rejects(library.importZip(zip([{ name: 'broken.gif', data }])), errorCode('INVALID'));
+  const tooWide = Buffer.from(bytes); tooWide.writeUInt16LE(STICKER_PACK_LIMITS.dimension + 1, 6);
+  await assert.rejects(library.importZip(zip([{ name: 'wide.gif', data: tooWide }])), errorCode('TOO_LARGE'));
+  const frame = bytes.subarray(19, 42);
+  const tooManyFrames = Buffer.concat([bytes.subarray(0, 19), ...Array(STICKER_PACK_LIMITS.gifFrames + 1).fill(frame), Buffer.from([0x3b])]);
+  await assert.rejects(library.importZip(zip([{ name: 'too-many.gif', data: tooManyFrames }])), errorCode('TOO_LARGE'));
+  const largeCanvas = Buffer.from(bytes.subarray(0, 19)); largeCanvas.writeUInt16LE(2048, 6); largeCanvas.writeUInt16LE(2048, 8);
+  const excessiveCanvasWork = Buffer.concat([largeCanvas, ...Array(40).fill(frame), Buffer.from([0x3b])]);
+  await assert.rejects(library.importZip(zip([{ name: 'expensive.gif', data: excessiveCanvasWork }])), errorCode('TOO_LARGE'));
+  assert.equal(library.packs().length, 1);
+});
+
+test('GIF application and comment extensions preserve loop bytes without flattening frames', async t => {
+  const { library } = await fixture(t), bytes = gif();
+  const loop = Buffer.from('21ff0b4e45545343415045322e300301000000', 'hex');
+  const comment = Buffer.from([0x21, 0xfe, 3, 0x61, 0x62, 0x63, 0]);
+  const looping = Buffer.concat([bytes.subarray(0, 19), loop, comment, bytes.subarray(19)]);
+  looping[11] = 255; // Unused background sentinel used by real market GIFs.
+  const pack = await library.importZip(zip([{ name: 'loop.gif', data: looping }]));
+  const sticker = library.catalog('zh', { packIds: [pack.id] })[0];
+  assert.deepEqual(await library.read(sticker.id), { data: looping, mediaType: 'image/gif' });
+  const truncated = Buffer.concat([bytes.subarray(0, 19), loop.subarray(0, -1)]);
+  await assert.rejects(library.importZip(zip([{ name: 'broken-loop.gif', data: truncated }])), errorCode('INVALID'));
 });
 
 test('validates image dimensions and image magic rather than trusting extension', async t => {
@@ -203,4 +271,39 @@ test('stored media corruption is surfaced and arbitrary IDs never become file pa
   await assert.rejects(library.read(item.id), errorCode('INVALID'));
   assert.equal(await library.read('../../private'), null);
   assert.equal(await library.read('meme-' + '0'.repeat(40)), null);
+});
+
+const largeMetadata = { label: '虚'.repeat(200), description: '构'.repeat(200), tag: '类'.repeat(80),
+  keywords: '词'.repeat(1000), source: 'https://example.invalid/' + '源'.repeat(950), license: '许'.repeat(200) };
+
+test('remote pack metadata is bounded before publication and the previous library still opens', async t => {
+  const { library, directory } = await fixture(t);
+  const previous = await library.importZip(zip([{ name: 'existing.png', data: png() }]));
+  const [oldSticker] = library.catalog('en', { packIds: [previous.id] });
+  const images = Array.from({ length: 500 }, () => ({ bytes: png(), ...largeMetadata }));
+  await assert.rejects(library.importRemotePack(images, { name: 'Fictional metadata overflow' }), errorCode('TOO_LARGE'));
+  const reopened = await new StickerPackLibrary(join(directory, 'packs'), { builtinCatalog: stickerCatalog }).open();
+  assert.deepEqual(reopened.catalog(), library.catalog()); assert.equal(reopened.packs().length, 2);
+  assert.deepEqual((await reopened.read(oldSticker.id)).data, png());
+});
+
+test('online collection rejects an oversized metadata append without breaking the existing collection on restart', async t => {
+  const { library, directory } = await fixture(t);
+  let accepted = 0, lastSticker, rejected = false;
+  for (let index = 0; index < STICKER_PACK_LIMITS.images; index++) {
+    const pixels = Buffer.alloc(16, 100); pixels.writeUInt32LE(index);
+    const bytes = encodePng({ width: 2, height: 2, channels: 4, pixels });
+    try {
+      const result = await library.importOnlineImage({ bytes, ...largeMetadata });
+      accepted++; lastSticker = result.sticker;
+    } catch (error) {
+      assert.equal(error.code, 'COMPANION_STICKER_PACK_TOO_LARGE'); rejected = true; break;
+    }
+  }
+  assert.equal(rejected, true); assert.ok(accepted > 0 && accepted < STICKER_PACK_LIMITS.images);
+  const raw = await readFile(join(directory, 'packs', ONLINE_STICKER_PACK_ID, 'metadata.json'));
+  assert.ok(raw.length <= 2 * 1024 * 1024);
+  const reopened = await new StickerPackLibrary(join(directory, 'packs'), { builtinCatalog: stickerCatalog }).open();
+  assert.equal(reopened.packs().find(pack => pack.id === ONLINE_STICKER_PACK_ID).count, accepted);
+  assert.deepEqual(reopened.catalog(), library.catalog()); assert.ok((await reopened.read(lastSticker.id)).data.length > 0);
 });

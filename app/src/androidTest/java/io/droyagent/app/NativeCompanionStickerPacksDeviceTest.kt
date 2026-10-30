@@ -21,10 +21,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.droyagent.app.nativeui.companion.data.NativeCompanionClient
 import io.droyagent.app.nativeui.companion.data.NativeCompanionViewModel
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 import java.util.Locale
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import java.util.zip.CRC32
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
@@ -37,7 +39,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class NativeCompanionStickerPacksDeviceTest {
     @get:Rule(order = 0) val compose = createEmptyComposeRule()
-    @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture()
+    @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture("messages")
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     private val language get() = InstrumentationRegistry.getArguments().getString("nativeFixtureLocale", "en")
     private val inserted = mutableListOf<Uri>()
@@ -62,7 +64,6 @@ class NativeCompanionStickerPacksDeviceTest {
         fixture.scenario.onActivity { model.refresh() }
         compose.waitUntil(15_000) { model.state.value.companions.any { it.id == second } }
 
-        compose.onNodeWithTag("native-tab-messages").performClick()
         awaitTag("native-companion-conversation:$first")
         compose.onNodeWithTag("native-companion-conversation:$first").performClick()
         awaitTag("native-open-companion-profile")
@@ -70,8 +71,7 @@ class NativeCompanionStickerPacksDeviceTest {
         compose.onNodeWithTag("native-companion-sticker-pack-droy-default").assertIsOn()
         capture("empty-library")
 
-        val gif = android.util.Base64.decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", android.util.Base64.DEFAULT)
-        pickZip(document(zip(mapOf("daily/animation.gif" to gif))), expectError = true)
+        pickZip(document(zip(mapOf("daily/animation.png" to unsupportedApng()))), expectError = true)
         assertEquals("COMPANION_STICKER_PACK_UNSUPPORTED", model.state.value.error)
         assertEquals(1, model.state.value.stickerPacks.size)
         capture("unsupported-animation")
@@ -204,6 +204,14 @@ class NativeCompanionStickerPacksDeviceTest {
         val bitmap = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888)
         Canvas(bitmap).apply { drawColor(Color.TRANSPARENT); drawCircle(48f, 48f, 36f, Paint().apply { this.color = color }) }
         return try { ByteArrayOutputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)); it.toByteArray() } } finally { bitmap.recycle() }
+    }
+    private fun unsupportedApng(): ByteArray {
+        val source = png(Color.BLUE)
+        val type = "acTL".toByteArray(Charsets.US_ASCII)
+        val data = ByteBuffer.allocate(8).putInt(2).putInt(0).array()
+        val checksum = CRC32().apply { update(type); update(data) }.value.toInt()
+        val chunk = ByteBuffer.allocate(20).putInt(8).put(type).put(data).putInt(checksum).array()
+        return source.copyOfRange(0, 33) + chunk + source.copyOfRange(33, source.size)
     }
     private fun request(path: String = "", method: String = "GET", body: JSONObject? = null): JSONObject = runBlocking {
         fixture.runtimeTransport.json("/droy/companions$path", method, body)
