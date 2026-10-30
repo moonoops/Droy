@@ -97,6 +97,18 @@ final class ProductBridge extends NanoHTTPD {
             if (session.getUri().equals("/memory") || session.getUri().equals("/history"))
                 return memoryRequest(session.getUri(), request);
             if (session.getUri().equals("/voice")) return ok(VoiceRuntime.request(context, request));
+            if (session.getUri().equals("/embedding")) {
+                if (request.optString("operation").equals("embed") && (policy.isStopped() || ProductPermissions.stopped(context))) {
+                    io.droyagent.app.embedding.EmbeddingRuntime.cancelAllIfCreated();
+                    return response(Response.Status.OK, failure("EMBEDDING_PAUSED", NativeLocale.text("本地语义处理已暂停", "Local semantic processing is paused")));
+                }
+                try { return ok(io.droyagent.app.embedding.EmbeddingRuntime.get(context).request(request)); }
+                catch (Exception error) {
+                    String code = error instanceof InterruptedException ? "EMBEDDING_CANCELLED" : error.getMessage();
+                    if (code == null || !code.matches("EMBEDDING_[A-Z_]{1,64}")) code = "EMBEDDING_NATIVE_FAILED";
+                    return response(Response.Status.OK, failure(code, NativeLocale.text("本地语义处理未完成", "Local semantic processing did not complete")));
+                }
+            }
             if (session.getUri().equals("/audio"))
                 return ok(audioRequest(request, audioOwner(request)));
             if (session.getUri().equals("/audio/file")) {
@@ -115,6 +127,14 @@ final class ProductBridge extends NanoHTTPD {
                 return response;
             }
             if (session.getUri().equals("/companion")) return ok(companionIdentity());
+            if (session.getUri().equals("/companion-memory")) {
+                try { return ok(NativeCompanionMemoryPurge.request(context, request)); }
+                catch (Exception error) {
+                    String code = error.getMessage();
+                    if (code == null || !code.matches("[A-Z][A-Z0-9_]{1,100}")) code = "COMPANION_MEMORY_PURGE_FAILED";
+                    return response(Response.Status.OK, failure(code, NativeLocale.text("记忆清理未完成，相关记忆保持停用", "Memory cleanup is incomplete. The affected memory remains disabled")));
+                }
+            }
             if (session.getUri().equals("/notify")) return ok(ProactiveNotifications.get(context).request(request));
             if (session.getUri().equals("/notifications")) {
                 if (request.optString("operation").equals("archive")) {
@@ -171,6 +191,11 @@ final class ProductBridge extends NanoHTTPD {
         catch (SecurityException e) { return response(Response.Status.OK, failure("PERMISSION_DENIED", e.getMessage(), "system_permission_denied", trace)); }
         catch (IllegalArgumentException | IllegalStateException e) { return response(Response.Status.OK, failure("REJECTED", e.getMessage(), "request_rejected", trace)); }
         catch (Exception e) { return response(Response.Status.INTERNAL_ERROR, failure("BRIDGE_ERROR", NativeLocale.text("原生接口失败：", "Native interface failed: ") + e.getClass().getSimpleName(), "native_failure", trace)); }
+    }
+
+    @Override public void stop() {
+        io.droyagent.app.embedding.EmbeddingRuntime.cancelAllIfCreated();
+        super.stop();
     }
 
     private Response memoryRequest(String route, JSONObject request) {

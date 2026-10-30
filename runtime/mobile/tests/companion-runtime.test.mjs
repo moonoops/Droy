@@ -1,22 +1,26 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, stat, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, stat, symlink, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRequire, registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CompanionStore } from '../companions/store.mjs';
 import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { prepareReply } from '../companions/delivery.mjs';
 import { localTimeContext, isQuietTime } from '../companions/dialogue.mjs';
 import { encodePng } from '../png.mjs';
+import { installCompanionMemoryManagement } from '../companions/memory-management.mjs';
+import { createCompanionStoreMaintenance } from '../companions/maintenance-store.mjs';
 
 const installed = createRequire(new URL('../../dsh/package.json', import.meta.url));
 const sourceImports = registerHooks({ resolve(specifier, context, next) {
   if(context.parentURL===new URL('../attachments.mjs',import.meta.url).href&&specifier==='./publish.mjs')
     return {url:new URL('./fixtures/host-publish.mjs',import.meta.url).href,shortCircuit:true};
+  if (specifier === '@droyagent/memory/memos') return { url: new URL('../../memory/memos/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier === '@droyagent/memory/store') return { url: new URL('../../memory/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier.startsWith('@deepseek-ai/')) return { url: pathToFileURL(installed.resolve(specifier)).href, shortCircuit: true };
   return next(specifier, context);
@@ -40,15 +44,30 @@ async function eventually(read, description, timeout = 1500) {
   assert.fail('Timed out: ' + description);
 }
 
-async function fixture(t, { directory, store: suppliedStore, legacy = true, debounceMs = 1000, learningMessages = 12, stream, failWorkCreation = false,seedKakaModel=true,locale='en',beforeInitialize,withAttachments=false } = {}) {
+function summaryResult(input, text = 'A fictional compacted context') {
+  return JSON.stringify({ topics: [{ text, sourceIds: input.messages.map(message => message.id) }],
+    background: [], progress: [], pending: [], agreements: [] });
+}
+function fixtureModelText(input) {
+  if (input?.query) return JSON.stringify({ terms: [input.query], kinds: [] });
+  if (input?.candidates && input?.evidence) return JSON.stringify({ action: input.evidence.length ? 'contact' : 'wait',
+    kind: 'check_in', reason: 'Continue the sourced fictional topic.', sourceIds: input.evidence.slice(0, 1).map(item => item.id), nextCheckMinutes: 120 });
+  if (input?.candidates) return JSON.stringify({ recordIds: input.candidates.map(item => item.recordId) });
+  if (input && Object.hasOwn(input, 'summaryState')) return summaryResult(input);
+  if (input?.stage) return '[]';
+  if (input?.suppliedMemories) return JSON.stringify({ impressions: [], expressions: [], jargon: [], memories: [], events: [] });
+  return 'Fictional companion response.';
+}
+
+async function fixture(t, { directory, store: suppliedStore, legacy = true, debounceMs = 1000, learningMessages = 12, stream, failWorkCreation = false,seedKakaModel=true,locale='en',beforeInitialize,withAttachments=false,inputModalities,workspaceIdPrefix='workspace-',workspaceSeeds=[] } = {}) {
   const ownsDirectory = !directory;
   directory ??= await mkdtemp(join(tmpdir(), 'droy-companion-runtime-'));
   const store = suppliedStore ?? await (legacy ? openLegacyCompanionStore({ directory }) : CompanionStore.open({ directory }));
   const ctx = new Context();
   await ctx.plugin(Tools, { mode: 'native' });
   await ctx.plugin(Prompt);
-  const calls = { agents: [], controller: [], llm: [], cancelled: [], disposed: [], notifications: [],defaultInitializations:0 };
-  const workspaces = new Map(), agents = new Map();
+  const calls = { agents: [], controller: [], llm: [], cancelled: [], disposed: [], notifications: [], memoryPurges: [],defaultInitializations:0 };
+  const workspaces = new Map(workspaceSeeds.map(workspace=>[workspace.id,workspace])), agents = new Map();
   let runtimeContext;
   let nextWorkspace = 0;
   ctx.provide('settings', { describe: () => [{ ns: 'locale', value: { preference: locale } }] });
@@ -57,7 +76,7 @@ async function fixture(t, { directory, store: suppliedStore, legacy = true, debo
     async create(path, title) {
       let workspace = [...workspaces.values()].find(item => item.path === path);
       if (!workspace) {
-        workspace = { id: 'workspace-' + (++nextWorkspace), path, title, sessions: [], async attachSession(id) { this.sessions.push(id); },async setTitle(value){this.title=value;} };
+        workspace = { id: workspaceIdPrefix + (++nextWorkspace), path, title, sessions: [], async attachSession(id) { this.sessions.push(id); },async setTitle(value){this.title=value;} };
         workspaces.set(workspace.id, workspace);
       }
       return workspace;
@@ -111,7 +130,7 @@ async function fixture(t, { directory, store: suppliedStore, legacy = true, debo
   ctx.provide('llm', {
     async prepareCall(config, signal) {
       const call = { config, signal }; calls.llm.push(call);
-      return { config, async *stream(input) {
+      return { config, inputModalities, async *stream(input) {
         call.input = input;
         for(const message of input.messages.filter(message=>message.role==='assistant')) {
           assert.equal(message.source?.kind,'model','Replyer history must satisfy DSH assistant provenance');
@@ -120,7 +139,7 @@ async function fixture(t, { directory, store: suppliedStore, legacy = true, debo
         if (stream) yield* stream(call);
         else {
           let inputValue;try{inputValue=JSON.parse(input.messages[0].content[0].text);}catch{}
-          yield { type: 'text-delta', text: inputValue?.candidates?JSON.stringify({recordIds:inputValue.candidates.map(item=>item.recordId)}):'Fictional companion response.' };
+          yield { type: 'text-delta', text: fixtureModelText(inputValue) };
           yield { type: 'finish', reason: { kind: 'stop' } };
         }
       } };
@@ -130,7 +149,8 @@ async function fixture(t, { directory, store: suppliedStore, legacy = true, debo
   if(withAttachments)await ctx.plugin(MobileAttachments,{dshHome:join(directory,'attachment-host')});
   await ctx.plugin({ name: 'companion-runtime-fixture', inject: ['tools', 'systemPrompt', 'settings', 'workspaceRegistry', 'workingDirectory', 'agentDefaultModel', 'droyInitialization', 'sessionController', 'agents', 'llm',...(withAttachments?['attachments']:[])],
     apply(scope) { runtimeContext = scope; } });
-  const runtime = new CompanionRuntime({ ctx: runtimeContext, store, directory, options: { debounceMs, learningMessages }, notify: value => calls.notifications.push(value) });
+  const runtime = new CompanionRuntime({ ctx: runtimeContext, store, directory, options: { debounceMs, learningMessages, factLearningMessages: learningMessages,
+    requestMemoryPurge: async input => { calls.memoryPurges.push(structuredClone(input)); return { pending: true }; } }, notify: value => calls.notifications.push(value) });
   await beforeInitialize?.({ctx:runtimeContext,store,directory});
   await runtime.initialize();
   for (const profile of await store.profiles()) {
@@ -144,11 +164,24 @@ async function fixture(t, { directory, store: suppliedStore, legacy = true, debo
     finally {
       await ctx.fiber.dispose();
       if (!suppliedStore) await store.close();
-      if (ownsDirectory) await rm(directory, { recursive: true, force: true });
+      if (ownsDirectory) { await rm(directory, { recursive: true, force: true }); await rm(directory+'.memory-vault', { recursive: true, force: true }); }
     }
   };
   t.after(close);
-  return { ctx: runtimeContext, store, runtime, calls, workspaces, directory, originals, close };
+  return { ctx: runtimeContext, store, runtime, calls, workspaces, agents, directory, originals, close };
+}
+
+function workbenchMemory(f) {
+  const events=[{type:'turn/start'}],questions=[];
+  const agent={id:'memory-management-workbench',session:{id:'memory-management-workbench',get seq(){return events.length;},eventAt:index=>events[index]}};
+  f.agents.set(agent.id,agent);f.ctx.agents.roots=()=>[agent];
+  f.ctx.provide('droyCompanions',f.runtime);
+  f.ctx.provide('userQuestions',{ask:async input=>{questions.push(input);return {answers:[{id:input.questions[0].id,selected:[input.questions[0].options[1].label]}]};}});
+  const manager=installCompanionMemoryManagement(f.ctx,{list:()=>f.runtime.listMemorySpaces(),
+    purge:(input,authorization)=>f.runtime.purgeMemorySpace(input,authorization),
+    restore:(input,authorization)=>f.runtime.restoreMemorySpace(input,authorization)},{defineTool});
+  let calls=0;
+  return {questions,events,agent,execute:args=>manager.execute(args,{agent,callId:'memory-management-call-'+(++calls),signal:new AbortController().signal})};
 }
 
 test('ordinary text stays in one exact bubble and does not automatically quote its reply target',async t=>{
@@ -334,7 +367,7 @@ test('same-template instances keep Planner, Replyer, memory, media, work, notifi
     personalityOverride: 'Fictional Alpha persona', model: null,
     settings: { proactiveEnabled: true, quietHours: { enabled: false, start: '22:00', end: '09:00' } } })).profile;
   const beta = (await f.store.createProfile({ requestId: 'same-template-beta', templateId: 'kaka', name: 'Fictional Beta',
-    personalityOverride: 'Fictional Beta persona', model: modelA })).profile;
+    personalityOverride: 'Fictional Beta persona', model: modelA, settings: { proactiveEnabled: false } })).profile;
   assert.equal(alpha.templateId, beta.templateId); assert.notEqual(alpha.id, beta.id);
   await Promise.all([f.runtime.startInstance(alpha.id), f.runtime.startInstance(beta.id)]);
   const [a, b] = await Promise.all([f.runtime.agent(alpha.id), f.runtime.agent(beta.id)]);
@@ -466,7 +499,7 @@ test('inherited learning and context compaction use current models while raw mem
   let f;
   f=await fixture(t,{seedKakaModel:false,learningMessages:1,stream:async function*(call){
     const input=JSON.parse(call.input.messages[0].content[0].text);
-    const text=input.stage?'[]':input.suppliedMemories?JSON.stringify({impressions:[],expressions:[],jargon:[],memories:[]}):'A fictional compacted context';
+    const text=fixtureModelText(input);
     if(input.suppliedMemories)f.ctx.agentDefaultModel.currentSelection=()=>modelB;
     yield {type:'text-delta',text};yield {type:'finish',reason:{kind:'stop'}};
   }});
@@ -479,7 +512,8 @@ test('inherited learning and context compaction use current models while raw mem
   Object.assign(f.runtime.learner.options,{compactAfter:4,retainMessages:1,batchMessages:8});
   for(let index=0;index<4;index++)await f.store.appendMessage('kaka',{id:'inherited-compaction-'+index,role:'user',text:'Fictional context '+index});
   const context=await f.runtime.learner.contextMessages('kaka');
-  assert.equal(context.state.summary,'A fictional compacted context');
+  assert.equal(context.state.summaryState.topics[0].text,'A fictional compacted context');
+  assert.match(context.state.summary,/A fictional compacted context/);
   assert.deepEqual(f.calls.llm.at(-1).config,modelB);
   assert.equal((await f.store.getProfile('kaka')).model,null);
 });
@@ -492,7 +526,9 @@ test('proactive inherited companions can wake while a missing model still reject
   assert.equal((await f.store.listMessages('kaka')).messages.length,0);
   f.ctx.agentDefaultModel.currentSelection=()=>modelB;
   await f.store.updateProfile('kaka',{settings:{proactiveEnabled:true,quietHours:{enabled:false,start:'22:00',end:'09:00'}}});
-  await f.store.updateState('kaka',{lastUserAt:new Date(0).toISOString()});
+  const previousTime=new Date(Date.now()-2*3600000).toISOString();
+  await f.store.appendMessage('kaka',{id:'proactive-evidence',role:'user',text:'I enjoy fictional mountain walks.',createdAt:previousTime});
+  await f.store.updateState('kaka',{lastUserAt:previousTime});
   f.runtime.scheduleProactive('kaka',new Date().toISOString());
   await eventually(()=>f.calls.agents.some(call=>call.agent.deliveries.length),'inherited proactive dispatch');
   assert.deepEqual(f.calls.agents[0].agent.options,modelB);
@@ -560,7 +596,7 @@ test('managed workspaces and sessions reject normal manual entry including canon
   await assert.rejects(f.ctx.sessionController.create({ cwd: alias }), code('COMPANION_WORKSPACE_MANAGED'));
 });
 
-test('remember checks real user provenance and forgetting rebuilds context without learned leakage', async t => {
+test('remember checks real user provenance and suppression retains the body while rebuilding context without learned leakage', async t => {
   const f = await fixture(t), agent = await f.runtime.agent('kaka');
   await f.store.appendMessage('kaka', { id: 'private-message', role: 'user', text: 'Fictional private preference' });
   await f.store.appendMessage('maimai', { id: 'other-message', role: 'user', text: 'Other fictional preference' });
@@ -575,6 +611,8 @@ test('remember checks real user provenance and forgetting rebuilds context witho
     jargon: [{ term: 'private', meaning: 'Fictional private jargon', sourceIds: ['private-message'] }],
   });
   await f.runtime.forget('kaka', { recordId: remembered.recordId, expectedRevisionId: remembered.revisionId });
+  const retained=await(await f.runtime.memory('kaka')).get(remembered.recordId);
+  assert.equal(retained.state,'expired');assert.equal(retained.payload.text,'Fictional private preference');
   const context = await f.runtime.context('kaka');
   assert.deepEqual(context.messages, []);
   assert.deepEqual(context.impressions, []);
@@ -597,9 +635,11 @@ test('explicit recall is shared with Replyer once per turn and a new input retir
   await f.ctx.tools.get('companion_recall',agent).execute({query:'jasmine tea'},{agent});
   const recalled=await f.runtime.context('kaka',owner);
   assert.ok(recalled.memories.some(item=>item.recordId===record.recordId));
+  const recallCalls=f.calls.llm.length;
+  assert.equal(recallCalls,2,'Explicit recall plans the query then selects actual candidates');
   const result=await f.runtime.reply(owner,{msg_id:'recall-question',reply_reference:'Use the retrieved fictional preference.'});
-  assert.equal(f.calls.llm.length,1,'Replyer uses the Planner recall without a second semantic query');
-  const request=f.calls.llm[0].input;
+  assert.equal(f.calls.llm.length,recallCalls+1,'Replyer uses the Planner recall without a second semantic query');
+  const request=f.calls.llm.at(-1).input;
   assert.ok(request.messages.some(item=>item.role==='assistant'&&item.content.some(block=>block.text?.includes('A fictional earlier reply.'))));
   assert.ok(request.messages.some(item=>item.role==='user'&&item.content.some(block=>block.text?.includes('Which fictional drink did I prefer?'))));
   assert.match(JSON.stringify(request.messages),/Fictional preference for jasmine tea/u);
@@ -1077,7 +1117,7 @@ test('proactive wake still obeys permission and quiet hours',async t=>{
   await f.runtime.wake('kaka',{kind:'proactive'});assert.equal(agent.deliveries.length,1);
 });
 
-test('editing memory replaces stale shared understanding and reset retains visible history without relearning it',async t=>{
+test('editing memory replaces stale understanding while direct reset cannot bypass workbench deletion',async t=>{
   const f=await fixture(t),memory=await f.runtime.memory('kaka');
   await f.store.appendMessage('kaka',{id:'old-source',role:'user',text:'Fictional old city'});
   const record=await memory.remember({text:'Fictional old city',sourceRefs:['old-source']});
@@ -1085,9 +1125,9 @@ test('editing memory replaces stale shared understanding and reset retains visib
   assert.equal(changed.record.payload.text,'Fictional new city');
   assert.deepEqual((await f.runtime.context('kaka')).messages,[]);
   assert.ok((await f.store.getState('kaka')).memoryRevision>0);
-  await f.runtime.resetMemories('kaka');
+  await assert.rejects(f.runtime.resetMemories('kaka'),code('COMPANION_MEMORY_WORKBENCH_REQUIRED'));
   assert.equal((await f.store.listMessages('kaka')).messages.length,1);
-  assert.equal((await memory.query()).total,0);assert.deepEqual((await f.runtime.context('kaka')).messages,[]);
+  assert.equal((await memory.query()).total,1);assert.equal((await memory.get(record.recordId)).payload.text,'Fictional new city');
 });
 
 test('correcting an unrelated manual memory preserves completed and running work',async t=>{
@@ -1121,7 +1161,7 @@ test('an unrelated manual memory does not cancel work that read a long summary w
 test('correcting a manual memory invalidates work that read its assistant echo through a summary',async t=>{
   const f=await fixture(t,{stream:async function*(call){
     const input=JSON.parse(call.input.messages[0].content[0].text);
-    yield {type:'text-delta',text:input.candidates?JSON.stringify({recordIds:[]}):'A fictional summary of the prior assistant echo.'};
+    yield {type:'text-delta',text:input.candidates?JSON.stringify({recordIds:[]}):summaryResult(input,'A fictional summary of the prior assistant echo.')};
     yield {type:'finish',reason:{kind:'stop'}};
   }}),memory=await f.runtime.memory('kaka');
   const record=await memory.remember({text:'Fictional private preference'});
@@ -1195,10 +1235,12 @@ test('a forget request cannot relearn its repeated fact and cancels work that ex
   assert.equal((await f.store.getMessage('kaka',task.taskId)).task.state,'cancelled');
   assert.ok(f.calls.cancelled.some(item=>item.id===worker.id));
   assert.ok((await f.runtime.context('kaka')).messages.every(item=>!item.text.includes('Fictional private city')));
-  assert.equal((await f.store.listMessages('kaka')).messages.at(-1).text,'Okay, I’ve forgotten that.');
+  assert.match((await f.store.listMessages('kaka')).messages.at(-1).text,/no longer use|stopped using/i);
+  assert.match((await f.store.listMessages('kaka')).messages.at(-1).text,/workbench/i);
+  assert.equal((await memory.get(record.recordId)).payload.text,'Fictional private city','chat suppression must retain the source body');
 });
 
-test('authenticated HTTP attachment and memory access remain scoped to the addressed companion', async t => {
+test('authenticated HTTP attachments stay scoped and raw memory endpoints cannot expose or delete either companion memory', async t => {
   const f = await fixture(t);
   const oldToken = process.env.DROY_WEB_TOKEN;
   const token = 'fictional-companion-http-token-1234567890'; process.env.DROY_WEB_TOKEN = token;
@@ -1218,11 +1260,16 @@ test('authenticated HTTP attachment and memory access remain scoped to the addre
   assert.equal((await upload.json()).error, 'COMPANION_ATTACHMENT_SCOPE');
   assert.equal((await request('/kaka/attachments/other-upload')).status, 404);
   const forgotten = await request('/kaka/memories', { method: 'DELETE', body: JSON.stringify({ recordId: remembered.recordId }) });
-  assert.equal(forgotten.status, 404);
+  assert.equal(forgotten.status, 403);
   assert.equal((await memory.query()).total, 1);
   const own = await request('/maimai/memories');
-  assert.equal(own.status, 200);
-  assert.equal((await own.json()).items[0].payload.text, 'Fictional Maimai-only memory');
+  assert.equal(own.status, 403);
+  assert.doesNotMatch(JSON.stringify(await own.json()),/Fictional Maimai-only memory/);
+  for(const method of ['POST','PATCH','DELETE']) {
+    const response=await request('/maimai/memories',{method,body:JSON.stringify({all:true,recordId:remembered.recordId,text:'Fictional replacement'})});
+    assert.equal(response.status,403);
+  }
+  assert.equal((await memory.get(remembered.recordId)).payload.text,'Fictional Maimai-only memory');
 });
 
 test('deleting a locally rejected message does not need memory or change another message', async t => {
@@ -1231,6 +1278,34 @@ test('deleting a locally rejected message does not need memory or change another
   f.runtime.memory = () => { throw new Error('A missing message has no memory to clean'); };
   assert.deepEqual(await f.runtime.removeMessage('kaka', 'never-admitted'), { removed: true });
   assert.equal((await f.store.getMessage('kaka', 'kept-message')).text, 'Keep this fictional message.');
+});
+
+test('deleting a chat bubble preserves usable sourced memory and evidence until explicit suppression',async t=>{
+  const f=await fixture(t),memory=await f.runtime.memory('kaka');
+  const source=await f.store.appendMessage('kaka',{id:'removed-bubble-source',role:'user',text:'Fictional user prefers jasmine tea'});
+  const record=await memory.remember({text:source.text,sourceRefs:[source.id],evidence:[{sourceRef:memory.sourceRef(source.id),text:source.text,role:'user',occurredAt:source.createdAt}]});
+  await f.store.appendMessage('kaka',{id:'removed-bubble-echo',role:'assistant',text:'A fictional reply based on that bubble',contextSourceIds:[source.id]});
+  await f.runtime.removeMessage('kaka',source.id);
+  assert.equal(await f.store.getMessage('kaka',source.id),null);
+  const retained=await memory.get(record.recordId);
+  assert.equal(retained.payload.text,source.text);assert.equal(retained.evidence[0].text,source.text);
+  assert.equal(retained.state,'active');
+  assert.ok(!(await f.runtime.context('kaka')).messages.some(message=>message.id===source.id));
+  const recalled=await f.runtime.learner.recall('kaka',[],{query:'jasmine tea'});
+  assert.ok(recalled.items.some(item=>item.recordId===record.recordId));
+  const confirmation=await f.store.appendMessage('kaka',{id:'new-confirmation-source',role:'user',text:'I still prefer fictional jasmine tea.'});
+  const generate=f.runtime.learner.generate;
+  f.runtime.learner.generate=async(profile,system,input,options)=>input.suppliedMemories?JSON.stringify({impressions:[],expressions:[],jargon:[],
+    memories:[{kind:'fact',text:source.text,sourceIds:[confirmation.id],claimType:'statement',evidence:[{sourceId:confirmation.id,quote:confirmation.text}]}]})
+    :generate(profile,system,input,options);
+  await f.runtime.learner.maintain('kaka',{force:true,compact:false});
+  const confirmed=await memory.get(record.recordId);
+  assert.equal((await memory.query()).total,1,'new confirmation merges with the retained fact');
+  assert.deepEqual(new Set(confirmed.sourceRefs),new Set([memory.sourceRef(source.id),memory.sourceRef(confirmation.id)]));
+  assert.equal(confirmed.evidence.find(item=>item.sourceRef===memory.sourceRef(source.id)).text,source.text);
+  await f.runtime.forget('kaka',{recordId:record.recordId,expectedRevisionId:confirmed.revisionId});
+  assert.deepEqual((await f.runtime.learner.recall('kaka',[],{query:'jasmine tea'})).items,[]);
+  assert.equal((await memory.get(record.recordId)).payload.text,source.text);
 });
 
 test('reply transport headers never enter delivered text or notifications',async t=>{
@@ -1242,4 +1317,265 @@ test('reply transport headers never enter delivered text or notifications',async
   const result=await f.runtime.reply(await f.store.sessionOwner(agent.id),{msg_id:'header-source',reply_reference:'Reply naturally.'});
   assert.equal(result.text,'Fictional reply');
   assert.equal((await f.store.getMessage('kaka',result.messageIds[0])).text,'Fictional reply');
+});
+
+test('new private input ends an active wait even with message steering disabled', async t => {
+  const f = await fixture(t), agent = await f.runtime.agent('kaka');
+  assert.notEqual(f.runtime.options.maibot?.messageSteering, true);
+  const waiting = f.ctx.tools.get('companion_wait', agent).execute({ seconds: 60 }, { agent, signal: new AbortController().signal });
+  await eventually(async () => (await f.store.getState('kaka')).waitingUntil, 'persisted active wait');
+  await f.runtime.submit('kaka', { clientId: 'wait-interruption', text: 'Actually, I have another fictional detail.' });
+  const result = await waiting;
+  assert.equal(result.reason, 'new_message'); assert.ok(result.waitedSeconds < 5);
+  const state = await f.store.getState('kaka');
+  assert.equal(state.waitingUntil, null); assert.equal(state.pendingIntent, null);
+  assert.deepEqual(state.pendingMessageIds, ['wait-interruption']);
+  await f.runtime.flush('kaka');
+  assert.match(JSON.stringify(agent.deliveries.at(-1).message), /another fictional detail/);
+});
+
+test('pending corrections block stale reply, emoji and delegated work before side effects', async t => {
+  const f = await fixture(t), agent = await f.runtime.agent('kaka');
+  await f.runtime.submit('kaka', { clientId: 'stale-original', text: 'Start a fictional old plan.' });
+  await f.runtime.flush('kaka');
+  await f.runtime.submit('kaka', { clientId: 'stale-correction', text: 'Do not start that; I changed my mind.' });
+  const before = { calls: f.calls.llm.length, sessions: (await f.store.listSessions('kaka')).length };
+  let conclusions = 0;
+  for (const [name, args] of [
+    ['companion_reply', { msg_id: 'stale-original', reply_reference: 'Proceed with the old plan.' }],
+    ['companion_emoji', {}],
+    ['companion_work', { title: 'Old fictional plan', goal: 'Proceed with the old request.' }],
+  ]) {
+    const result = await f.ctx.tools.get(name, agent).execute(args, { agent, concludeTurn() { conclusions++; } });
+    assert.equal(result.superseded, true); assert.equal(result.reason, 'new_messages_pending');
+  }
+  assert.equal(conclusions, 3); assert.equal(f.calls.llm.length, before.calls);
+  assert.equal((await f.store.listSessions('kaka')).length, before.sessions);
+  assert.ok((await f.store.listMessages('kaka')).messages.every(message => message.role === 'user'));
+  await f.runtime.flush('kaka');
+  assert.match(JSON.stringify(agent.deliveries.at(-1).message), /changed my mind/);
+});
+
+test('Planner and Replyer share one persona snapshot while later turns adopt edits', async t => {
+  const f = await fixture(t);
+  await f.store.updateProfile('kaka', { personalityOverride: 'Fictional original reserved persona.', replyStyleOverride: 'Fictional original style.' });
+  await f.runtime.submit('kaka', { clientId: 'persona-snapshot-source', text: 'A fictional shared experience.' });
+  await f.runtime.flush('kaka');
+  const agent = await f.runtime.agent('kaka'), owner = await f.store.sessionOwner(agent.id);
+  const original = await f.ctx.systemPrompt.assemble({ agent, scope: agent });
+  assert.match(JSON.stringify(original.sections), /original reserved persona/);
+  await f.store.updateProfile('kaka', { personalityOverride: 'Fictional updated playful persona.', replyStyleOverride: 'Fictional updated style.' });
+  await f.runtime.reply(owner, { msg_id: 'persona-snapshot-source', reply_reference: 'Respond to the current turn.' });
+  const firstReply = f.calls.llm.at(-1).input.system;
+  assert.match(firstReply, /original reserved persona/); assert.match(firstReply, /original style/);
+  assert.doesNotMatch(firstReply, /updated playful persona|updated style/);
+  await f.runtime.finishTurn(owner, { data: { reason: { kind: 'completed' } } });
+  await f.ctx.systemPrompt.assemble({ agent, scope: agent });
+  await f.runtime.reply(owner, { msg_id: 'persona-snapshot-source', reply_reference: 'Respond using the updated role.' });
+  assert.match(f.calls.llm.at(-1).input.system, /updated playful persona/);
+  assert.match(f.calls.llm.at(-1).input.system, /updated style/);
+  assert.equal((await f.store.getMessage('kaka', 'persona-snapshot-source')).text, 'A fictional shared experience.');
+});
+
+test('Replyer automatically follows prepared route image capability without a manual vision flag', async t => {
+  for (const visual of [true, false]) await t.test(visual ? 'image route' : 'text route', async child => {
+    const f = await fixture(child, { withAttachments: true, inputModalities: visual ? ['text', 'image'] : ['text'] });
+    assert.equal(f.runtime.options.maibot?.enableVisualMessage, undefined);
+    const ref = await f.ctx.attachments.saveImage({ data: encodePng({ width: 2, height: 2, channels: 4, pixels: Buffer.alloc(16, 150) }), mediaType: 'image/png', name: 'fixture-capability.png' });
+    await f.store.putUpload('kaka', { id: 'capability-upload', name: ref.name, mediaType: 'image/png', bytes: ref.bytes, ref, url: '/droy/companions/kaka/attachments/capability-upload' });
+    await f.store.appendMessage('kaka', { id: 'capability-source', role: 'user', type: 'image', text: 'A fictional shared picture.',
+      attachments: [{ id: 'capability-upload', name: ref.name, mediaType: 'image/png', bytes: ref.bytes }] });
+    const agent = await f.runtime.agent('kaka');
+    await f.runtime.reply(await f.store.sessionOwner(agent.id), { msg_id: 'capability-source', reply_reference: 'Discuss the shared picture.' });
+    const images = f.calls.llm.at(-1).input.messages.flatMap(message => message.content.filter(block => block.type === 'image'));
+    assert.deepEqual(images.map(image => image.attachment), visual ? [ref] : []);
+    assert.match(JSON.stringify(f.calls.llm.at(-1).input.messages), /fictional shared picture/);
+    assert.equal((await f.store.getMessage('kaka', 'capability-source')).attachments[0].ref, undefined);
+  });
+});
+
+test('sticker-only input retains its meaning in Planner delivery, shared context and Replyer history', async t => {
+  const f = await fixture(t);
+  await f.runtime.submit('kaka', { clientId: 'semantic-sticker', text: '', stickerId: 'test-sticker-curious' });
+  await f.runtime.flush('kaka');
+  const agent = await f.runtime.agent('kaka'), owner = await f.store.sessionOwner(agent.id);
+  const input = JSON.parse(agent.deliveries.at(-1).message.content[0].text).userMessages[0];
+  assert.equal(input.stickerId, 'test-sticker-curious'); assert.match(input.sticker.description, /curiosity or puzzlement/);
+  const context = await f.runtime.context('kaka', owner);
+  assert.match(context.messages.find(item => item.id === 'semantic-sticker').sticker.description, /curiosity or puzzlement/);
+  await f.runtime.reply(owner, { msg_id: 'semantic-sticker', reply_reference: 'Respond to the puzzled reaction.' });
+  assert.match(JSON.stringify(f.calls.llm.at(-1).input.messages), /curiosity or puzzlement/);
+});
+
+test('a flushed correction still invalidates the earlier Planner actions until a fresh assembly reads it', async t => {
+  const f = await fixture(t), agent = await f.runtime.agent('kaka');
+  await f.runtime.submit('kaka', { clientId: 'assembled-old-request', text: 'Use the first fictional plan.' });
+  await f.runtime.flush('kaka');
+  await f.ctx.systemPrompt.assemble({ agent, scope: agent });
+  await f.runtime.submit('kaka', { clientId: 'assembled-correction', text: 'Use the corrected fictional plan instead.' });
+  await f.runtime.flush('kaka');
+  assert.equal(f.runtime.state('kaka').pending.length, 0);
+  assert.match(JSON.stringify(agent.deliveries.at(-1).message), /corrected fictional plan/);
+  const beforeCalls = f.calls.llm.length, beforeSessions = (await f.store.listSessions('kaka')).length;
+  let conclusions = 0;
+  const exec = { agent, concludeTurn() { conclusions++; } };
+  const staleReply = await f.ctx.tools.get('companion_reply', agent).execute({ msg_id: 'assembled-old-request', reply_reference: 'Use the old plan.' }, exec);
+  const staleWork = await f.ctx.tools.get('companion_work', agent).execute({ title: 'Stale fictional work', goal: 'Use the first plan.' }, exec);
+  for (const result of [staleReply, staleWork]) assert.deepEqual(result, { superseded: true, reason: 'new_messages_queued' });
+  assert.equal(conclusions, 0, 'The queued correction must reach the next Planner step instead of concluding the turn');
+  assert.equal(f.calls.llm.length, beforeCalls);
+  assert.equal((await f.store.listSessions('kaka')).length, beforeSessions);
+  const fresh = await f.ctx.systemPrompt.assemble({ agent, scope: agent });
+  assert.match(JSON.stringify(fresh.contexts), /corrected fictional plan/);
+  const newWork = await f.ctx.tools.get('companion_work', agent).execute({ title: 'Corrected fictional work', goal: 'Use the corrected plan.' }, exec);
+  assert.equal(newWork.state, 'running');
+  const newReply = await f.ctx.tools.get('companion_reply', agent).execute({ msg_id: 'assembled-correction', reply_reference: 'Acknowledge the corrected plan.' }, exec);
+  assert.equal(newReply.delivered, true);
+  assert.equal((await f.store.listSessions('kaka')).length, beforeSessions + 1);
+});
+
+test('restart recovers proactive drafts without reply targets and rechecks opt-out and quiet hours', async t => {
+  for (const mode of ['allowed', 'opt-out', 'quiet-hours', 'partial-opt-out', 'partial-quiet-hours']) await t.test(mode, async child => {
+    const f = await fixture(child);
+    const oldTime = new Date(Date.now() - 2 * 3600000).toISOString();
+    await f.store.updateProfile('kaka', { settings: { proactiveEnabled: true, quietHours: { enabled: false, start: '22:00', end: '09:00' } } });
+    await f.store.appendMessage('kaka', { id: 'proactive-recovery-evidence', role: 'user', text: 'I enjoy fictional mountain walks.', createdAt: oldTime, status: 'sent' });
+    await f.store.updateState('kaka', { lastUserAt: oldTime });
+    const memory = await f.runtime.memory('kaka');
+    const saved = await memory.remember({ text: 'Fictional interest in mountain walks.', sourceRefs: ['proactive-recovery-evidence'] });
+    const partial = mode.startsWith('partial-');
+    const draft = await prepareReply({ store: f.store, companionId: 'kaka', sourceMessageIds: [],
+      proactive: { sourceIds: ['memory:' + saved.recordId] },
+      parts: partial ? ['Already published fictional check-in.', 'Unsent fictional follow-up.'] : ['Fictional grounded check-in.'] });
+    if (partial) await f.store.appendMessage('kaka', draft.parts[0]);
+    assert.equal((await f.store.getState('kaka')).proactiveLastContactDraftId, undefined, 'Simulated crash precedes atomic completion');
+    if (mode.includes('opt-out')) await f.store.updateProfile('kaka', { settings: { proactiveEnabled: false } });
+    if (mode.includes('quiet-hours')) await f.store.updateProfile('kaka', { settings: { quietHours: { enabled: true, start: '22:00', end: '09:00' } } });
+    await f.runtime.close();
+    const resumed = new CompanionRuntime({ ctx: f.ctx, store: f.store, directory: f.directory,
+      options: { debounceMs: 0, getClock: async () => ({ now: '2026-10-30T23:30:00+08:00', timeZone: 'Asia/Shanghai' }) } });
+    child.after(() => resumed.close());
+    await resumed.initialize(); await resumed.start();
+    await eventually(async () => !(await f.store.getState('kaka')).replyDraft, 'proactive draft recovery or suppression');
+    const replies = (await f.store.listMessages('kaka')).messages.filter(message => message.role === 'assistant');
+    const sent = mode === 'allowed' || partial;
+    assert.equal(replies.length, sent ? 1 : 0);
+    if (sent) assert.equal(replies[0].id, draft.parts[0].id);
+    const state = await f.store.getState('kaka');
+    assert.equal(state.proactiveUnansweredCount ?? 0, sent ? 1 : 0);
+    assert.equal(state.proactiveLastContactDraftId, sent ? draft.id : undefined);
+    if (sent) assert.deepEqual(state.proactiveLastContactSourceIds, ['memory:' + saved.recordId]);
+    assert.equal(f.calls.llm.length, 0, 'Recovery does not regenerate the persisted message');
+    assert.equal(f.calls.agents.length, 0, 'A proactive draft without input IDs is recovered without starting a new Planner');
+    await resumed.recoverReply('kaka');
+    assert.equal((await f.store.getState('kaka')).proactiveUnansweredCount ?? 0, sent ? 1 : 0, 'Repeated recovery cannot count contact twice');
+  });
+});
+
+test('workbench purge queues exact offline scope and keeps the original memory blocked until cleanup',async t=>{
+  const f=await fixture(t),memory=await f.runtime.memory('kaka');
+  const message=await f.store.appendMessage('kaka',{id:'before-purge-source',role:'user',text:'Fictional memory to clear'});
+  const saved=await memory.remember({text:message.text,sourceRefs:[message.id],evidence:[{sourceRef:memory.sourceRef(message.id),text:message.text,role:'user',occurredAt:message.createdAt}]});
+  const oldSpaceId=memory.memorySpaceId,manager=workbenchMemory(f);
+  const items=(await manager.execute({operation:'list'})).items,target=items.find(item=>item.memorySpaceId===oldSpaceId);
+  assert.ok(target);assert.doesNotMatch(JSON.stringify(items),/Fictional memory to clear|directory|personaSnapshot/);
+  await assert.rejects(f.runtime.purgeMemorySpace({memorySpaceId:oldSpaceId,expectedRevision:target.revision,operationId:'forged'},{}),code('COMPANION_MEMORY_AUTHORIZATION_REQUIRED'));
+  assert.deepEqual(f.calls.memoryPurges,[]);
+  const result=await manager.execute({operation:'purge',memorySpaceId:oldSpaceId,expectedRevision:target.revision});
+  assert.equal(result.completed,false);assert.equal(result.pending,true);assert.equal(manager.questions.length,1);
+  const pending=await f.runtime.memorySpaces.get(oldSpaceId);
+  assert.equal(pending.state,'purging');assert.ok(pending.purgeOperation);
+  assert.deepEqual(f.calls.memoryPurges,[{operation:'purge',memorySpaceId:oldSpaceId,operationId:pending.purgeOperation}]);
+  assert.equal((await f.runtime.memorySpaces.current('kaka')).memorySpaceId,oldSpaceId,'The live host cannot create a clean replacement before offline completion');
+  await assert.rejects(memory.remember({text:'Fictional late result',sourceRefs:[message.id]}),code('COMPANION_CLOSED'));
+  await assert.rejects(f.runtime.memory('kaka'),code('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS'));
+  await assert.rejects(f.runtime.submit('kaka',{clientId:'during-purge-source',text:'Fictional blocked submission'}),code('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS'));
+  assert.equal(await f.store.getMessage('kaka','during-purge-source'),null);
+  assert.equal((await f.store.getMessage('kaka',message.id)).text,message.text);
+  assert.equal((await f.store.getState('kaka')).forgottenThrough,await f.store.getMessageCursor('kaka',message.id));
+  // Inspect disk read-only: a native queue receipt must not be represented as completed erasure.
+  const audit=new DatabaseSync(join(pending.directory,'memory.sqlite'),{readOnly:true});
+  try { assert.equal(audit.prepare('SELECT user_text FROM traces WHERE id=?').get(saved.recordId).user_text,message.text); }
+  finally { audit.close(); }
+});
+
+test('restart preserves pending purge isolation and resubmits its operation only after the native bridge is ready',async t=>{
+  const f=await fixture(t),memory=await f.runtime.memory('kaka'),other=await f.runtime.memory('maimai');
+  const oldSpaceId=memory.memorySpaceId,otherSpaceId=other.memorySpaceId;
+  const message=await f.store.appendMessage('maimai',{id:'unrelated-purge-source',role:'user',text:'Fictional unrelated companion memory'});
+  const saved=await other.remember({text:message.text,sourceRefs:[message.id]});
+  const manager=workbenchMemory(f),target=(await manager.execute({operation:'list'})).items.find(item=>item.memorySpaceId===oldSpaceId);
+  await manager.execute({operation:'purge',memorySpaceId:oldSpaceId,expectedRevision:target.revision});
+  const request=structuredClone(f.calls.memoryPurges[0]);
+  await f.runtime.close();
+  const resumedRequests=[],resumed=new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,
+    options:{requestMemoryPurge:async input=>{resumedRequests.push(structuredClone(input));return {pending:true};}}});
+  t.after(()=>resumed.close());
+  try {
+    await resumed.initialize();
+    assert.deepEqual(resumedRequests,[],'Initialization must not call a native bridge that is not ready yet');
+    assert.equal((await resumed.memorySpaces.get(oldSpaceId)).state,'purging');
+    await assert.rejects(resumed.memory('kaka'),code('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS'));
+    await resumed.start();
+    assert.equal(resumed.instanceStarts.has('kaka'),false,'Startup must not restart blocked companion work');
+    await resumed.resumeMemoryPurges();
+    assert.deepEqual(resumedRequests,[request],'Restart reuses the persisted operation and memory identity');
+    assert.equal((await resumed.memorySpaces.current('kaka')).memorySpaceId,oldSpaceId);
+    const available=await resumed.memory('maimai');
+    assert.equal(available.memorySpaceId,otherSpaceId);
+    assert.equal((await available.get(saved.recordId)).payload.text,message.text);
+  } finally { await resumed.close(); }
+});
+
+test('workbench restore reuses archived memory identity with a new workspace and preserves a colliding new persona',async t=>{
+  const directory=await realpath(await mkdtemp(join(tmpdir(),'droy-retained-runtime-')));
+  const f=await fixture(t,{directory});
+  let next;
+  t.after(async()=>{await next?.close();await f.close();await rm(directory,{recursive:true,force:true});await rm(directory+'.memory-vault',{recursive:true,force:true});});
+  await f.store.updateProfile('kaka',{name:'Fictional retained companion',personalityOverride:'Fictional private archived persona'});
+  const profile=await f.store.getProfile('kaka'),memory=await f.runtime.memory('kaka');
+  const message=await f.store.appendMessage('kaka',{id:'archived-source',role:'user',text:'Fictional durable tea preference'});
+  const saved=await memory.remember({text:message.text,sourceRefs:[message.id],evidence:[{sourceRef:memory.sourceRef(message.id),text:message.text,role:'user',occurredAt:message.createdAt}]});
+  const memorySpaceId=memory.memorySpaceId;
+  await f.close();
+  await f.runtime.memorySpaces.retain('kaka',{profile,evidence:[message],operationId:'retain-fixture'});
+  let manifestDigest;
+  const deletion=await createCompanionStoreMaintenance({root:directory,operationId:'delete-retained-fixture',companionId:'kaka',
+    authority:{assertHeld:async()=>({root:directory,operationId:'delete-retained-fixture',admissionEpoch:'fixture-offline-epoch',hostStopped:true,admissionsClosed:true,manifestDigest})}});
+  manifestDigest=(await deletion.prepare()).manifestDigest;await deletion.commit();
+  next=await fixture(t,{directory,legacy:false,seedKakaModel:false,workspaceIdPrefix:'restored-workspace-',
+    workspaceSeeds:[...f.workspaces.values()].filter(workspace=>workspace.id!==profile.workspaceId)});
+  await assert.rejects(next.store.getProfile('kaka'),code('COMPANION_NOT_FOUND'));
+  const replacement=(await next.store.createProfile({requestId:'same-name-new-persona',templateId:'kaka',name:profile.name,personalityOverride:'Fictional unrelated new persona'})).profile;
+  const manager=workbenchMemory(next),target=(await manager.execute({operation:'list'})).items.find(item=>item.memorySpaceId===memorySpaceId);
+  assert.equal(target.state,'retained');
+  assert.equal((await manager.execute({operation:'restore',memorySpaceId,expectedRevision:target.revision})).completed,true);
+  const restored=await next.store.getProfile('kaka'),restoredMemory=await next.runtime.memory('kaka');
+  assert.equal(restoredMemory.memorySpaceId,memorySpaceId);
+  assert.notEqual(restored.workspaceId,profile.workspaceId);
+  assert.equal(restored.personalityOverride,profile.personalityOverride);
+  assert.notEqual(restored.name,replacement.name);
+  assert.equal((await next.store.getProfile(replacement.id)).personalityOverride,'Fictional unrelated new persona');
+  assert.equal((await restoredMemory.get(saved.recordId)).payload.text,message.text);
+  assert.deepEqual((await next.store.listMessages('kaka')).messages,[],'restore does not invent deleted chat history');
+});
+
+test('a memory open waiting for profile lookup cannot create a worker after runtime closure', async t => {
+  const f = await fixture(t), original = f.store.getProfile.bind(f.store);
+  let release, entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const captured = new Promise(resolve => { entered = resolve; });
+  f.store.getProfile = async id => { const profile = await original(id); entered(); await gate; return profile; };
+  const pending = f.runtime.memory('kaka').then(value => ({ value }), error => ({ error }));
+  try {
+    await captured;
+    await f.runtime.close();
+    release();
+    const result = await pending;
+    // If this regresses, close the escaped worker before failing the assertion.
+    if (result.value) await result.value.close();
+    assert.equal(result.error?.code, 'COMPANION_CLOSED');
+    assert.equal(f.runtime.memories.size, 0);
+    await assert.rejects(stat(join(f.directory, 'kaka', 'memory')), error => error.code === 'ENOENT');
+  } finally { release(); f.store.getProfile = original; }
 });

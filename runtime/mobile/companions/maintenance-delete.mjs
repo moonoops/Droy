@@ -168,6 +168,9 @@ export async function createCompanionDeletionMaintenance({ home, operationId, co
       const currentStore=await(await storeJob()).prepare();if(currentStore.manifestDigest!==journal.manifestDigest)fail('STORE_CHANGED');
       // A complete owned plan is durable before the first irreversible removal.
       const value=await(await ownedJob()).status();if(value?.pending.length)fail('ATTACHMENT_SCOPE_INCOMPLETE');
+      // Persist memory identity, personality and referenced evidence before
+      // deleting their source Sessions or product message rows.
+      await (await ownedJob()).retainMemory();
       const sessions=await sessionJob();if(sessions){const result=await sessions.commit();if(result.sessionPhase!=='complete')fail('SESSION_INCOMPLETE');}
       await checkpoint('sessions');
     }

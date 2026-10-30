@@ -1,7 +1,7 @@
 const installed = new WeakMap();
 const writers = ['initialize','start','prepareWorkspace','startInstance','memory','context','generate','agent','decorate',
   'submit','enqueue','transcribeVoice','retry','flush','reply','sendEmoji','wait','publish','recoverReply','finishTurn','learn',
-  'startWork','resumeWork','wake','invalidate','forget','reviseMemory','removeMessage','resetMemories','clearHistory','resetChat','cancel'];
+  'startWork','resumeWork','refreshProactiveSchedule','proactiveContext','considerProactive','wake','invalidate','forget','reviseMemory','removeMessage','resetMemories','clearHistory','resetChat','cancel'];
 const fail = (code, cause) => { throw Object.assign(new Error(code, cause === undefined ? undefined : { cause }), { code }); };
 const validOptions = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -11,13 +11,13 @@ export function installCompanionMaintenance(runtime) {
   const active = new Set(), proactive = new Map(), recoveries = new Map();
   let revision = 0, owner, stopped = false;
   const changed = () => { revision++; };
-  const begin = kind => {
-    const done = Promise.withResolvers(), entry = { kind, done: done.promise };
+  const begin = (kind,companionId) => {
+    const done = Promise.withResolvers(), entry = { kind, companionId, done: done.promise };
     active.add(entry); changed(); let finished = false;
     return () => { if (!finished) { finished = true; active.delete(entry); changed(); done.resolve(); } };
   };
-  const run = (kind, operation) => {
-    const finish = begin(kind);
+  const run = (kind, operation, companionId) => {
+    const finish = begin(kind,companionId);
     let result;
     try { result = operation(); } catch (error) { finish(); throw error; }
     if (result !== null && (typeof result === 'object' || typeof result === 'function') && typeof result.then === 'function')
@@ -172,6 +172,13 @@ export function installCompanionMaintenance(runtime) {
   };
   const control = Object.freeze({
     begin, run, changed, acquire,
+    async drainMemorySpace(id) {
+      for(;;) {
+        const pending=[...active].filter(entry=>entry.companionId===id);
+        if(!pending.length)return;
+        await Promise.all(pending.map(entry=>entry.done));
+      }
+    },
     proactive(id, at, callback) { return schedule(proactive, id, at, callback, true); },
     recovery(key, at, callback, { unref = false } = {}) { return schedule(recoveries, key, at, callback, unref); },
     cancelRecovery(key) { cancel(recoveries, key); },
@@ -183,13 +190,21 @@ export function installCompanionMaintenance(runtime) {
       owner?.released?.resolve();
     },
   });
+  const memoryProducers=new Set(['submit','enqueue','startWork','context','generate','agent','reply','sendEmoji','publish','recoverReply','learn','considerProactive','wake','wait']);
   for (const key of writers) {
     const original = runtime[key];
-    runtime[key] = function (...args) { return run(key, () => Reflect.apply(original, this, args)); };
+    runtime[key] = function (...args) {
+      const id=typeof args[0]==='string'?args[0]:args[0]?.companionId??args[0]?.id;
+      if(memoryProducers.has(key)&&this.memoryManagement?.has(id))return Promise.reject(Object.assign(new Error('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS'),{code:'COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS'}));
+      return run(key, () => Reflect.apply(original, this, args),id);
+    };
   }
   for (const key of ['maintain','contextMessages','recall']) {
     const original = runtime.learner[key];
-    runtime.learner[key] = function (...args) { return run('learning:' + key, () => Reflect.apply(original, this, args)); };
+    runtime.learner[key] = function (...args) {
+      if(runtime.memoryManagement?.has(args[0]))return Promise.reject(Object.assign(new Error('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS'),{code:'COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS'}));
+      return run('learning:' + key, () => Reflect.apply(original, this, args),args[0]);
+    };
   }
   installed.set(runtime, control);
   return control;

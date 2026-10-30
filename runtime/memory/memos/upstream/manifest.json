@@ -1,0 +1,146 @@
+{
+  "repository": "https://github.com/MemTensor/MemOS",
+  "commit": "64388b50e2a15528bcdf032e65a1ac792bcf63ee",
+  "packageVersion": "2.0.16-beta.1",
+  "generation": "Node stripTypeScriptTypes transform; relative .js module extensions changed to .mjs. Android storage and private logger are explicit Droy adapters.",
+  "files": [
+    {
+      "path": "core/time.ts",
+      "sha256": "821fa02d20398da4eb3176381097f5fc78d592352720cbe2f19404f000c3ab4b",
+      "generated": "core/time.mjs",
+      "generatedSha256": "e9cf8cd5aa8653572308dec6f670e64f81be33b693ea49aacb35860ccc5878ea"
+    },
+    {
+      "path": "core/runtime/namespace.ts",
+      "sha256": "71bd70338f939d671bfb7ef247447c88b2720d7cfdbaf08d092303cf001519f2",
+      "generated": "core/runtime/namespace.mjs",
+      "generatedSha256": "263573ab3c3233507c1efad011dac4f05464adf43a627eccfeb76b0e8879c67b"
+    },
+    {
+      "path": "core/storage/migrator.ts",
+      "sha256": "6e4d0ae88a7e73aa8a3d15a52a6729b6b2572cbad4ae4299bf287375402f4450",
+      "generated": "core/storage/migrator.mjs",
+      "generatedSha256": "9f6b6b311684350b20974be77045b0bc5e2c4997b04304bddd026d2ceb65471a"
+    },
+    {
+      "path": "core/storage/policy-metadata-backfill.ts",
+      "sha256": "523676c78cd093ddc43f065295738b9d8e1e16ae62ac6fb88dd01bf950348cc5",
+      "generated": "core/storage/policy-metadata-backfill.mjs",
+      "generatedSha256": "186cf2ad364538e54ef954edb62d9ddb886c677145097de5c43267d9db7db600"
+    },
+    {
+      "path": "core/storage/keyword.ts",
+      "sha256": "4375010c42ed119a36e38f8f7992a4943b943941456f78b74a4b495ff1825971",
+      "generated": "core/storage/keyword.mjs",
+      "generatedSha256": "182c2f3ae948d27e17f629c87b699ca3e26473211e448beeea41d96eb9f9f196"
+    },
+    {
+      "path": "core/storage/vector.ts",
+      "sha256": "f17cb0074ffee5199507ffee3b29d34fab9fde4657a0662fc66e56c12c272540",
+      "generated": "core/storage/vector.mjs",
+      "generatedSha256": "0b1064a5217ab3f6cdff912a6b6d442ee6b061b8abab65ec6def6543b998b958"
+    },
+    {
+      "path": "core/storage/tx.ts",
+      "sha256": "87671b75593dc7ef68d4a9aa4f6c94147f28dc9cfb27b29444fe4d0cf0fd4725",
+      "generated": "core/storage/tx.mjs",
+      "generatedSha256": "43d58ce575b3aec7dbcd4266ca538a74e6b40e4e173d8acf77465dfef08d608f"
+    },
+    {
+      "path": "core/storage/repos/_helpers.ts",
+      "sha256": "b0156e08367e483e94bbb4b2d65d248f59a1661d570536eaae00e9a03b5655e1",
+      "generated": "core/storage/repos/_helpers.mjs",
+      "generatedSha256": "23dc44729aa11950b7e4fe7fd25f41a6971def9ea0ecc63204a088fac40cc275"
+    },
+    {
+      "path": "core/storage/repos/traces.ts",
+      "sha256": "17177ea17cc9270b8fad33d0268be4c61794ce956d3dfe25e824f36866823a92",
+      "generated": "core/storage/repos/traces.mjs",
+      "generatedSha256": "3a2dbdbb36ab571af7601262e0e8441772fe9ea17ed6a7c5b52ed37a377ad343"
+    },
+    {
+      "path": "core/storage/migrations/001-initial.sql",
+      "sha256": "7971e3f8ee157b8b4e86b19a7216a7b2df98dd60634b810cac3501c849f0bc3d",
+      "generated": "core/storage/migrations/001-initial.sql",
+      "generatedSha256": "7971e3f8ee157b8b4e86b19a7216a7b2df98dd60634b810cac3501c849f0bc3d"
+    },
+    {
+      "path": "core/storage/migrations/002-embedding-retry-queue.sql",
+      "sha256": "4d46d518646907cebaf1de8bd5a50bab0e04d2ca197e5cd5c1004703de47eff1",
+      "generated": "core/storage/migrations/002-embedding-retry-queue.sql",
+      "generatedSha256": "4d46d518646907cebaf1de8bd5a50bab0e04d2ca197e5cd5c1004703de47eff1"
+    },
+    {
+      "path": "core/storage/migrations/003-embedding-retry-lease.sql",
+      "sha256": "b8d11b247ff5645bac8b5f3c8feb868acd93e83c85062924a330eea9638f0c7b",
+      "generated": "core/storage/migrations/003-embedding-retry-lease.sql",
+      "generatedSha256": "b8d11b247ff5645bac8b5f3c8feb868acd93e83c85062924a330eea9638f0c7b"
+    },
+    {
+      "path": "core/storage/migrations/004-skill-usage.sql",
+      "sha256": "272b7720de96ef59acfdd5e9ec97916d3971e03c7bbb54c84c9dddb8ecf98441",
+      "generated": "core/storage/migrations/004-skill-usage.sql",
+      "generatedSha256": "272b7720de96ef59acfdd5e9ec97916d3971e03c7bbb54c84c9dddb8ecf98441"
+    },
+    {
+      "path": "core/storage/migrations/005-skill-trials.sql",
+      "sha256": "f1cf9f4f927995bb180f323b0357475c6b84c8b8fe60b34a82d45c8e4f370a5a",
+      "generated": "core/storage/migrations/005-skill-trials.sql",
+      "generatedSha256": "f1cf9f4f927995bb180f323b0357475c6b84c8b8fe60b34a82d45c8e4f370a5a"
+    },
+    {
+      "path": "core/storage/migrations/006-world-model-version.sql",
+      "sha256": "d3d553129369c4341dcbadedd10a5d20c355118eae14a8aa0fd901dad58d7b31",
+      "generated": "core/storage/migrations/006-world-model-version.sql",
+      "generatedSha256": "d3d553129369c4341dcbadedd10a5d20c355118eae14a8aa0fd901dad58d7b31"
+    },
+    {
+      "path": "core/storage/migrations/007-namespace-visibility.sql",
+      "sha256": "6ed2158668b7e71f9f7feacbdab86445aa37af544235a20709cbfc4741be1313",
+      "generated": "core/storage/migrations/007-namespace-visibility.sql",
+      "generatedSha256": "6ed2158668b7e71f9f7feacbdab86445aa37af544235a20709cbfc4741be1313"
+    },
+    {
+      "path": "core/storage/migrations/008-feedback-experience-metadata.sql",
+      "sha256": "3d45d0258721ee4a587443d2732834c99854f581f6ca9880292f0275d799999a",
+      "generated": "core/storage/migrations/008-feedback-experience-metadata.sql",
+      "generatedSha256": "3d45d0258721ee4a587443d2732834c99854f581f6ca9880292f0275d799999a"
+    },
+    {
+      "path": "core/storage/migrations/009-policies-fts.sql",
+      "sha256": "0e5f42557539a4d2947d0b2be6c5d0dfd7cc1db78b328804cc6a8d5647fa01fc",
+      "generated": "core/storage/migrations/009-policies-fts.sql",
+      "generatedSha256": "0e5f42557539a4d2947d0b2be6c5d0dfd7cc1db78b328804cc6a8d5647fa01fc"
+    },
+    {
+      "path": "core/storage/migrations/010-trace-policy-links.sql",
+      "sha256": "f06ece30e226f8901166fed3a62973c9d2c276cb3d267e9fde03cb3b27c5591c",
+      "generated": "core/storage/migrations/010-trace-policy-links.sql",
+      "generatedSha256": "f06ece30e226f8901166fed3a62973c9d2c276cb3d267e9fde03cb3b27c5591c"
+    },
+    {
+      "path": "core/storage/migrations/011-hub-sharing.sql",
+      "sha256": "a047de1a92ff3cfbdf248f87302560167b54a09ee7bfcbc3580738b5c4db81b9",
+      "generated": "core/storage/migrations/011-hub-sharing.sql",
+      "generatedSha256": "a047de1a92ff3cfbdf248f87302560167b54a09ee7bfcbc3580738b5c4db81b9"
+    },
+    {
+      "path": "core/storage/migrations/012-trace-turn-pagination-index.sql",
+      "sha256": "59de70d1b84edf15e28ac9b0f8a51f39e94865a8d8009028718814f31a3d210d",
+      "generated": "core/storage/migrations/012-trace-turn-pagination-index.sql",
+      "generatedSha256": "59de70d1b84edf15e28ac9b0f8a51f39e94865a8d8009028718814f31a3d210d"
+    },
+    {
+      "path": "core/storage/migrations/018-traces-ts-index.sql",
+      "sha256": "84384561dad0203da1a4d195664eda604e9e8f6773a64c06f4adeb4c7809fda5",
+      "generated": "core/storage/migrations/018-traces-ts-index.sql",
+      "generatedSha256": "84384561dad0203da1a4d195664eda604e9e8f6773a64c06f4adeb4c7809fda5"
+    },
+    {
+      "path": "core/storage/migrations/019-policy-metadata.sql",
+      "sha256": "b5d001e0624c7759aa6b41148ec8a63bffaff719dfca688cb198b4ed259930f6",
+      "generated": "core/storage/migrations/019-policy-metadata.sql",
+      "generatedSha256": "b5d001e0624c7759aa6b41148ec8a63bffaff719dfca688cb198b4ed259930f6"
+    }
+  ]
+}

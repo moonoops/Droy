@@ -8,9 +8,11 @@ import { CompanionStore } from '../companions/store.mjs';
 import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { CompanionLearning, maiBotLearningCopy } from '../companions/learning.mjs';
 import { renderMaiBotPrompt } from '../companions/maibot-prompts.mjs';
+import { withMemoryEvidence } from './fixtures/memory-evidence.mjs';
 
 const imports=registerHooks({resolve(specifier,context,next){
   if(specifier==='@droyagent/memory/store')return {url:new URL('../../memory/store.mjs',import.meta.url).href,shortCircuit:true};
+  if(specifier==='@droyagent/memory/memos')return {url:new URL('../../memory/memos/store.mjs',import.meta.url).href,shortCircuit:true};
   return next(specifier,context);
 }});
 after(()=>imports.deregister());
@@ -29,7 +31,7 @@ async function fixture(t,{respond,locale='en'}={}) {
   const generate=async(profile,system,input,options)=>{
     const call={profile,system,input,options,stage:options.learningStage};calls.push(call);
     const supplied=await respond?.(call);
-    if(supplied!==undefined)return typeof supplied==='string'?supplied:JSON.stringify(supplied);
+    if(supplied!==undefined)return input.suppliedMemories?withMemoryEvidence(supplied,input.messages):typeof supplied==='string'?supplied:JSON.stringify(supplied);
     if(call.stage==='learn_style'||call.stage==='learn_jargon')return '[]';
     if(call.stage==='expression_evaluation')return JSON.stringify({suitable:true,reason:'Fictional reusable wording'});
     if(call.stage==='jargon_inference_with_context')return JSON.stringify({meaning:'A fictional private cafe',no_info:false});
@@ -162,7 +164,7 @@ test('a withdrawn expression cannot be relearned from the same correction messag
   assert.equal(f.calls.some(call=>call.stage==='expression_evaluation'),false);
 });
 
-test('source invalidation during expression review prevents all batch writes and cursor advancement',async t=>{
+test('source invalidation during expression review blocks late language writes and excludes previously committed facts from recall',async t=>{
   let release,started;
   const gate=new Promise(resolve=>{release=resolve;}),began=new Promise(resolve=>{started=resolve;});
   const f=await fixture(t,{respond:async({stage})=>{
@@ -176,7 +178,8 @@ test('source invalidation during expression review prevents all batch writes and
   assert.equal((await pending).discarded,true);
   const state=await f.store.getState('kaka');
   assert.equal(state.expressions,undefined);assert.equal(state.learningCursor,undefined);
-  assert.equal((await(await f.memoryFor('kaka')).query()).total,0);
+  assert.equal((await(await f.memoryFor('kaka')).query()).total,1,'the fact committed independently before language review began');
+  assert.deepEqual((await f.learner.recall('kaka',[{role:'user',text:'Fictional private fact'}])).items,[],'excluded sources cannot return to chat');
 });
 
 test('extracted sources cannot name SELF and nonliteral jargon cannot be learned from an invented term',async t=>{

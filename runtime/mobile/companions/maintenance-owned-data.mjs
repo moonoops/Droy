@@ -3,10 +3,11 @@ import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual } from 'node:util';
 import { companionStoreMaintenanceSchema } from './store.mjs';
 import { requestImageVariantId } from '@deepseek-ai/dsh-attachment-local';
-import { lstat, realpath, readFile, readdir, open, rename, unlink, rmdir } from 'node:fs/promises';
+import { lstat, realpath, readFile, readdir, open, rename, unlink, rmdir, mkdir } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { scheduleDomain } from '@deepseek-ai/dsh-schedule';
 import { createTrustedRootAlias } from './maintenance-root-alias.mjs';
+import { CompanionMemorySpaces } from './memory-spaces.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-][A-Za-z0-9_.:-]{0,159}$/u.test(value) && !['.', '..'].includes(value);
@@ -42,6 +43,77 @@ async function inventory(path, { hardlinks = false } = {}) {
   }
   if (!value.isFile() || !hardlinks && value.nlink !== 1) fail('LINKED_PATH');
   return [{ path, type: 'file', digest: hash(await readFile(path)), dev: value.dev, ino: value.ino, nlink: value.nlink }];
+}
+
+async function memoryArchiveSnapshot(root, companionId, spaces) {
+  const storePath = join(root, 'companions.sqlite'); await safePath(storePath);
+  // The lower-level maintenance helper can operate without the product store;
+  // the complete coordinator always supplies an audited store beforehand.
+  if (!await info(storePath)) return { evidence: [] };
+  const binding = await spaces.current(companionId);
+  const memoryPath = join(binding?.directory ?? join(root, companionId, 'memory'), 'memory.sqlite');
+  await safePath(memoryPath);
+  const sourceIds = new Set();
+  if (await info(memoryPath)) {
+    let memory;
+    try {
+      memory = new DatabaseSync(memoryPath, { readOnly: true });
+      if (memory.prepare('PRAGMA application_id').get().application_id !== 1146244434
+        || ![1,2].includes(memory.prepare('PRAGMA user_version').get().user_version)) fail('MEMORY_SOURCE_UNSUPPORTED');
+      for (const row of memory.prepare('SELECT data FROM revisions').iterate()) {
+        const record = JSON.parse(row.data);
+        if (!record.payload) continue;
+        for (const source of record.sourceRefs ?? []) {
+          if (typeof source !== 'string' || !source.startsWith('im:' + companionId + ':')) fail('MEMORY_SOURCE_SCOPE');
+          sourceIds.add(source.slice(('im:' + companionId + ':').length));
+        }
+      }
+    } catch (error) { if (error.code?.startsWith('MAINTENANCE_OWNED_')) throw error; fail('MEMORY_SOURCE_UNREADABLE', error); }
+    finally { memory?.close(); }
+  }
+  const store = new DatabaseSync(storePath, { readOnly: true });
+  try {
+    const row = store.prepare('SELECT data FROM profiles WHERE id=?').get(companionId);
+    if (!row) fail('TARGET_MISSING');
+    const profile = JSON.parse(row.data), evidence = [];
+    for (const messageId of sourceIds) {
+      const sourceRef = 'im:' + companionId + ':' + messageId;
+      const message = store.prepare('SELECT data FROM messages WHERE companion_id=? AND message_id=?').get(companionId, messageId);
+      if (!message) { evidence.push({ sourceRef, messageId, unavailable: true }); continue; }
+      const value = JSON.parse(message.data);
+      const text = typeof value.text === 'string' ? value.text : '';
+      const sensitive = /(?:\bBearer\s+\S+|\bsk-[\w-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?:api[_ -]?key|password|access[_ -]?token|密码|令牌)\s*[:=：]\s*\S+)/iu.test(text);
+      const attachments = [];
+      if (!sensitive) for (const attachment of value.attachments ?? []) {
+        const upload = store.prepare('SELECT data FROM companion_uploads WHERE companion_id=? AND upload_id=?').get(companionId, attachment.id);
+        if (!upload) fail('MEMORY_EVIDENCE_ATTACHMENT_MISSING');
+        const uploaded = JSON.parse(upload.data);
+        if (!uploaded.ref?.attachmentId || !/^sha256:[a-f0-9]{64}$/u.test(uploaded.ref.attachmentId)) fail('MEMORY_EVIDENCE_ATTACHMENT_UNSUPPORTED');
+        attachments.push({ id: attachment.id, ref: uploaded.ref });
+      }
+      evidence.push({ sourceRef, messageId, role: value.role, ...(value.createdAt ? { createdAt: value.createdAt } : {}),
+        ...(sensitive ? { unavailable: true, reason: 'credential' } : { text: [...text].slice(0, 16384).join(''), truncated: [...text].length > 16384,
+          ...(attachments.length ? { attachments } : {}) }) });
+    }
+    return { profile, evidence };
+  } finally { store.close(); }
+}
+async function preserveEvidenceAttachments(evidence, binding, attachmentRoot) {
+  for (const attachmentId of refs(evidence)) {
+    const key = attachmentId.slice(7), source = join(attachmentRoot, 'objects', key.slice(0, 2), key);
+    await safePath(source); const sourceInfo = await info(source);
+    if (!sourceInfo?.isFile()) fail('MEMORY_EVIDENCE_ATTACHMENT_MISSING');
+    const bytes = await readFile(source); if (hash(bytes) !== key) fail('MEMORY_EVIDENCE_ATTACHMENT_CHANGED');
+    const directory = join(dirname(binding.directory), 'evidence-blobs'), target = join(directory, key);
+    await safePath(directory); await mkdir(directory, { recursive: true, mode: 0o700 }); await safePath(target);
+    const current = await info(target);
+    if (current) { if (!current.isFile() || current.nlink !== 1 || hash(await readFile(target)) !== key) fail('MEMORY_EVIDENCE_ATTACHMENT_CHANGED'); }
+    else {
+      const file = await open(target, 'wx', 0o600);
+      try { await file.writeFile(bytes); await file.sync(); } finally { await file.close(); }
+      await syncDirectory(directory);
+    }
+  }
 }
 function refs(value, output = new Set()) {
   if (Array.isArray(value)) for (const item of value) refs(item, output);
@@ -89,6 +161,7 @@ export async function createCompanionOwnedDataMaintenance({ root, storageRoot, a
   const sessions = new Set(manifest.sessionClaims.map(row => row.sessionId));
   if ([...sessions].some(value => !id(value)) || !Array.isArray(manifest.workspaceClaims) || !Array.isArray(manifest.blobs)) fail('MANIFEST_INVALID');
   let epoch, journal;
+  const memorySpaces = await CompanionMemorySpaces.open({ directory: root });
   async function guard() {
     let proof; try { proof = await authority.assertHeld({ root, operationId, scope: 'companion-owned-data', manifestDigest }); } catch (error) { fail('AUTHORITY_LOST', error); }
     if (!object(proof) || proof.root !== root || proof.operationId !== operationId || proof.manifestDigest !== manifestDigest
@@ -104,6 +177,9 @@ export async function createCompanionOwnedDataMaintenance({ root, storageRoot, a
       || saved.plan.roots.join('\n') !== roots.join('\n') || digest(saved.plan.trustedRootAlias ?? null) !== digest(storedPaths.value)) fail('JOURNAL_INVALID');
     const allowed = path => inside(target, path) || inside(attachmentRoot, path) || inside(attachmentCacheRoot, path) || inside(legacyAttachmentRoot, path);
     if (!saved.plan.deletions.every(row => allowed(row.path)) || !saved.plan.replacements.every(row => replacementPaths.includes(row.path))) fail('JOURNAL_INVALID');
+    // Older prepared plans include the memory directory in their deletion set.
+    // Do not resume those plans under the retention contract.
+    if (!id(saved.plan.memorySpaceId) || saved.plan.deletions.some(row => row.path === join(target, 'memory.identity.json') || inside(join(target, 'memory'), row.path))) fail('MEMORY_RETENTION_PLAN_REQUIRED');
     journal = saved; return true;
   }
   async function checkpoint(phase) {
@@ -111,9 +187,9 @@ export async function createCompanionOwnedDataMaintenance({ root, storageRoot, a
   }
   const receipt = () => ({ version: 1, scope: 'companion-owned-data', operationId, companionId: manifest.companionId,
     phase: journal.phase, manifestDigest, planDigest: journal.planDigest,
-    resources: { deepSeekUploadIndex: journal.phase, memory: journal.phase, workspaces: journal.phase, schedules: journal.phase,
+    resources: { deepSeekUploadIndex: journal.phase, memory: journal.phase === 'complete' ? 'retained' : journal.phase, workspaces: journal.phase, schedules: journal.phase,
       attachments: journal.plan.pending.length ? 'incomplete' : journal.phase },
-    preservedSharedBlobIds: journal.plan.shared, pending: journal.plan.pending, companionDeletion: 'incomplete' });
+    memorySpaceId: journal.plan.memorySpaceId, preservedSharedBlobIds: journal.plan.shared, pending: journal.plan.pending, companionDeletion: 'incomplete' });
   async function prepare() {
     await guard(); if (await load()) { await validate(); return receipt(); }
     const audit = await inspectSessions();
@@ -128,6 +204,12 @@ export async function createCompanionOwnedDataMaintenance({ root, storageRoot, a
     }
     for (const value of sessions) if (!listed.has(value)) fail('SESSION_MISSING');
     if (audit.attachmentReferencesComplete === true && (!Array.isArray(audit.retainedAttachmentIds) || audit.retainedAttachmentIds.some(value => !/^sha256:[a-f0-9]{64}$/u.test(value)))) fail('REFERENCE_INVALID');
+    await guard();
+    const archive = await memoryArchiveSnapshot(root, manifest.companionId, memorySpaces);
+    await guard();
+    const memoryBinding = await memorySpaces.stageArchive(manifest.companionId, archive);
+    await preserveEvidenceAttachments(archive.evidence, memoryBinding, attachmentRoot);
+    await guard();
     const retainedRefs = new Set(manifest.blobs.filter(row => row.retainedInStore.length).map(row => row.ref.attachmentId));
     for (const value of audit.retainedAttachmentIds ?? []) retainedRefs.add(value);
     const candidateRefs = new Set([...manifest.blobs.map(row => row.ref.attachmentId), ...(audit.targetAttachmentIds ?? [])]);
@@ -235,7 +317,7 @@ export async function createCompanionOwnedDataMaintenance({ root, storageRoot, a
         if (candidateRefs.size) pending.push('attachment-request-cache-unproven');
       } else if (referenceCoverage && candidateRefs.has(attachmentId) && !retainedRefs.has(attachmentId)) deletions.push(row);
     }
-    const plan = { roots, ...(storedPaths.value ? { trustedRootAlias: storedPaths.value } : {}), deletions, replacements, shared, pending: [...new Set(pending)] };
+    const plan = { roots, memorySpaceId: memoryBinding.memorySpaceId, ...(storedPaths.value ? { trustedRootAlias: storedPaths.value } : {}), deletions, replacements, shared, pending: [...new Set(pending)] };
     journal = { version: 1, operationId, manifestDigest, epoch, phase: 'prepared', planDigest: digest(plan), plan };
     await checkpoint('prepared'); return receipt();
   }
@@ -256,6 +338,7 @@ export async function createCompanionOwnedDataMaintenance({ root, storageRoot, a
   async function commit() {
     await guard(); if (!await load()) fail('PREPARE_REQUIRED'); await validate();
     if (journal.phase === 'complete') return receipt();
+    await retainMemory();
     await checkpoint('applying');
     for (const action of journal.plan.replacements) {
       await guard(); await safePath(action.path);
@@ -276,7 +359,13 @@ export async function createCompanionOwnedDataMaintenance({ root, storageRoot, a
   }
   let chain = Promise.resolve();
   const serial = operation => { const result = chain.then(operation); chain = result.catch(() => {}); return result; };
-  return Object.freeze({ prepare: () => serial(prepare), commit: () => serial(commit), recover: () => serial(commit),
+  async function retainMemory() {
+    await guard(); if (!journal && !await load()) fail('PREPARE_REQUIRED');
+    const value = await memorySpaces.retain(manifest.companionId, { operationId });
+    if (value.memorySpaceId !== journal.plan.memorySpaceId || value.state !== 'retained') fail('MEMORY_RETENTION_CONFLICT');
+    return { memorySpaceId: value.memorySpaceId, state: value.state };
+  }
+  return Object.freeze({ prepare: () => serial(prepare), commit: () => serial(commit), recover: () => serial(commit), retainMemory: () => serial(retainMemory),
     status: () => serial(async () => { await guard(); if (!await load()) return null; await validate(); return receipt(); }) });
 }
 

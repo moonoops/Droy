@@ -36,14 +36,15 @@ public final class NativeCompanionDeletion {
         return state;
     }
     public static synchronized boolean begin(Context context, String companionId, LocalParticipant local) {
-        if (running || pending(context) || !RuntimeService.ready || RuntimeService.hostPid < 1 || RuntimeService.hostBirth.isEmpty()
+        if (running || pending(context) || NativeCompanionMemoryPurge.pending(context) || !RuntimeService.ready || RuntimeService.hostPid < 1 || RuntimeService.hostBirth.isEmpty()
                 || !companionId.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,79}")) return false;
+        if (!NativeRuntimeHost.claimCompanionMaintenance()) return false;
         try {
             JSONObject journal = new JSONObject().put("version", 1).put("operationId", UUID.randomUUID().toString())
                 .put("companionId", companionId).put("phase", "waiting").put("port", RuntimeService.webPort)
                 .put("token", RuntimeService.webToken).put("hostPid", RuntimeService.hostPid).put("hostBirth", RuntimeService.hostBirth);
             save(context, journal); launch(context.getApplicationContext(), local); return true;
-        } catch (Exception error) { state = new Snapshot("failed", companionId, "COMPANION_MAINTENANCE_STORAGE", false, false, false); return false; }
+        } catch (Exception error) { NativeRuntimeHost.companionMaintenance(false); state = new Snapshot("failed", companionId, "COMPANION_MAINTENANCE_STORAGE", false, false, false); return false; }
     }
     public static synchronized boolean resume(Context context, LocalParticipant local) {
         if (running || !pending(context)) return false;
@@ -162,6 +163,13 @@ public final class NativeCompanionDeletion {
         }
     }
     private static JSONObject offline(Context context, JSONObject journal, String action, JSONObject snapshot, JSONObject receipt) throws Exception {
+        return offline(context, journal, action, snapshot, receipt, value -> save(context, value));
+    }
+    interface JournalSaver { void save(JSONObject value) throws IOException; }
+    static JSONObject offlineMemoryPurge(Context context, JSONObject journal, JournalSaver saver) throws Exception {
+        return offline(context, journal, "memory-purge", null, null, saver);
+    }
+    private static JSONObject offline(Context context, JSONObject journal, String action, JSONObject snapshot, JSONObject receipt, JournalSaver saver) throws Exception {
         assertHeld(journal);
         // A pending operation blocks normal Host startup, so recovery must still
         // activate this APK's verified runtime before launching its offline code.
@@ -169,7 +177,9 @@ public final class NativeCompanionDeletion {
         File requestedHome = new File(context.getFilesDir(), "dsh-home");
         File home = requestedHome.getCanonicalFile();
         assertHeld(journal);
-        File script = new File(runtime, "node_modules/@droyagent/mobile/companions/maintenance-native-runner.mjs");
+        boolean memoryPurge = action.equals("memory-purge");
+        File script = new File(runtime, "node_modules/@droyagent/mobile/companions/" +
+            (memoryPurge ? "memory-session-purge-native-runner.mjs" : "maintenance-native-runner.mjs"));
         if (!script.isFile()) throw new IOException("COMPANION_MAINTENANCE_RUNTIME_MISSING");
         ProcessBuilder builder = new ProcessBuilder(context.getApplicationInfo().nativeLibraryDir + "/libdroy_node.so", "--expose-internals", script.getAbsolutePath());
         builder.directory(home);
@@ -186,10 +196,11 @@ public final class NativeCompanionDeletion {
              BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8))) {
             JSONObject hello = deadline.frame(reader);
             if (!hello.optString("kind").equals("started")) throw new IOException("COMPANION_MAINTENANCE_PROTOCOL");
-            journal.put("workerPid", hello.getInt("pid")).put("workerBirth", processBirth(hello.getInt("pid"))); save(context, journal);
-            JSONObject command = new JSONObject().put("action", action).put("home", home.getAbsolutePath())
+            journal.put("workerPid", hello.getInt("pid")).put("workerBirth", processBirth(hello.getInt("pid"))); saver.save(journal);
+            JSONObject command = new JSONObject().put("action", memoryPurge ? "commit" : action).put("home", home.getAbsolutePath())
                 .put("operationId", journal.getString("operationId")).put("companionId", journal.getString("companionId"))
                 .put("admissionEpoch", journal.getString("admissionEpoch"));
+            if (memoryPurge) command.put("memorySpaceId", journal.getString("memorySpaceId")).put("compression", "none");
             if (!requestedHome.getAbsolutePath().equals(home.getAbsolutePath())) {
                 // Android may expose /data/user/0 through a mount namespace
                 // alias. Node verifies this root and every descendant before
@@ -212,7 +223,7 @@ public final class NativeCompanionDeletion {
                 else throw new IOException(value.optString("code", "COMPANION_MAINTENANCE_PROTOCOL"));
             }
             if (!process.waitFor(5000, TimeUnit.MILLISECONDS) || process.exitValue() != 0) throw new IOException("COMPANION_MAINTENANCE_EXIT_UNCONFIRMED");
-            journal.remove("workerPid"); journal.remove("workerBirth"); save(context, journal); return result;
+            journal.remove("workerPid"); journal.remove("workerBirth"); saver.save(journal); return result;
         } finally {
             deadline.close();
             // EOF revokes the offline capability; preserve its PID until actual exit.
@@ -244,19 +255,23 @@ public final class NativeCompanionDeletion {
         if (!RuntimeService.companionMaintenanceHeld() || sameProcess(journal, "host")) throw new IOException("COMPANION_MAINTENANCE_AUTHORITY_LOST");
     }
     static boolean matchesAuthority(JSONObject journal, String home, JSONObject request) throws Exception {
-        if (!request.optString("root").equals(home) || !request.optString("scope").equals("companion-deletion")) return false;
+        boolean memoryPurge = journal.optString("kind").equals("memory-purge");
+        if (!request.optString("root").equals(home) || !request.optString("scope").equals(memoryPurge ? "companion-memory-purge" : "companion-deletion")) return false;
+        if (memoryPurge && !journal.getString("memorySpaceId").equals(request.optString("memorySpaceId"))) return false;
         for (String key : new String[]{"operationId", "companionId", "admissionEpoch"})
             if (!journal.getString(key).equals(request.optString(key))) return false;
         return true;
     }
-    private static JSONObject request(JSONObject journal, String method, String action) throws Exception {
+    static JSONObject request(JSONObject journal, String method, String action) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:" + journal.getInt("port") + PATH).openConnection();
         connection.setConnectTimeout(5000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(false);
         connection.setRequestMethod(method); connection.setRequestProperty("Cookie", "droy_session=" + journal.getString("token"));
         try {
             if (!method.equals("GET")) {
                 connection.setDoOutput(true); connection.setRequestProperty("Content-Type", "application/json");
-                JSONObject body = new JSONObject().put("operationId", journal.getString("operationId")).put("companionId", journal.getString("companionId"));
+                JSONObject body = new JSONObject().put("operationId", journal.getString("operationId"));
+                if (journal.has("companionId")) body.put("companionId", journal.getString("companionId"));
+                if (journal.optString("kind").equals("memory-purge")) body.put("memorySpaceId", journal.getString("memorySpaceId"));
                 if (action != null) body.put("action", action);
                 try (OutputStream output = connection.getOutputStream()) { output.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
             }
@@ -267,14 +282,14 @@ public final class NativeCompanionDeletion {
             }
         } finally { connection.disconnect(); }
     }
-    private static void awaitGone(JSONObject journal, String owner) throws Exception {
+    static void awaitGone(JSONObject journal, String owner) throws Exception {
         long until = android.os.SystemClock.elapsedRealtime() + 30000;
         while (sameProcess(journal, owner)) {
             if (android.os.SystemClock.elapsedRealtime() >= until) throw new IOException("COMPANION_MAINTENANCE_EXIT_UNCONFIRMED");
             Thread.sleep(100);
         }
     }
-    private static boolean sameProcess(JSONObject journal, String owner) throws Exception {
+    static boolean sameProcess(JSONObject journal, String owner) throws Exception {
         if (!journal.has(owner + "Pid")) return false;
         String current = processBirth(journal.getInt(owner + "Pid"));
         return current != null && current.equals(journal.getString(owner + "Birth"));

@@ -408,7 +408,7 @@ test('forget exclusion follows assistant restatements and summary ranges while r
   await f.store.appendMessage('kaka',message('independent','Unrelated fictional topic'));
   await f.store.appendMessage('kaka',message('independent-reply','Unrelated fictional answer',{role:'assistant',contextSourceIds:['independent']}));
   await f.store.appendMessage('maimai',message('echo','Independent other companion',{role:'assistant',contextSourceIds:['identity']}));
-  await f.store.updateState('kaka',{memoryRevision:4,summary:'Private fictional identity summary',summaryThrough:'identity',summaryCursor:identityCursor});
+  await f.store.updateState('kaka',{memoryRevision:4,summary:'Private fictional identity summary',summaryState:{background:[{text:'Private fictional identity',sourceIds:['identity']}]},summaryThrough:'identity',summaryCursor:identityCursor});
   const result=await f.store.excludeDerivedMessages('kaka',['identity']);
   assert.deepEqual(result.excludedIds,['identity','echo','echo-again','from-summary']);
   assert.equal(result.newlyExcluded,true);
@@ -416,6 +416,7 @@ test('forget exclusion follows assistant restatements and summary ranges while r
   assert.equal(state.memoryRevision,5);
   assert.equal(state.summary,'');
   assert.equal(state.summaryThrough,null);
+  assert.equal(state.summaryState,null, 'Structured derived facts must be removed atomically with their excluded source');
   assert.equal(state.summaryCursor,'seq:0');
   assert.equal(state.forgottenMessageIds,undefined,'derived IDs are flags on rows, not a growing state array');
   const history=(await f.store.listMessages('kaka')).messages;
@@ -626,4 +627,30 @@ test('legacy assistant envelopes are hidden in history and previews without rewr
   assert.equal((await f.store.listMessages('kaka',{after:'seq:0'})).messages[0].text,'Fictional reply');
   const db=new DatabaseSync(join(f.directory,'companions.sqlite'),{readOnly:true});
   try {assert.equal(JSON.parse(db.prepare('SELECT data FROM messages WHERE message_id=?').get('legacy-envelope').data).text,text);} finally {db.close();}
+});
+
+test('role edits persist verbatim with revision and preserve private history and other companions', async t => {
+  const f = await fixture(t);
+  await f.store.appendMessage('maimai', message('persona-source', 'Fictional shared experience'));
+  const before = await f.store.getProfile('maimai');
+  const role = { personalityOverride: '  Fictional male programmer.\nOriginal words.  ',
+    behaviorStyleOverride: 'Listen before advising.', replyStyleOverride: 'Short, dry humor.' };
+  const edited = await f.store.updateProfile('maimai', role);
+  assert.equal(edited.personaRevision, (before.personaRevision ?? 1) + 1);
+  const renamed = await f.store.updateProfile('maimai', { name: 'Fictional persona' });
+  assert.equal(renamed.personaRevision, edited.personaRevision);
+  await f.reopen();
+  const saved = await f.store.getProfile('maimai');
+  for (const [key, value] of Object.entries(role)) assert.equal(saved[key], value);
+  for (const locale of ['zh', 'en']) {
+    const localized = localizedProfile(saved, locale);
+    assert.equal(localized.personality, role.personalityOverride);
+    assert.equal(localized.behaviorStyle, role.behaviorStyleOverride);
+    assert.equal(localized.replyStyle, role.replyStyleOverride);
+    assert.equal(localized.personaPreset.personality, before.personality[locale]);
+  }
+  assert.equal((await f.store.listMessages('maimai')).messages[0].id, 'persona-source');
+  assert.equal((await f.store.getProfile('kaka')).personalityOverride, '');
+  for (const patch of [{ behaviorStyleOverride: null }, { replyStyleOverride: 1 }, { behaviorStyleOverride: 'x'.repeat(16385) }])
+    await assert.rejects(f.store.updateProfile('maimai', patch), code('COMPANION_INVALID_INPUT'));
 });

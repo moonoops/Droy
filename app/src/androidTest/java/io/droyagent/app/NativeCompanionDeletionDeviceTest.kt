@@ -73,7 +73,16 @@ class NativeCompanionDeletionDeviceTest {
         compose.onNodeWithTag("native-open-companion-profile").performClick()
         awaitNode("native-companion-delete-profile")
         compose.onNodeWithTag("native-companion-delete-profile").performScrollTo().performClick()
-        compose.onNodeWithText(context.getString(R.string.native_companion_confirm_delete)).performClick()
+        val locale = InstrumentationRegistry.getArguments().getString("nativeFixtureLocale", "en")
+        val localized = context.createConfigurationContext(android.content.res.Configuration(context.resources.configuration).apply {
+            setLocale(java.util.Locale.forLanguageTag(locale))
+        })
+        val deletionScope = localized.getString(R.string.native_companion_delete_profile_scope)
+        val confirmDelete = localized.getString(R.string.native_companion_confirm_delete)
+        compose.onNodeWithText(deletionScope).assertIsDisplayed()
+        compose.onNodeWithText(confirmDelete).assertIsDisplayed()
+        fixture.capture("native-companion-deletion-confirmation-$locale")
+        compose.onNodeWithText(confirmDelete).performClick()
         await(120_000, "Deletion must complete, release both journals and restart the real Host") {
             val state = NativeCompanionDeletion.inspect(context)
             state.phase() in setOf("complete", "idle") && !NativeCompanionDeletion.pending(context) &&
@@ -98,6 +107,15 @@ class NativeCompanionDeletionDeviceTest {
         assertEquals(expected.getString("retainedSession"), actual.getString("retainedSession"))
         assertEquals(expected.getString("retainedMemory"), actual.getString("retainedMemory"))
         assertEquals(expected.getString("retainedMessages"), actual.getString("retainedMessages"))
+        assertEquals(expected.getString("targetMemory"), actual.getString("targetMemory"))
+        assertEquals(expected.getString("targetMemorySpaceId"), actual.getString("targetMemorySpaceId"))
+        assertEquals(expected.getString("retainedMemorySpaceId"), actual.getString("retainedMemorySpaceId"))
+        assertEquals("retained", actual.getString("targetMemoryState"))
+        assertEquals("active", actual.getString("retainedMemoryState"))
+        assertTrue(actual.getBoolean("targetEvidenceRetained"))
+        assertTrue(actual.getBoolean("targetPersonaRetained"))
+        assertTrue(actual.getBoolean("targetMemoryPrivate"))
+        assertTrue(actual.getBoolean("targetProfileAbsent"))
         assertTrue(actual.getBoolean("targetAbsent"))
         assertTrue(actual.getBoolean("workspaceAbsent"))
         for (name in listOf("native-fixture-calls.jsonl", "native-fixture-companion.jsonl")) {
@@ -159,8 +177,8 @@ class NativeCompanionDeletionDeviceTest {
     companion object {
         private val STORAGE_SCRIPT = """
             import assert from 'node:assert/strict';
-            import {readFile,writeFile,mkdir} from 'node:fs/promises';
-            import {join,dirname} from 'node:path';
+            import {readFile,writeFile,mkdir,realpath} from 'node:fs/promises';
+            import {join,dirname,relative} from 'node:path';
             import {pathToFileURL} from 'node:url';
             import {createRequire} from 'node:module';
             import {createHash} from 'node:crypto';
@@ -171,17 +189,36 @@ class NativeCompanionDeletionDeviceTest {
             const load=relative=>import(pathToFileURL(join(runtime,'node_modules',relative)).href);
             const {CompanionStore}=await load('@droyagent/mobile/companions/store.mjs');
             const {createOfflineJsonlProvider}=await load('@droyagent/mobile/companions/maintenance-sessions.mjs');
-            const {MemoryStore}=await load('@droyagent/memory/store.mjs');
+            const {CompanionMemory}=await load('@droyagent/mobile/companions/memory.mjs');
+            const {CompanionMemorySpaces}=await load('@droyagent/mobile/companions/memory-spaces.mjs');
+            const {MemosMemoryStore}=await load('@droyagent/memory/memos/store.mjs');
             const require=createRequire(join(runtime,'package.json'));
             const {createUserMessage,createAssistantMessage}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')).href);
             const input=JSON.parse(await readFile(process.argv[3],'utf8')),root=join(home,'droy-companions');
             const store=await CompanionStore.open({directory:root});
+            const spaces=await CompanionMemorySpaces.open({directory:root});
             const sessions=await createOfflineJsonlProvider()({root:join(home,'sessions'),compression:'none'});
             const workspaceFile=join(home,'storages','workspace.json');
             const workspace=JSON.parse(await readFile(workspaceFile,'utf8'));
             const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
             const sid=id=>'fixture-chat-'+id.slice(-12),wid=id=>'fixture-workspace-'+id.slice(-12);
+            const sourceId=kind=>'synthetic-memory-source-'+kind;
+            const sourceText=kind=>'Synthetic '+kind+' fact stated by the user';
             async function readSession(id){const reader=await sessions.store.open(sid(id),'read');try{return {header:reader.header,...await reader.read()};}finally{await reader.close();}}
+            async function memorySnapshot(id,kind){
+              const binding=await spaces.current(id);assert.ok(binding);
+              assert.equal(binding.companionId,id);
+              assert.equal(relative(join((await realpath(root))+'.memory-vault',binding.memorySpaceId),binding.directory),'memory');
+              const memory=await MemosMemoryStore.open({directory:binding.directory,companionId:id,memorySpaceId:binding.memorySpaceId});
+              try{
+                const records=(await memory.query()).items;assert.equal(records.length,1);
+                const record=await memory.get({recordId:records[0].recordId});
+                assert.equal(record.payload.text,'Synthetic '+kind+' memory');
+                assert.deepEqual(record.sourceRefs,['im:'+id+':'+sourceId(kind)]);
+                assert.deepEqual(record.evidence,[{sourceRef:'im:'+id+':'+sourceId(kind),role:'user',text:sourceText(kind),occurredAt:'2026-10-30T00:00:00.000Z'}]);
+                return {binding,digest:digest(record)};
+              }finally{await memory.close();}
+            }
             try {
               if(process.argv[2]==='seed'){
                 for(const [kind,id] of Object.entries(input)){
@@ -193,6 +230,7 @@ class NativeCompanionDeletionDeviceTest {
                   await store.updateProfile(id,{workspaceId:wid(id),chatSessionId:sid(id),settings:{proactiveEnabled:false,memoryEnabled:false}});
                   await store.bindSession(id,{workspaceId:wid(id),sessionId:sid(id),kind:'chat'});
                   await store.appendMessage(id,{id:'synthetic-message-'+kind,role:'assistant',type:'text',text:'Synthetic '+kind+' companion body'});
+                  await store.appendMessage(id,{id:sourceId(kind),role:'user',type:'text',text:sourceText(kind),createdAt:'2026-10-30T00:00:00.000Z',status:'sent'});
                   const header={version:4,id:sid(id),cwd,createdAt:1,isSeeded:false,delegationDepth:0};
                   const rows=[],append=(type,data,surfaceOp)=>rows.push({type,data,seq:rows.length,time:rows.length+1,...(surfaceOp?{surfaceOp}:{})});
                   append('turn/start',{turn:1});
@@ -202,14 +240,30 @@ class NativeCompanionDeletionDeviceTest {
                   append('step/end',{turn:1,step:1});append('turn/end',{turn:1,reason:{kind:'completed'}});
                   const writer=await sessions.store.create(header,{inheritedEventCount:0});
                   try{await writer.append(rows);await writer.flush();}finally{await writer.close();}
-                  const memory=await MemoryStore.open({directory:join(directory,'memory'),initialize:true});
-                  try{await memory.record({operationId:'synthetic-fact',record:{kind:'fact',payload:{text:'Synthetic '+kind+' memory'}}});}finally{await memory.close();}
+                  const memory=await CompanionMemory.open({directory:root,companionId:id,spaces,profile:await store.getProfile(id)});
+                  try{await memory.remember({operationId:'synthetic-fact',text:'Synthetic '+kind+' memory',sourceRefs:[sourceId(kind)],
+                    evidence:[{sourceRef:sourceId(kind),role:'user',text:sourceText(kind),occurredAt:'2026-10-30T00:00:00.000Z'}]});}finally{await memory.close();}
                 }
                 await writeFile(workspaceFile,JSON.stringify(workspace));
               } else assert.equal(process.argv[2],'verify');
-              const memory=await MemoryStore.open({directory:join(root,input.keep,'memory')});
-              let retainedMemory;try{retainedMemory=digest(await memory.query());}finally{await memory.close();}
-              const result={retainedSession:digest(await readSession(input.keep)),retainedMemory,
+              const retained=await memorySnapshot(input.keep,'keep'),target=await memorySnapshot(input.target,'target');
+              let targetEvidenceRetained=false,targetPersonaRetained=false;
+              if(process.argv[2]==='verify'){
+                assert.equal(target.binding.state,'retained');assert.equal(retained.binding.state,'active');
+                const evidence=JSON.parse(await readFile(join(dirname(target.binding.directory),'evidence.json'),'utf8'));
+                assert.equal(evidence.companionId,input.target);
+                const source=evidence.sources.find(item=>item.sourceRef==='im:'+input.target+':'+sourceId('target'));
+                assert.ok(source);assert.equal(source.role,'user');assert.equal(source.text,sourceText('target'));assert.notEqual(source.unavailable,true);
+                targetEvidenceRetained=true;
+                const persona=await spaces.persona(target.binding.memorySpaceId);
+                assert.equal(persona.id,input.target);assert.equal(persona.name,'Synthetic deletion target');targetPersonaRetained=true;
+                await assert.rejects(async()=>{const unexpected=await CompanionMemory.open({directory:root,companionId:input.target,spaces});await unexpected.close();},
+                  {code:'COMPANION_MEMORY_SPACE_RETAINED'});
+              }
+              const result={retainedSession:digest(await readSession(input.keep)),retainedMemory:retained.digest,
+                targetMemory:target.digest,targetMemorySpaceId:target.binding.memorySpaceId,retainedMemorySpaceId:retained.binding.memorySpaceId,
+                targetMemoryState:target.binding.state,retainedMemoryState:retained.binding.state,targetEvidenceRetained,targetPersonaRetained,targetMemoryPrivate:true,
+                targetProfileAbsent:!(await store.profiles()).some(profile=>profile.id===input.target),
                 retainedMessages:digest(await store.listMessages(input.keep)),targetAbsent:!(await sessions.store.stat(sid(input.target))),
                 workspaceAbsent:!workspace.tables.workspaces[wid(input.target)]};
               await writeFile(process.argv[4],JSON.stringify(result));

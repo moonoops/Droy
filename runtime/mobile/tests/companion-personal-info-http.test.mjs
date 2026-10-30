@@ -15,6 +15,7 @@ const installed = createRequire(new URL('../../dsh/package.json', import.meta.ur
 const hooks = registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL === new URL('../attachments.mjs', import.meta.url).href && specifier === './publish.mjs')
     return { url: new URL('./fixtures/host-publish.mjs', import.meta.url).href, shortCircuit: true };
+  if (specifier === '@droyagent/memory/memos') return { url: new URL('../../memory/memos/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier === '@droyagent/memory/store') return { url: new URL('../../memory/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier.startsWith('@deepseek-ai/')) return { url: pathToFileURL(installed.resolve(specifier)).href, shortCircuit: true };
   return next(specifier, context);

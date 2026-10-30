@@ -262,17 +262,12 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
       hasMore: { ...snapshot.hasMore, [id]: false }, ...(snapshot.companionId === id ? { task: null } : {}), error: null });
     await refreshRoot();
   }
-  async function correctMemory(id, record, text) {
-    return api('/' + encodeURIComponent(id) + '/memories', { method: 'PATCH', body: {
-      recordId: record.recordId || record.id, expectedRevisionId: record.revisionId, text } });
-  }
-  const resetMemories = id => api('/' + encodeURIComponent(id) + '/memories', { method: 'DELETE', body: { all: true } });
   return {
     getSnapshot: () => snapshot, subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     getViewSnapshot: () => viewSnapshot, subscribeView(listener) { viewListeners.add(listener); return () => viewListeners.delete(listener); },
     subscribeDraft(id, listener) { if (!draftListeners.has(id)) draftListeners.set(id, new Set()); const set = draftListeners.get(id); set.add(listener); return () => { set.delete(listener); if (!set.size) draftListeners.delete(id); }; },
     initialize, refresh, refreshRoot, refreshMessages, api, profile, draft, setDraft, send, updateProfile, updateSettings, removeMessage,
-    retryTurn, clearChat, correctMemory, resetMemories, updateUserProfile, conversationAction, markRead,
+    retryTurn, clearChat, updateUserProfile, conversationAction, markRead,
     open, back, report, showProfile: () => publish({ screen: 'profile', direction: 'forward', error: null }),
     showTask: task => publish({ screen: 'task', direction: 'forward', task, error: null }),
     cancel: id => api('/' + encodeURIComponent(id) + '/cancel', { method: 'POST', body: {} }).then(() => refreshMessages(id)),
@@ -994,10 +989,7 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
               const voice = state.draft(companion.id).retainedRecording?.voice; await state.clearChat(companion.id);
               if (voice) await recording?.discard?.({ companionId: companion.id, voice });
             });
-          } }, t('clearChat')),
-          h('button', { type: 'button', className: 'droy-im-text-button is-danger', disabled: pending, onClick: () => {
-            if (target.confirm(t('resetMemoriesConfirm') + '\n' + t('resetMemoriesHint'))) run(() => state.resetMemories(companion.id));
-          } }, t('resetMemories'))), h(ErrorNotice, { error: snapshot.error })),
+          } }, t('clearChat'))), h(ErrorNotice, { error: snapshot.error })),
       modal === 'avatar' && avatarCandidate ? dialog('avatar', h('div', { className: 'droy-im-dialog-form' },
         h('div', { className: 'droy-im-profile-identity' }, h('span', { className: 'droy-im-avatar' }, h('img', { src: avatarCandidate.url, alt: t('avatar') }))),
         h(ErrorNotice, { error: snapshot.error }), h('div', { className: 'droy-im-dialog-actions' },

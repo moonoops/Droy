@@ -155,3 +155,52 @@ test('overlapping publishers cannot repeat new-message callbacks for the same dr
   assert.equal(results[1].reason.code,'COMPANION_REPLY_STALE');
   assert.deepEqual(sent,draft.parts.map(part=>part.id));
 });
+
+test('proactive delivery recovers durable contact accounting after append and counts the draft only once',async t=>{
+  const f=await fixture(t),draft=await prepareReply({store:f.store,companionId:'kaka',sourceMessageIds:[],
+    proactive:{sourceIds:['source']},parts:[{type:'text',text:'A fictional grounded check-in',contextSourceIds:['source']}]}),
+    append=f.store.appendMessage.bind(f.store),crash=new Error('Fictional post-append crash');
+  f.store.appendMessage=async(...args)=>{await append(...args);throw crash;};
+  await assert.rejects(f.publish(draft),error=>error===crash);
+  assert.equal((await f.store.getState('kaka')).proactiveUnansweredCount,undefined);
+  await f.reopen();
+  const restored=(await f.store.getState('kaka')).replyDraft;
+  assert.deepEqual(restored.proactive,{sourceIds:['source']});
+  const result=await f.publish(restored);
+  assert.deepEqual(result.newMessageIds,[]);
+  const state=await f.store.getState('kaka'),published=await f.store.getMessage('kaka',draft.parts[0].id);
+  assert.equal(state.proactiveLastContactDraftId,draft.id);
+  assert.equal(state.proactiveLastContactAt,published.createdAt);
+  assert.deepEqual(state.proactiveLastContactSourceIds,['source']);
+  assert.equal(state.proactiveUnansweredCount,1);
+  await f.reopen();
+  await f.store.updateState('kaka',{replyDraft:restored});
+  assert.deepEqual((await f.publish(restored)).newMessageIds,[]);
+  assert.equal((await f.store.getState('kaka')).proactiveUnansweredCount,1);
+});
+
+test('a response after a proactive append prevents recovery from inventing unanswered contact',async t=>{
+  const f=await fixture(t),draft=await prepareReply({store:f.store,companionId:'kaka',sourceMessageIds:[],
+    proactive:{sourceIds:['source']},parts:['A fictional check-in']}),crash=new Error('Fictional pre-finalization crash');
+  f.store.completeInputs=async()=>{throw crash;};
+  await assert.rejects(f.publish(draft),error=>error===crash);
+  const sent=await f.store.getMessage('kaka',draft.parts[0].id),replyAt=new Date(Date.parse(sent.createdAt)+1000).toISOString();
+  await f.store.appendMessage('kaka',{id:'reply-after-contact',role:'user',text:'Fictional response',status:'received',createdAt:replyAt});
+  await f.store.updateState('kaka',{lastUserAt:replyAt});
+  await f.reopen();await f.publish((await f.store.getState('kaka')).replyDraft);
+  const state=await f.store.getState('kaka');
+  assert.equal(state.proactiveUnansweredCount,0);
+  assert.equal(state.proactiveLastContactAt,sent.createdAt);
+});
+
+test('source invalidation before proactive finalization prevents stale settlement or resumed sends',async t=>{
+  const f=await fixture(t),draft=await prepareReply({store:f.store,companionId:'kaka',sourceMessageIds:['source'],
+    proactive:{sourceIds:['source']},parts:['A fictional follow-up']});
+  await assert.rejects(f.publish(draft,{onSent:async()=>{
+    await f.store.excludeDerivedMessages('kaka',['source']);
+    await f.store.updateState('kaka',state=>({memoryRevision:(state.memoryRevision??0)+1}));
+  }}),code('COMPANION_REPLY_STALE'));
+  assert.equal((await f.store.getState('kaka')).proactiveLastContactDraftId,undefined);
+  await f.reopen();await assert.rejects(f.publish(draft),code('COMPANION_REPLY_STALE'));
+  assert.equal((await f.store.getState('kaka')).proactiveUnansweredCount,undefined);
+});

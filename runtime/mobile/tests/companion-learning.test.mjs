@@ -8,15 +8,22 @@ import { CompanionStore } from '../companions/store.mjs';
 import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
 import { CompanionLearning, learningProtocols, rankMemoryCandidates } from '../companions/learning.mjs';
 import { dialoguePrompts } from '../companions/dialogue-prompts.mjs';
+import { withMemoryEvidence } from './fixtures/memory-evidence.mjs';
 
 const imports = registerHooks({ resolve(specifier, context, next) {
   if(specifier==='@droyagent/memory/store')return {url:new URL('../../memory/store.mjs',import.meta.url).href,shortCircuit:true};
+  if(specifier==='@droyagent/memory/memos')return {url:new URL('../../memory/memos/store.mjs',import.meta.url).href,shortCircuit:true};
   return next(specifier,context);
 } });
 after(()=>imports.deregister());
 const { CompanionMemory } = await import('../companions/memory.mjs');
 const code = expected => error => error.code===expected;
 const emptyLearning = () => ({impressions:[],expressions:[],jargon:[],memories:[]});
+const recallWithoutEvidence = record => {
+  const {evidence,...value}=record;
+  assert.deepEqual(evidence,[]);
+  return {...value,evidenceCount:0,evidenceExcerpts:[],evidenceTruncated:false};
+};
 
 async function fixture(t,{respond,options={},locale='en'}={}) {
   const directory=await mkdtemp(join(tmpdir(),'droy-companion-learning-'));
@@ -35,7 +42,12 @@ async function fixture(t,{respond,options={},locale='en'}={}) {
       const call={profile,system,input,signal,learningStage};calls.push(call);
       if(learningStage==='learn_style'||learningStage==='learn_jargon')return '[]';
       if(learningStage==='expression_evaluation')return JSON.stringify({suitable:true,reason:'Fictional suitable expression'});
-      return respond ? respond(call) : input.suppliedMemories ? JSON.stringify(emptyLearning()) : 'Fictional unfinished topic retained.';
+      const answer=await (respond ? respond(call) : input.suppliedMemories ? JSON.stringify(emptyLearning()) : 'Fictional unfinished topic retained.');
+      if(input.summary !== undefined) {
+        const sourceIds=[...new Set([...input.messages.map(message=>message.id),...Object.values(input.summaryState ?? {}).flatMap(entries=>entries.flatMap(entry=>entry.sourceIds))])];
+        return JSON.stringify({topics:[],background:[{text:answer,sourceIds}],progress:[],pending:[],agreements:[]});
+      }
+      return input.suppliedMemories?withMemoryEvidence(answer,input.messages):answer;
     }});
   t.after(async()=>{
     await Promise.allSettled([...learning.running.values()]);
@@ -71,6 +83,7 @@ test('incremental learning persists sourced language and skips processed message
   assert.equal((await f.store.getState('kaka')).expressions.length,1);
   assert.deepEqual((await f.store.getState('kaka')).expressions[0].sourceIds,['first','second']);
   assert.equal((await(await f.memoryFor('kaka')).query()).total,1);
+  assert.deepEqual((await(await f.memoryFor('kaka')).query()).items[0].sourceRefs,['im:kaka:first','im:kaka:second']);
   assert.deepEqual((await f.store.getState('maimai')).expressions,undefined);
 });
 
@@ -376,10 +389,10 @@ test('semantic recall bridges different wording, preserves revisions and uses th
     await kaka.remember({kind:'fact',text:'今天某个虚构城市下雨'});
     assert.deepEqual(rankMemoryCandidates([kakaRecord],[{role:'user',text:'我叫什么'}]),[]);
     const selected=await f.learning.recall('kaka',[{id:'name-question',role:'user',text:'我叫什么'}]);
-    assert.deepEqual(selected.items,[kakaRecord]);
+    assert.deepEqual(selected.items,[recallWithoutEvidence(kakaRecord)]);
     assert.equal(selected.items[0].revisionId,kakaRecord.revisionId);
     const other=await f.learning.recall('maimai',[{role:'user',text:'Could you remind me of my name?'}]);
-    assert.deepEqual(other.items,[maimaiRecord]);
+    assert.deepEqual(other.items,[recallWithoutEvidence(maimaiRecord)]);
     assert.equal(f.calls.length,2);
   });
 });
@@ -410,7 +423,7 @@ test('semantic selection sees a matching older query result beyond the recent wi
   oldRecord=(await memory.remember({text:'Riverside is the fictional preferred cafe',occurredAt:'2025-01-01T00:00:00Z'})).record;
   for(let i=0;i<8;i++)await memory.remember({text:'Unrelated fictional astronomy record '+i,occurredAt:new Date(Date.UTC(2026,1,i+1)).toISOString()});
   const result=await f.learning.recall('kaka',[{role:'user',text:'Shall we visit Riverside?'}]);
-  assert.deepEqual(result.items,[oldRecord]);
+  assert.deepEqual(result.items,[recallWithoutEvidence(oldRecord)]);
 });
 
 test('invalid semantic output and model errors are explicit failures rather than recent-memory fallback',async t=>{
@@ -442,5 +455,345 @@ test('semantic recall is cancelled or discarded when its sources are invalidated
       assert.deepEqual((await f.learning.recall('kaka',[{role:'user',text:'Who am I?'}])).items,[]);
       assert.equal(f.calls.length,1,'excluded candidate cannot be passed to another semantic call');
     }
+  });
+});
+
+test('explicit recall expands synonyms across older records and applies the requested time window',async t=>{
+  let old;
+  const f=await fixture(t,{locale:'zh',options:{semanticRecall:true,memoryCandidates:3},respond:({input,system,learningStage})=>{
+    if(learningStage==='memory_query') {
+      assert.equal(system,learningProtocols.zh.query);
+      assert.equal(input.query,'我以前说周末喜欢爬山吗？');
+      return JSON.stringify({terms:['登山','徒步'],kinds:['preference']});
+    }
+    assert.equal(system,learningProtocols.zh.recall);
+    assert.ok(input.candidates.some(item=>item.recordId===old.recordId));
+    assert.ok(!input.candidates.some(item=>item.text.includes('outside requested range')));
+    return JSON.stringify({recordIds:[old.recordId]});
+  }});
+  const memory=await f.memoryFor('kaka');
+  old=(await memory.remember({kind:'preference',text:'虚构用户小林喜欢在周末登山。',occurredAt:'2025-01-01T00:00:00Z'})).record;
+  for(let i=0;i<8;i++)await memory.remember({text:'Fictional unrelated recent record '+i,occurredAt:new Date(Date.UTC(2026,0,i+1)).toISOString()});
+  await memory.remember({kind:'preference',text:'Fictional 登山 outside requested range',occurredAt:'2026-10-01T00:00:00Z'});
+  const result=await f.learning.recall('kaka',[],{query:'我以前说周末喜欢爬山吗？',from:'2024-01-01T00:00:00Z',to:'2026-02-01T00:00:00Z'});
+  assert.deepEqual(result.items,[recallWithoutEvidence(old)]);
+  assert.equal(f.calls.length,2,'one query plan and one semantic selection');
+});
+
+test('invalid query plans cannot broaden recall to unsupported kinds or invented records',async t=>{
+  const f=await fixture(t,{options:{semanticRecall:true},respond:()=>JSON.stringify({terms:['coffee'],kinds:['other-companion']})});
+  await(await f.memoryFor('kaka')).remember({text:'A fictional coffee preference'});
+  await assert.rejects(f.learning.recall('kaka',[],{query:'What drink do I like?'}),code('COMPANION_INVALID_RECALL'));
+  assert.equal(f.calls.length,1);
+});
+
+test('fact progress survives language failure and later facts continue independently before language recovers',async t=>{
+  const f=await fixture(t,{respond:({input})=>JSON.stringify({...emptyLearning(),memories:input.messages.filter(message=>message.role==='user').map(message=>({
+    kind:'fact',text:message.text,sourceIds:[message.id]}))})});
+  const generate=f.learning.generate;
+  let broken=true;
+  f.learning.generate=(profile,system,input,options)=>{
+    if(options.learningStage==='learn_style'&&broken)throw Object.assign(new Error('Fictional style service failure'),{code:'COMPANION_INVALID_LEARNING'});
+    return generate(profile,system,input,options);
+  };
+  await f.append('fact-one','Fictional first remembered fact');
+  await assert.rejects(f.learning.maintain('kaka'),code('COMPANION_INVALID_LEARNING'));
+  let state=await f.store.getState('kaka');
+  assert.equal(state.factsThroughMessageId,'fact-one');
+  assert.equal(state.learningCursor,undefined);
+  assert.equal(state.languageLearningStatus.status,'failed');
+  await f.append('fact-two','Fictional second remembered fact');
+  await assert.rejects(f.learning.maintain('kaka'),code('COMPANION_INVALID_LEARNING'));
+  state=await f.store.getState('kaka');
+  assert.equal(state.factsThroughMessageId,'fact-two');
+  assert.equal((await(await f.memoryFor('kaka')).query()).total,2);
+  broken=false;
+  await f.learning.maintain('kaka');
+  state=await f.store.getState('kaka');
+  assert.equal(state.learnedThroughMessageId,'fact-two');
+  assert.equal(state.languageLearningStatus.status,'ready');
+  assert.equal((await(await f.memoryFor('kaka')).query()).total,2,'language recovery does not duplicate facts');
+});
+
+test('structured summaries preserve grounded quotes and reject invented source references',async t=>{
+  for(const invalid of [false,true])await t.test(String(invalid),async child=>{
+    const f=await fixture(child);
+    for(let i=0;i<6;i++)await f.append('structured-'+i,'Fictional exact source '+i);
+    f.learning.generate=async(_profile,system,input)=>{
+      assert.ok(system.includes(learningProtocols.en.summary));
+      return JSON.stringify({topics:[{text:'Fictional open conversation',sourceIds:[invalid?'invented':'structured-0'],quote:'Fictional exact source 0'}],
+        background:[],progress:[],pending:[{text:'Fictional unfinished discussion',sourceIds:['structured-1']}],agreements:[]});
+    };
+    if(invalid) {
+      await assert.rejects(f.learning.maintain('kaka',{learn:false}),code('COMPANION_LEARNING_SOURCE_REQUIRED'));
+      assert.equal((await f.store.getState('kaka')).summaryCursor,undefined);
+    } else {
+      await f.learning.maintain('kaka',{learn:false});
+      const state=await f.store.getState('kaka');
+      assert.equal(state.summaryState.topics[0].quote,'Fictional exact source 0');
+      assert.deepEqual(state.summaryState.pending[0].sourceIds,['structured-1']);
+      assert.match(state.summary,/Fictional exact source 0/);
+      assert.equal(state.summaryRevision,0);
+    }
+  });
+});
+
+test('grounded events support completion and disappear from proactive context when disabled or excluded',async t=>{
+  let complete=false;
+  const f=await fixture(t,{respond:({input})=>JSON.stringify({...emptyLearning(),events:[{
+    action:complete?'replace':'add',...(complete?{targetId:input.existing.events[0].id}:{}),
+    kind:'event',text:'Fictional interview',status:complete?'completed':'pending',dueAt:'2026-11-01T09:00:00+08:00',
+    sourceIds:[input.messages.filter(message=>message.role==='user').at(-1).id],
+  }]})});
+  await f.append('event-source','Fictional interview on November 1 at 09:00 +08:00');
+  await f.learning.maintain('kaka');
+  let events=await f.learning.activeEvents('kaka');
+  assert.equal(events.length,1);
+  assert.equal(events[0].dueAt,'2026-11-01T01:00:00.000Z');
+  const eventRecordId=events[0].memoryRecordId,memory=await f.memoryFor('kaka');
+  assert.ok(eventRecordId);
+  assert.equal((await memory.get(eventRecordId)).kind,'event');
+  assert.equal((await memory.query({text:'Fictional interview'})).total,1,'events are discoverable by recall and forget');
+  await f.store.updateProfile('kaka',{settings:{memoryEnabled:false}});
+  assert.deepEqual(await f.learning.activeEvents('kaka'),[]);
+  await f.store.updateProfile('kaka',{settings:{memoryEnabled:true}});
+  complete=true;
+  await f.append('event-complete','Fictional interview is completed');
+  await f.learning.maintain('kaka');
+  assert.deepEqual(await f.learning.activeEvents('kaka'),[]);
+  assert.equal((await f.learning.activeEvents('kaka',{includeClosed:true}))[0].status,'completed');
+  const completed=await memory.get(eventRecordId);
+  assert.match(completed.payload.text,/completed/);
+  assert.deepEqual(completed.sourceRefs,['im:kaka:event-complete','im:kaka:event-source']);
+  assert.equal((await memory.query({text:'Fictional interview'})).total,1,'completion revises the event instead of leaving an active duplicate');
+  await f.store.excludeDerivedMessages('kaka',['event-complete']);
+  assert.deepEqual(await f.learning.activeEvents('kaka',{includeClosed:true}),[]);
+});
+
+test('a single meaningful user message saves facts and events before the language batch is full',async t=>{
+  const f=await fixture(t,{options:{learningUserMessages:6},respond:({input})=>JSON.stringify({...emptyLearning(),
+    memories:[{kind:'fact',text:'Fictional appointment tomorrow',sourceIds:['single-event']}],
+    events:[{kind:'event',text:'Fictional appointment tomorrow',status:'pending',sourceIds:['single-event']}],
+  })});
+  await f.append('single-event','I have a fictional appointment tomorrow');
+  const result=await f.learning.maintain('kaka');
+  assert.equal(result.factsThrough,'single-event');
+  assert.equal((await f.learning.activeEvents('kaka')).length,1);
+  assert.equal((await f.store.getState('kaka')).learningCursor,undefined);
+  assert.equal(f.calls.filter(call=>call.learningStage).length,0,'language learning still waits for its own batch');
+});
+
+test('event revision reconciles a committed memory after the state write fails without a receipt conflict',async t=>{
+  let completed=false;
+  const f=await fixture(t,{respond:({input})=>JSON.stringify({...emptyLearning(),events:[{
+    action:completed?'replace':'add',...(completed?{targetId:input.existing.events[0].id}:{}),
+    kind:'event',text:'Fictional interview',status:completed?'completed':'pending',
+    sourceIds:[completed?'completed-source':'initial-source'],
+  }]})});
+  await f.append('initial-source','Fictional interview is pending');
+  await f.learning.maintain('kaka');
+  const event=(await f.learning.activeEvents('kaka'))[0],memory=await f.memoryFor('kaka');
+  completed=true;
+  await f.append('completed-source','The fictional interview is complete');
+  const update=f.store.updateState.bind(f.store);
+  let failOnce=true;
+  f.store.updateState=async(id,patch)=>{
+    if(failOnce&&patch.events?.some(entry=>entry.status==='completed')) {
+      failOnce=false;
+      throw new Error('Fictional interrupted state persistence');
+    }
+    return update(id,patch);
+  };
+  await assert.rejects(f.learning.maintain('kaka'),/Fictional interrupted state persistence/);
+  const saved=await memory.get(event.memoryRecordId);
+  assert.match(saved.payload.text,/completed/);
+  assert.equal((await f.learning.activeEvents('kaka')).length,1,'state still reflects the interrupted pre-commit state');
+  await f.learning.maintain('kaka');
+  assert.deepEqual(await f.learning.activeEvents('kaka'),[]);
+  assert.equal((await memory.get(event.memoryRecordId)).revisionId,saved.revisionId,'already committed event revision is not repeated');
+  assert.equal((await memory.query({kinds:['event']})).total,1);
+});
+
+test('invalid language proposals in maintenance output do not discard valid sourced facts',async t=>{
+  const f=await fixture(t,{respond:()=>JSON.stringify({...emptyLearning(),
+    expressions:[{situation:'Fictional expression',expression:'Fictional unsupported phrase',sourceIds:['invented']}],
+    memories:[{kind:'fact',text:'Fictional confirmed preference',sourceIds:['valid-source']}],
+  })});
+  await f.append('valid-source','A fictional confirmed preference');
+  await assert.rejects(f.learning.maintain('kaka'),code('COMPANION_LEARNING_SOURCE_REQUIRED'));
+  assert.equal((await(await f.memoryFor('kaka')).query()).total,1);
+  const state=await f.store.getState('kaka');
+  assert.equal(state.factsThroughMessageId,'valid-source');
+  assert.equal(state.learningCursor,undefined);
+  assert.equal(state.languageLearningStatus.status,'failed');
+});
+
+test('source exclusion clears the persisted structured summary as well as its readable text',async t=>{
+  const f=await fixture(t);
+  for(let i=0;i<6;i++)await f.append('private-summary-'+i,'Fictional private source '+i);
+  await f.learning.maintain('kaka',{learn:false});
+  assert.ok((await f.store.getState('kaka')).summaryState.background.length);
+  await f.store.excludeDerivedMessages('kaka',['private-summary-0']);
+  const state=await f.store.getState('kaka');
+  assert.equal(state.summary,'');
+  assert.equal(state.summaryState,null);
+  assert.equal(state.summaryThrough,null);
+});
+
+test('automatic memory requires exact user evidence and rejects questions, quoted claims and fabricated excerpts',async t=>{
+  for(const invalid of ['missing','fabricated','question','quotation','hypothetical'])await t.test(invalid,async child=>{
+    const source=invalid==='question'?'Should I move to a fictional city?':'I prefer fictional tea.';
+    const f=await fixture(child,{respond:()=>JSON.stringify({...emptyLearning(),memories:[{
+      kind:'preference',text:'The fictional user prefers tea',sourceIds:['source'],
+      claimType:['quotation','hypothetical'].includes(invalid)?invalid:'statement',
+      evidence:invalid==='missing'?[]:[{sourceId:'source',quote:invalid==='fabricated'?'I prefer fictional coffee.':source}],
+    }]})});
+    await f.append('source',source);
+    await assert.rejects(f.learning.maintain('kaka'),code('COMPANION_LEARNING_EVIDENCE_REQUIRED'));
+    assert.equal((await(await f.memoryFor('kaka')).query()).total,0);
+    assert.equal((await f.store.getState('kaka')).factLearningCursor,undefined);
+  });
+});
+
+test('a guessed correction cannot replace a stored fact even with a valid current source',async t=>{
+  const f=await fixture(t),memory=await f.memoryFor('kaka');
+  const saved=await memory.remember({text:'The fictional user lives in city A',sourceRefs:['old']});
+  await f.append('new','I am considering a fictional trip to city B.');
+  f.learning.generate=async()=>JSON.stringify({...emptyLearning(),memories:[{action:'revise',recordId:saved.recordId,
+    expectedRevisionId:saved.revisionId,text:'The fictional user lives in city B',sourceIds:['new'],claimType:'inference',
+    revisionReason:'explicit_update',evidence:[{sourceId:'new',quote:'I am considering a fictional trip to city B.'}]}]});
+  await assert.rejects(f.learning.maintain('kaka'),code('COMPANION_LEARNING_EVIDENCE_REQUIRED'));
+  assert.equal((await memory.get(saved.recordId)).revisionId,saved.revisionId);
+});
+
+test('inferred candidates are retained separately and never supplied as active recall facts',async t=>{
+  const f=await fixture(t,{respond:()=>JSON.stringify({...emptyLearning(),memories:[{kind:'preference',text:'Fictional user may prefer quiet cafes',
+    sourceIds:['source'],claimType:'inference'}]})});
+  await f.append('source','This fictional cafe is quiet.');
+  await f.learning.maintain('kaka');
+  const memory=await f.memoryFor('kaka'),candidate=(await memory.query({states:['candidate']})).items[0];
+  assert.equal(candidate.state,'candidate');
+  assert.equal(candidate.assertion,'model_inference');
+  assert.deepEqual((await f.learning.recall('kaka',[{role:'user',text:'quiet cafes'}])).items,[]);
+});
+
+test('validated quotes persist the canonical user source rather than a model-generated paraphrase',async t=>{
+  const source='  My fictional favorite drink is tea. I enjoy it in the morning.  ';
+  const f=await fixture(t,{respond:()=>JSON.stringify({...emptyLearning(),memories:[{kind:'preference',text:'Fictional user prefers tea',
+    sourceIds:['source'],claimType:'statement',evidence:[{sourceId:'source',quote:'My fictional favorite drink is tea.'}]}]})});
+  await f.append('source',source);
+  const actual=await f.store.getMessage('kaka','source'),memory=await f.memoryFor('kaka'),remember=memory.remember.bind(memory);
+  let input;
+  memory.remember=async value=>{input=value;return remember(value);};
+  await f.learning.maintain('kaka');
+  assert.deepEqual(input.evidence,[{sourceRef:'im:kaka:source',text:actual.text,occurredAt:new Date(actual.createdAt).toISOString(),role:'user'}]);
+  assert.equal(input.assertion,'model_inference','a grounded paraphrase is still automatic interpretation');
+});
+
+test('events require direct statement evidence before they can affect proactive context',async t=>{
+  const f=await fixture(t,{respond:()=>JSON.stringify({...emptyLearning(),events:[{kind:'agreement',text:'Fictional appointment',
+    status:'pending',sourceIds:['source'],claimType:'statement',evidence:[{sourceId:'source',quote:'Invented agreement'}]}]})});
+  await f.append('source','An unrelated fictional greeting.');
+  await assert.rejects(f.learning.maintain('kaka'),code('COMPANION_LEARNING_EVIDENCE_REQUIRED'));
+  assert.deepEqual(await f.learning.activeEvents('kaka'),[]);
+});
+
+test('a canonical source larger than a memory summary is retained without silent truncation',async t=>{
+  const source='My fictional favorite drink is tea.\n'+'Fictional contextual detail. '.repeat(700);
+  assert.ok(Buffer.byteLength(source)>16384);
+  const f=await fixture(t,{respond:()=>JSON.stringify({...emptyLearning(),memories:[{kind:'preference',text:'Fictional user prefers tea',
+    sourceIds:['long-source'],claimType:'statement',evidence:[{sourceId:'long-source',quote:'My fictional favorite drink is tea.'}]}]})});
+  await f.append('long-source',source);
+  await f.learning.maintain('kaka');
+  const memory=await f.memoryFor('kaka'),record=(await memory.query()).items[0];
+  assert.equal((await memory.get(record.recordId)).evidence[0].text,source);
+});
+
+test('a semantic selection cannot return a record revised while the model was choosing it',async t=>{
+  let memory,record;
+  const f=await fixture(t,{options:{semanticRecall:true},respond:async({input})=>{
+    assert.ok(input.candidates.some(item=>item.recordId===record.recordId));
+    await memory.revise({recordId:record.recordId,expectedRevisionId:record.revisionId,text:'Fictional corrected preference'});
+    return JSON.stringify({recordIds:[record.recordId]});
+  }});
+  memory=await f.memoryFor('kaka');record=(await memory.remember({text:'Fictional tea preference'})).record;
+  const result=await f.learning.recall('kaka',[{role:'user',text:'tea preference'}]);
+  assert.deepEqual(result.items,[]);
+  assert.equal(result.total,0);
+});
+
+test('scoped engine search supplies semantic candidates while inactive results remain excluded',async t=>{
+  const f=await fixture(t,{options:{memoryCandidates:1}}),memory=await f.memoryFor('kaka');
+  const old=(await memory.remember({text:'Fictional user enjoys tea',occurredAt:'2020-01-01T00:00:00Z'})).record;
+  await memory.remember({text:'Fictional unrelated newest note'});
+  const pending=(await memory.remember({text:'Fictional inferred beverage',state:'candidate'})).record;
+  let searched;
+  memory.search=async args=>{searched=args;return {items:[old,pending],total:2};};
+  const result=await f.learning.recall('kaka',[],{query:'My preferred beverage'});
+  assert.equal(searched.query,'My preferred beverage');
+  assert.deepEqual(searched.states,['active']);
+  assert.deepEqual(result.items.map(item=>item.recordId),[old.recordId]);
+});
+
+test('recent and text query results cannot reintroduce facts outside their validity window',async t=>{
+  const f=await fixture(t),memory=await f.memoryFor('kaka'),now=Date.now();
+  const expired=await memory.remember({text:'Fictional coffee expired preference'});
+  await memory.revise({recordId:expired.recordId,expectedRevisionId:expired.revisionId,patch:{validUntil:new Date(now-60_000).toISOString()}});
+  const future=await memory.remember({text:'Fictional coffee future preference'});
+  await memory.revise({recordId:future.recordId,expectedRevisionId:future.revisionId,patch:{validFrom:new Date(now+60_000).toISOString()}});
+  const active=await memory.remember({text:'Fictional coffee active preference'});
+  const result=await f.learning.recall('kaka',[{role:'user',text:'coffee preference'}]);
+  assert.deepEqual(result.items.map(record=>record.recordId),[active.recordId]);
+});
+
+test('recall rechecks validity at selection completion even without a revision change',async t=>{
+  let memory,record,expire=false;
+  const f=await fixture(t,{options:{semanticRecall:true},respond:({input})=>{
+    assert.ok(input.candidates.some(candidate=>candidate.recordId===record.recordId));
+    expire=true;return JSON.stringify({recordIds:[record.recordId]});
+  }});
+  memory=await f.memoryFor('kaka');record=(await memory.remember({text:'Fictional coffee preference'})).record;
+  const get=memory.get.bind(memory);
+  memory.get=async id=>{const current=await get(id);return expire?{...current,validUntil:new Date(Date.now()-1).toISOString()}:current;};
+  assert.deepEqual((await f.learning.recall('kaka',[{role:'user',text:'coffee'}])).items,[]);
+});
+
+
+test('recall bounds canonical proof in selector input and final records without changing stored sources',async t=>{
+  for(const locale of ['zh','en'])for(const semanticRecall of [true,false])await t.test(locale+' '+semanticRecall,async child=>{
+    const budget=1800,source='My fictional favorite drink is tea.\n'+'Fictional contextual detail. '.repeat(6000);
+    assert.ok(Buffer.byteLength(source)>150000);
+    const f=await fixture(child,{locale,options:{semanticRecall,memoryBytes:budget},respond:({system,input})=>{
+      assert.equal(system,learningProtocols[locale].recall);
+      assert.match(system,locale==='zh'?/关于其他人的描述不能当作用户自身事实/:/descriptions of other people are not facts about the user/);
+      assert.ok(Buffer.byteLength(JSON.stringify(input.candidates))<=budget);
+      for(const candidate of input.candidates) {
+        assert.equal(candidate.assertion,'model_inference');
+        assert.equal(candidate.evidenceCount,1);assert.equal(candidate.evidenceTruncated,true);
+        assert.equal(candidate.evidence,undefined);
+        assert.equal(candidate.evidenceExcerpts[0].truncated,true);
+        assert.ok(Buffer.byteLength(candidate.evidenceExcerpts[0].text)<=512);
+        assert.ok(source.startsWith(candidate.evidenceExcerpts[0].text));
+      }
+      return JSON.stringify({recordIds:input.candidates.map(candidate=>candidate.recordId)});
+    }});
+    const memory=await f.memoryFor('kaka'),stored=[];
+    for(let index=0;index<2;index++) {
+      const sourceRef=memory.sourceRef('long-proof-'+index);
+      stored.push((await memory.remember({text:'Fictional tea preference '+index,assertion:'model_inference',sourceRefs:[sourceRef],
+        evidence:[{sourceRef,text:source,role:'user',occurredAt:'2026-10-01T00:00:00Z'}]})).record);
+    }
+    const result=await f.learning.recall('kaka',[{role:'user',text:'Fictional tea preference'}]);
+    assert.ok(result.items.length>0);assert.ok(result.items.length<stored.length,'The aggregate budget includes source excerpts and record metadata');
+    assert.ok(Buffer.byteLength(JSON.stringify(result.items))<=budget);
+    for(const record of result.items) {
+      assert.equal(Object.hasOwn(record,'evidence'),false);
+      assert.equal(record.evidenceCount,1);assert.equal(record.evidenceTruncated,true);
+      assert.equal(record.assertion,'model_inference');
+      assert.equal(record.revisionId,stored.find(item=>item.recordId===record.recordId).revisionId);
+      assert.ok(Buffer.byteLength(record.evidenceExcerpts[0].text)<=512);
+    }
+    for(const record of stored)assert.equal((await memory.get(record.recordId)).evidence[0].text,source);
+    assert.equal(f.calls.length,semanticRecall?1:0,'Bounded proof uses the existing selector call');
   });
 });

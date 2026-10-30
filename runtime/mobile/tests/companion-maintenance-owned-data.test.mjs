@@ -38,7 +38,7 @@ async function fixture(t, options = {}) {
   return { base, root, target, keep, storageRoot, attachmentRoot, attachmentCacheRoot, workspace, manifest, snapshots, privateBlob, sharedBlob, config,
     create: more => createCompanionOwnedDataMaintenance({ ...config, ...more }), lose: () => { held = false; }, epoch: () => { epoch = 'changed'; } };
 }
-test('removes only proven target directories/registry/blob and preserves shared data, idempotently', async t => {
+test('removes proven target workspace data but retains memory outside it, idempotently', async t => {
   const f = await fixture(t), job = await f.create(); assert.equal((await job.prepare()).phase, 'prepared');
   const receipt = await job.commit(); assert.equal(receipt.phase, 'complete'); assert.deepEqual(receipt.pending, []);
   await absent(f.target); assert.equal(await readFile(join(f.keep,'work','keep.txt'),'utf8'), 'keep');

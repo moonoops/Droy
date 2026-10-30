@@ -35,13 +35,14 @@ async function checkedDraft({store,companionId,draft,signal}) {
 
 /** Persist message identities before publishing any bubbles. Recovery uses the
  * same identities even if the previous process stopped immediately after append. */
-export async function prepareReply({store,companionId,sourceMessageIds,parts}) {
+export async function prepareReply({store,companionId,sourceMessageIds,parts,proactive}) {
   assertCompanionId(companionId);
   if(!Array.isArray(sourceMessageIds)||!Array.isArray(parts)||!parts.length)fail('COMPANION_INVALID_INPUT');
   const sources=[...new Set(sourceMessageIds.map(identifier))],state=await store.getState(companionId);
   await sourceCheck(store,companionId,state,sources);
+  const contact=proactive?{sourceIds:[...new Set((proactive.sourceIds??[]).map(identifier))]}:null;
   const createdAt=new Date().toISOString(),draft={id:randomUUID(),companionId,sourceMessageIds:sources,
-    memoryRevision:state.memoryRevision??0,baseline:state.forgottenThrough??'seq:0',createdAt,
+    ...(contact?{proactive:contact}:{}),memoryRevision:state.memoryRevision??0,baseline:state.forgottenThrough??'seq:0',createdAt,
     parts:parts.map(part=>{
       const message=typeof part==='string'?{type:'text',text:part}:structuredClone(part);
       if(!message||typeof message!=='object'||Array.isArray(message))fail('COMPANION_INVALID_INPUT');

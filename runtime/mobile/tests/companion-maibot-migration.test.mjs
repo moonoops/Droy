@@ -10,6 +10,7 @@ import { openLegacyCompanionStore, markLegacyFixture } from './fixtures/legacy-c
 import { defaultProfiles, LEGACY_COMPANION_PERSONAS } from '../companions/profiles.mjs';
 
 const imports = registerHooks({ resolve(specifier, context, next) {
+  if (specifier === '@droyagent/memory/memos') return { url: new URL('../../memory/memos/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier === '@droyagent/memory/store') return { url: new URL('../../memory/store.mjs', import.meta.url).href, shortCircuit: true };
   return next(specifier, context);
 } });

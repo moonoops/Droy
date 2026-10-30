@@ -41,6 +41,8 @@ class NativeIsolatedRuntimeFixture(private val destination: String = "workbench"
 
     fun prepare() {
         assumeTrue("Explicit isolated native fixture required", InstrumentationRegistry.getArguments().getString("nativeWorkbenchFixture") == "true")
+        val fixtureLocale = InstrumentationRegistry.getArguments().getString("nativeFixtureLocale", "en")
+        require(fixtureLocale in setOf("en", "zh")) { "Fixture locale must be en or zh" }
         assertEquals("Only the development application can run this fixture", "io.droyagent.app.dev", context.packageName)
         assertTrue("A dedicated emulator is required", Build.MODEL.contains("sdk_gphone") || Build.FINGERPRINT.contains("emulator"))
         assertTrue("Do not interrupt an existing runtime", RuntimeService.canManageHistory())
@@ -78,12 +80,12 @@ class NativeIsolatedRuntimeFixture(private val destination: String = "workbench"
             plugin.writeText(instrumentation.context.assets.open("native-workbench-provider.mjs").bufferedReader().use { it.readText() })
             File(profile, "cordis.patch.yml").writeText(JSONArray()
                 .put(JSONObject().put("id", "agent-default-model").put("config", JSONObject().put("provider", "droy-native-fixture").put("model", "native-local")))
-                .put(JSONObject().put("id", "locale").put("config", JSONObject().put("preference", "en")))
+                .put(JSONObject().put("id", "locale").put("config", JSONObject().put("preference", fixtureLocale)))
                 .put(JSONObject().put("insert", JSONArray().put(JSONObject().put("id", "native-local-fixture").put("name", plugin.absolutePath)))).toString())
             changedPreferences = true
             preferences.keys.forEach { assertTrue(context.getSharedPreferences(it, 0).edit().clear().commit()) }
             assertTrue(context.getSharedPreferences("installation", 0).edit().putBoolean("completed", true).commit())
-            val product = context.getSharedPreferences("product", 0).edit().putString("languagePreference", "en")
+            val product = context.getSharedPreferences("product", 0).edit().putString("languagePreference", fixtureLocale)
                 .putBoolean(BackgroundRuntime.STOPPED, true).putBoolean("petEnabled", false)
             allowRoot?.let { product.putBoolean("allowRoot", it) }
             assertTrue(product.commit())

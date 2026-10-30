@@ -214,6 +214,17 @@ def verifyQwenRuntime = tasks.register('verifyQwenRuntime') {
 }
 tasks.named('preBuild').configure { dependsOn verifyQwenRuntime }
 
+def verifyEmbeddingRuntime = tasks.register('verifyEmbeddingRuntime') {
+    def library = rootProject.layout.projectDirectory.file('runtime/generated/jniLibs/arm64-v8a/libdroy_embedding.so')
+    def manifest = rootProject.layout.projectDirectory.file('runtime/generated/assets/embedding/e5-small/manifest.json')
+    inputs.files(library, manifest)
+    doLast {
+        if (!library.asFile.isFile() || !manifest.asFile.isFile())
+            throw new GradleException('Missing local embedding resources. Run python3 tools/prepare_embedding.py with the Android NDK and CMake.')
+    }
+}
+tasks.named('preBuild').configure { dependsOn verifyEmbeddingRuntime }
+
 android {
     namespace 'io.droyagent.app'
     compileSdk 37

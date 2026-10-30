@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { stickerContext } from './media.mjs';
 
 /** Semantic paragraphs remain intact; fenced code is never split into chat fragments. */
 export function splitReply(text) {
@@ -72,8 +73,8 @@ function fingerprint(item) {
 
 export function withoutSources(state, sourceIds) {
   const forgotten = new Set(sourceIds);
-  const result = {...state,summary:'',summaryThrough:null};
-  for (const name of ['expressions','jargon','jargonCandidates','impressions']) result[name] = (state[name] ?? []).filter(item =>
+  const result = {...state,summary:'',summaryState:null,summaryThrough:null};
+  for (const name of ['expressions','jargon','jargonCandidates','impressions','events']) result[name] = (state[name] ?? []).filter(item =>
     !item.sourceIds?.some(id => forgotten.has(id)));
   return result;
 }
@@ -82,11 +83,27 @@ export function recallQuery(messages) {
   return messages.filter(message => message.role === 'user').slice(-3).map(message => message.text || '').join(' ').trim().slice(0,512);
 }
 
-export function sharedContext(state, memories, messages) {
-  return {summary:state.summary || '',impressions:state.impressions ?? [],expressions:state.expressions ?? [],
+function relatedImpressions(impressions,messages) {
+  const recent=messages.filter(message=>message.role==='user').slice(-3),sourceIds=new Set(recent.map(message=>message.id));
+  const query=recent.map(message=>message.text??'').join(' ').toLocaleLowerCase('und');
+  const tokens=new Set(query.match(/[\p{L}\p{N}_]{3,}/gu)??[]);
+  for(const run of query.match(/[\p{Script=Han}]{2,}/gu)??[])for(let i=0;i<run.length-1;i++) {
+    const token=run.slice(i,i+2);
+    if(!['用户','喜欢','这个','那个','我们','他们','觉得','什么','今天'].includes(token))tokens.add(token);
+  }
+  return (impressions??[]).map((item,index)=>({item,index,score:(item.sourceIds??[]).some(id=>sourceIds.has(id))?100:
+    [...tokens].filter(token=>String(item.text??'').toLocaleLowerCase('und').includes(token)).length}))
+    .filter(entry=>entry.score>0).sort((a,b)=>b.score-a.score||b.index-a.index).slice(0,3)
+    .map(({item})=>({...item,assertion:'companion_impression'}));
+}
+
+export function sharedContext(state, memories, messages, locale='zh') {
+  return {summary:state.summary || '',summaryState:state.summaryState??null,
+    events:structuredClone(state.events??[]),impressions:relatedImpressions(state.impressions,messages),expressions:state.expressions ?? [],
     jargon:(state.jargon ?? []).filter(item => messages.some(message => message.text?.includes(item.term))),
     memories:memories?.records ?? memories?.items ?? [],messages:messages.map(message => ({
       id:message.id,role:message.role,type:message.type,text:message.text,createdAt:message.createdAt,
+      ...stickerContext(message,locale),
       ...(message.replyTo ? {replyTo:message.replyTo}:{}),
       ...(typeof message.quoteReply === 'boolean' ? {quoteReply:message.quoteReply}:{}),
       ...(message.task ? {task:message.task}:{}),

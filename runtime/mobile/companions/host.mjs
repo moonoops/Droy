@@ -9,9 +9,12 @@ import { requireMobileSession } from '../auth.mjs';
 import { resolveMobileLocale } from '../locale.mjs';
 import { isQuietTime } from './dialogue.mjs';
 import { stickerCatalog } from './media.mjs';
+import { defineTool } from '@deepseek-ai/dsh-tools';
+import { installCompanionMemoryManagement } from './memory-management.mjs';
+import { createCompanionEmbedder } from './embedding.mjs';
 
 const base='/droy/companions';
-export const stickerIds=['test-sticker-ok','test-sticker-happy','test-sticker-curious'];
+export const stickerIds=stickerCatalog().map(sticker=>sticker.id);
 const assetNames=new Set(['kaka.png','maimai.png','user-default.png',...['01','02','03','04','05'].flatMap(id=>['wallpaper-'+id+'.webp','wallpaper-'+id+'-thumb.webp']),...stickerIds.map(id=>id+'.png')]);
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 async function body(req,limit=262144) {
@@ -83,7 +86,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         for(const template of defaultProfiles()) {
           const view=localizedProfile(template,locale);
           templates.push({templateId:template.templateId,name:view.name,avatarUrl:template.avatar,personality:view.personality,
-            behaviorStyle:view.behaviorStyle,replyStyle:view.replyStyle,settings:structuredClone(template.settings),
+            behaviorStyle:view.behaviorStyle,replyStyle:view.replyStyle,customPersonaDefaults:view.customPersonaDefaults,settings:{...structuredClone(template.settings),proactiveEnabled:true},
             chatBackground:structuredClone(template.chatBackground),suggestedName:await store.suggestName(template.templateId,locale)});
         }
         return send(res,200,{templates});
@@ -143,7 +146,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
           if(input.avatar!==undefined&&input.avatar!==input.avatarUrl)fail('COMPANION_INVALID_INPUT');
           input.avatar=input.avatarUrl;delete input.avatarUrl;
         }
-        if(Object.keys(input).some(key=>!['name','avatar','model','settings','personalityOverride','chatBackground'].includes(key))) fail('COMPANION_INVALID_INPUT');
+        if(Object.keys(input).some(key=>!['name','avatar','model','settings','personalityOverride','behaviorStyleOverride','replyStyleOverride','chatBackground'].includes(key))) fail('COMPANION_INVALID_INPUT');
         const updated=await store.updateProfile(id,input);
         if(input.name!==undefined)await ctx.workspaceRegistry.get(updated.workspaceId)?.setTitle?.(input.name);
         if(input.settings?.memoryEnabled===false) {
@@ -188,19 +191,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
       if(path[1]==='cancel' && req.method==='POST') return send(res,200,await runtime.cancel(id,await body(req)));
       if(path[1]==='retry' && req.method==='POST') {await runtime.retry(id);return send(res,202,{accepted:true});}
       if(path[1]==='memories') {
-        const memory=await runtime.memory(id);
-        if(req.method==='GET') {
-          const result=await memory.query(url.searchParams.get('q')?{text:url.searchParams.get('q')}:{});
-          return send(res,200,{...result,records:result.items});
-        }
-        const input=await body(req);
-        if(req.method==='POST') return send(res,200,await memory.remember(input));
-        if(req.method==='PATCH') return send(res,200,await runtime.reviseMemory(id,input));
-        if(req.method==='DELETE') {
-          if(input.all===true)return send(res,200,await runtime.resetMemories(id));
-          const record=await memory.get(input.recordId);if(!record) fail('COMPANION_NOT_FOUND');
-          return send(res,200,await runtime.forget(id,{recordId:input.recordId,expectedRevisionId:input.expectedRevisionId??record.revisionId}));
-        }
+        return send(res,403,{error:'COMPANION_MEMORY_WORKBENCH_REQUIRED',message:dialoguePrompts[resolveMobileLocale(ctx)].memoryPrivate});
       }
       if(path[1]==='uploads' && req.method==='POST') {
         const upload=await saveUpload(req,ctx,id);
@@ -251,7 +242,8 @@ export function installCompanions(ctx,bridge) {
       const directory=join(process.env.DSH_HOME,'droy-companions');
       await mkdir(directory,{recursive:true,mode:0o700});
       store=await CompanionStore.open({directory});
-      runtime=new CompanionRuntime({ctx:scope,store,directory,options:{getClock:signal=>bridge.clock(signal)},notify:async value=>{
+      runtime=new CompanionRuntime({ctx:scope,store,directory,options:{getClock:signal=>bridge.clock(signal),embed:createCompanionEmbedder(bridge),
+        requestMemoryPurge:input=>bridge.companionMemory(input)},notify:async value=>{
         const profile=await store.getProfile(value.companionId);
         const clock=await runtime.clock();
         if(isQuietTime(profile.settings.quietHours,new Date(clock.currentTime),clock.timeZone))return {status:'suppressed'};
@@ -263,9 +255,13 @@ export function installCompanions(ctx,bridge) {
       scope.webServer.register({kind:'exact',path:base,handler});
       scope.webServer.register({kind:'prefix',path:base,handler});
       scope.provide('droyCompanions',runtime);
+      installCompanionMemoryManagement(scope,{list:()=>runtime.listMemorySpaces(),
+        purge:(input,authorization)=>runtime.purgeMemorySpace(input,authorization),
+        restore:(input,authorization)=>runtime.restoreMemorySpace(input,authorization)},{defineTool});
       await runtime.start();
       scope.effect(()=>async()=>{await runtime.close();await store.close();});
       startup.phase='ready';
+      void runtime.resumeMemoryPurges().catch(error=>scope.logger.warn('COMPANION_MEMORY_PURGE_PENDING: '+(error.code??'COMPANION_OPERATION_FAILED')));
     } catch(error) {
       startup.phase='failed';startup.errorCode=/^[A-Z][A-Z0-9_]{2,80}$/.test(error.code??'')?error.code:'COMPANION_INITIALIZATION_FAILED';
       startup.errorType=error.name;

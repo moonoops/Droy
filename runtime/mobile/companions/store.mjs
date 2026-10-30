@@ -49,7 +49,7 @@ export function companionCreationTombstoneDigest(kind, value) {
   id(value);
   return createHash('sha256').update('droy-companion-creation-v1\0' + kind + '\0' + value).digest('hex');
 }
-const PROFILE_FIELDS = ['name', 'avatar', 'personality', 'personalityOverride', 'chatBackground', 'behaviorStyle', 'replyStyle', 'model', 'settings', 'workspaceId', 'chatSessionId'];
+const PROFILE_FIELDS = ['name', 'avatar', 'personality', 'personalityOverride', 'behaviorStyleOverride', 'replyStyleOverride', 'chatBackground', 'behaviorStyle', 'replyStyle', 'model', 'settings', 'workspaceId', 'chatSessionId'];
 const CONTEXT_FIELDS = ['contextSourceIds', 'contextRange', 'contextExcluded'];
 const MESSAGE_FIELDS = ['id', 'clientId', 'role', 'type', 'text', 'createdAt', 'status', 'attachments', 'replyTo', 'quoteReply', 'task', 'voice', 'stickerId', 'transcript', 'error', ...CONTEXT_FIELDS];
 const MUTABLE_MESSAGE_FIELDS = ['text', 'status', 'attachments', 'task', 'voice', 'transcript', 'error', ...CONTEXT_FIELDS];
@@ -166,7 +166,8 @@ function profilePatch(patch, current) {
     fields(next[key], ['zh', 'en']);
     text(next[key].zh, 16384, false); text(next[key].en, 16384, false);
   }
-  if (next.personalityOverride !== undefined) text(next.personalityOverride, 16384);
+  for (const key of ['personalityOverride', 'behaviorStyleOverride', 'replyStyleOverride'])
+    if (next[key] !== undefined) text(next[key], 16384);
   if (next.chatBackground !== undefined) next.chatBackground = validateBackground(next.chatBackground);
   if (next.model !== undefined) next.model = validateModel(next.model);
   if (next.settings !== undefined) next.settings = validateSettings(next.settings, current.settings);
@@ -382,19 +383,22 @@ export class CompanionStore {
     });
   }
   async createProfile(input) {
-    fields(input, ['requestId', 'templateId', 'name', 'personalityOverride', 'model', 'settings', 'chatBackground', 'draftId', 'avatarUploadId']);
+    fields(input, ['requestId', 'templateId', 'name', 'personalityOverride', 'behaviorStyleOverride', 'replyStyleOverride', 'model', 'settings', 'chatBackground', 'draftId', 'avatarUploadId']);
     this.#ready(); id(input.requestId); this.#creationAvailable('profile-request', input.requestId);
     assertTemplateId(input.templateId); normalizedName(input.name);
     if (input.draftId !== undefined) id(input.draftId);
     if (input.avatarUploadId !== undefined) { id(input.avatarUploadId); if (!input.draftId) fail('COMPANION_ATTACHMENT_SCOPE'); }
-    const preset = defaultProfiles().find(profile => profile.templateId === input.templateId);
+    const preset = profileFromTemplate(input.templateId);
     const patch = profilePatch({ name: input.name, personalityOverride: input.personalityOverride === undefined ? '' : input.personalityOverride,
+      ...(input.behaviorStyleOverride === undefined ? {} : { behaviorStyleOverride: input.behaviorStyleOverride }),
+      ...(input.replyStyleOverride === undefined ? {} : { replyStyleOverride: input.replyStyleOverride }),
       model: input.model === undefined ? null : input.model,
       ...(input.settings === undefined ? {} : { settings: input.settings }),
       ...(input.chatBackground === undefined ? {} : { chatBackground: input.chatBackground }) }, preset);
     const content = { templateId: input.templateId, ...patch,
       settings: patch.settings ?? clone(preset.settings), chatBackground: patch.chatBackground ?? clone(preset.chatBackground),
       draftId: input.draftId ?? null, avatarUploadId: input.avatarUploadId ?? null };
+    for (const key of ['behaviorStyleOverride', 'replyStyleOverride']) if (content[key] === '') delete content[key];
     if (content.chatBackground.type === 'upload') {
       if (!content.draftId) fail('COMPANION_ATTACHMENT_SCOPE');
       const url = `/droy/companions/creation-drafts/${content.draftId}/attachments/${content.chatBackground.id}`;
@@ -406,12 +410,16 @@ export class CompanionStore {
       this.#creationAvailable('profile-request', input.requestId);
       const receipt = this.#db.prepare('SELECT * FROM creation_receipts WHERE request_id=?').get(input.requestId);
       if (receipt) {
-        if (receipt.fingerprint !== fingerprint) fail('COMPANION_CREATION_CONFLICT');
-        return { requestId: input.requestId, replayed: true, profile: this.#profile(receipt.companion_id) };
+        const existing = this.#profile(receipt.companion_id);
+        // Requests committed before proactive defaults changed must replay exactly.
+        const legacyFingerprint = existing.templateVersion === undefined && input.settings?.proactiveEnabled === undefined
+          ? createHash('sha256').update(canonical({ ...content, settings: { ...content.settings, proactiveEnabled: false } })).digest('hex') : null;
+        if (receipt.fingerprint !== fingerprint && receipt.fingerprint !== legacyFingerprint) fail('COMPANION_CREATION_CONFLICT');
+        return { requestId: input.requestId, replayed: true, profile: existing };
       }
       if (content.draftId) this.#draft(content.draftId, true);
       const profile = { ...profileFromTemplate(content.templateId, { name: content.name, model: content.model }),
-        personalityOverride: content.personalityOverride, settings: clone(content.settings), chatBackground: clone(content.chatBackground) };
+        personalityOverride: content.personalityOverride, behaviorStyleOverride: content.behaviorStyleOverride ?? '', replyStyleOverride: content.replyStyleOverride ?? '', settings: clone(content.settings), chatBackground: clone(content.chatBackground) };
       const uploads = new Map();
       const transferImage = uploadId => {
         if (!uploads.has(uploadId)) {
@@ -442,6 +450,29 @@ export class CompanionStore {
     this.#creationAvailable('profile-request', requestId);
     const receipt = this.#db.prepare('SELECT companion_id FROM creation_receipts WHERE request_id=?').get(requestId);
     return receipt ? { requestId, profile: this.#profile(receipt.companion_id) } : null;
+  }
+  async restoreRetainedProfile(snapshot) {
+    if(!snapshot||typeof snapshot!=='object'||Array.isArray(snapshot))fail('COMPANION_INVALID_INPUT');
+    assertCompanionId(snapshot.id);assertTemplateId(snapshot.templateId);
+    const base=profileFromTemplate(snapshot.templateId),patch=profilePatch(Object.fromEntries(
+      ['name','personality','behaviorStyle','replyStyle','personalityOverride','behaviorStyleOverride','replyStyleOverride']
+        .filter(key=>snapshot[key]!==undefined).map(key=>[key,snapshot[key]])),base);
+    return this.#transaction(()=>{
+      const existing=this.#db.prepare('SELECT data FROM profiles WHERE id=?').get(snapshot.id);
+      if(existing)return clone(JSON.parse(existing.data));
+      const profile={...base,...patch,id:snapshot.id,workspaceId:null,chatSessionId:null,
+        nameCustomized:snapshot.nameCustomized===true,personaRevision:snapshot.personaRevision??1};
+      // A restored name may have been claimed by a new companion. Preserve the
+      // archived identity, but use the same unique-name policy as creation.
+      if(profileNameKeys(profile).some(key=>this.#db.prepare('SELECT 1 FROM name_claims WHERE name_key=?').get(key))) {
+        const name=profile.name;let suffix=2;
+        do {profile.name=`${name} ${suffix++}`;} while(this.#db.prepare('SELECT 1 FROM name_claims WHERE name_key=?').get(normalizedName(profile.name)));
+        profile.nameCustomized=true;
+      }
+      this.#db.prepare('INSERT INTO profiles VALUES(?,?)').run(profile.id,JSON.stringify(profile));
+      this.#db.prepare('INSERT INTO read_positions VALUES(?,0)').run(profile.id);this.#putNameClaims(profile);
+      return clone(profile);
+    });
   }
   async getState(companionId) {
     this.#profile(companionId);
@@ -542,6 +573,9 @@ export class CompanionStore {
     return this.#transaction(() => {
     const current = this.#profile(companionId);
     const next = { ...current, ...profilePatch(patch, current), ...(patch.name !== undefined ? { nameCustomized: true } : {}), updatedAt: new Date().toISOString() };
+    if (['personality', 'behaviorStyle', 'replyStyle', 'personalityOverride', 'behaviorStyleOverride', 'replyStyleOverride'].some(key =>
+      patch[key] !== undefined && JSON.stringify(patch[key]) !== JSON.stringify(current[key] ?? '')))
+      next.personaRevision = (current.personaRevision ?? 1) + 1;
     if (patch.avatar !== undefined && patch.avatar !== current.avatar && patch.avatar !== null
       && !defaultProfiles().some(profile => profile.avatar === next.avatar)) {
       const uploadId = String(next.avatar).split('/').at(-1);
@@ -660,6 +694,38 @@ export class CompanionStore {
       : this.#db.prepare('SELECT * FROM sessions WHERE companion_id=? AND kind=? ORDER BY rowid').all(companionId, kind);
     return rows.map(row => ({ companionId, sessionId: row.session_id, kind: row.kind, workspaceId: row.workspace_id, taskId: row.task_id }));
   }
+  async retireMemorySessions(companionId,sessionIds,{sourceCaptureBoundary}={}) {
+    assertCompanionId(companionId);
+    if(!Array.isArray(sessionIds))fail('COMPANION_INVALID_INPUT');
+    const selected=new Set(sessionIds.map(id));
+    if(sourceCaptureBoundary!==undefined)sequence(sourceCaptureBoundary);
+    return this.#transaction(()=>{
+      const profile=this.#profile(companionId);
+      for(const sessionId of selected) {
+        const owner=this.#db.prepare('SELECT companion_id FROM sessions WHERE session_id=?').get(sessionId);
+        if(owner&&owner.companion_id!==companionId)fail('COMPANION_SESSION_CONFLICT');
+      }
+      for(const row of this.#db.prepare('SELECT message_id,data FROM messages WHERE companion_id=?').all(companionId)) {
+        const message=JSON.parse(row.data);
+        if(message.task&&selected.has(message.task.sessionId)&&['running','queued','cancelling'].includes(message.task.state)) {
+          message.task={...message.task,state:'cancelled',summary:''};
+          this.#db.prepare('UPDATE messages SET data=? WHERE companion_id=? AND message_id=?').run(JSON.stringify(message),companionId,row.message_id);
+        }
+      }
+      for(const sessionId of selected)this.#db.prepare('DELETE FROM sessions WHERE companion_id=? AND session_id=?').run(companionId,sessionId);
+      if(selected.has(profile.chatSessionId)) {profile.chatSessionId=null;this.#db.prepare('UPDATE profiles SET data=? WHERE id=?').run(JSON.stringify(profile),companionId);}
+      const row=this.#db.prepare('SELECT data FROM companion_state WHERE companion_id=?').get(companionId);
+      const state=row?JSON.parse(row.data):{};
+      state.sessionSources=Object.fromEntries(Object.entries(state.sessionSources??{}).filter(([sessionId])=>!selected.has(sessionId)));
+      state.invalidSessionIds=[...new Set([...(state.invalidSessionIds??[]),...selected])];
+      if(sourceCaptureBoundary!==undefined)Object.assign(state,{memoryRevision:(state.memoryRevision??0)+1,
+        expressions:[],jargon:[],jargonCandidates:[],impressions:[],events:[],summary:'',summaryState:null,summaryThrough:null,
+        forgottenThrough:sourceCaptureBoundary,learningCursor:sourceCaptureBoundary,factLearningCursor:sourceCaptureBoundary,
+        factsThroughMessageId:null,summaryCursor:sourceCaptureBoundary,replyDraft:null,pendingIntent:null,waitingUntil:null,pendingMessageIds:[]});
+      this.#db.prepare('INSERT INTO companion_state VALUES(?,?) ON CONFLICT(companion_id) DO UPDATE SET data=excluded.data').run(companionId,JSON.stringify(state));
+      return {retired:[...selected]};
+    });
+  }
   #message(companionId, messageId) {
     this.#profile(companionId); id(messageId);
     const row = this.#db.prepare('SELECT data FROM messages WHERE companion_id=? AND message_id=?').get(companionId, messageId);
@@ -709,7 +775,19 @@ export class CompanionStore {
       const complete=this.#db.prepare(`UPDATE messages SET data=json_set(data,'$.status','sent') WHERE companion_id=? AND message_id=? AND ${RECEIVED_INPUT_SQL}`);
       const completedIds=[];
       for(const messageId of consumed)if(complete.run(companionId,messageId).changes)completedIds.push(messageId);
-      const next={...state,pendingMessageIds:(state.pendingMessageIds??[]).filter(messageId=>!consumed.has(messageId)),
+      const contact={};
+      if(draftId&&state.replyDraft?.proactive&&state.proactiveLastContactDraftId!==draftId) {
+        const first=state.replyDraft.parts?.[0];
+        const published=first&&this.#db.prepare('SELECT data FROM messages WHERE companion_id=? AND message_id=?').get(companionId,first.id);
+        if(published) {
+          const at=JSON.parse(published.data).createdAt;
+          const repliedSincePrevious=Date.parse(state.lastUserAt??'')>Date.parse(state.proactiveLastContactAt??'');
+          Object.assign(contact,{proactiveLastContactDraftId:draftId,proactiveLastContactAt:at,
+            proactiveLastContactSourceIds:state.replyDraft.proactive.sourceIds,
+            proactiveUnansweredCount:Date.parse(state.lastUserAt??'')>Date.parse(at)?0:(repliedSincePrevious?0:state.proactiveUnansweredCount??0)+1});
+        }
+      }
+      const next={...state,...contact,pendingMessageIds:(state.pendingMessageIds??[]).filter(messageId=>!consumed.has(messageId)),
         ...(draftId!==undefined?{replyDraft:null}:{})};
       this.#db.prepare('INSERT INTO companion_state VALUES(?,?) ON CONFLICT(companion_id) DO UPDATE SET data=excluded.data').run(companionId,JSON.stringify(next));
       return {completedIds};
@@ -831,7 +909,7 @@ export class CompanionStore {
         const current=this.#db.prepare('SELECT data FROM companion_state WHERE companion_id=?').get(companionId);
         const state=current?JSON.parse(current.data):{},revision=(state.memoryRevision??0)+1;
         if(!Number.isSafeInteger(revision)||revision<1)fail('COMPANION_INVALID_INPUT');
-        const next={...state,memoryRevision:revision,summary:'',summaryThrough:null,summaryCursor:state.forgottenThrough??'seq:0'};
+        const next={...state,memoryRevision:revision,summary:'',summaryState:null,summaryThrough:null,summaryCursor:state.forgottenThrough??'seq:0'};
         this.#db.prepare('INSERT INTO companion_state VALUES(?,?) ON CONFLICT(companion_id) DO UPDATE SET data=excluded.data').run(companionId,JSON.stringify(next));
       }
       return {excludedIds:rows.filter(row=>affected.has(row.message_id)).map(row=>row.message_id),newlyExcluded:added>0};

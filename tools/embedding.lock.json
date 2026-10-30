@@ -1,0 +1,50 @@
+{
+  "sentencepiece": {
+    "repository": "google/sentencepiece",
+    "revision": "e0cce7d37b065b5140349dbe12c6bcf6192fdd78",
+    "bytes": 14162291,
+    "sha256": "0c369622d810d7d8fd98396bede6b7e92104ea3edb75680bda4b667c2f0b9565"
+  },
+  "onnxruntime": {
+    "version": "1.28.2",
+    "headerUrl": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.28.2/include/onnxruntime/core/session/onnxruntime_c_api.h",
+    "headerBytes": 394991,
+    "headerSha256": "b69a133143c0da61782b2b02cc8a620d21ac139231fd211719776d10385135c1",
+    "supportHeaders": [
+      {
+        "name": "onnxruntime_error_code.h",
+        "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.28.2/include/onnxruntime/core/session/onnxruntime_error_code.h",
+        "bytes": 2775,
+        "sha256": "5ce3b054e798eced8d14f5b86e98692fd33470463f96194ce0700a2d53dd8721"
+      },
+      {
+        "name": "onnxruntime_ep_c_api.h",
+        "url": "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.28.2/include/onnxruntime/core/session/onnxruntime_ep_c_api.h",
+        "bytes": 152985,
+        "sha256": "db86df0f846b8d3bdbf429a5c76c5805293196575ca3c475878612591cd18e51"
+      }
+    ]
+  },
+  "model": {
+    "id": "intfloat/multilingual-e5-small",
+    "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+    "dimensions": 384,
+    "maxTokens": 512,
+    "files": [
+      {
+        "name": "model.onnx",
+        "source": "onnx/model_qint8_avx512_vnni.onnx",
+        "bytes": 118346824,
+        "sha256": "dd476dd0c2514e9b9be83aeb3853fac0763e0bdf4a71645407587d77c48a2d88"
+      },
+      {
+        "name": "sentencepiece.bpe.model",
+        "source": "sentencepiece.bpe.model",
+        "bytes": 5069051,
+        "sha256": "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865"
+      }
+    ]
+  },
+  "ndk": "28.2.13676358",
+  "androidApi": 30
+}

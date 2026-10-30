@@ -349,16 +349,12 @@ const recognitionFailure = (asText = false) => Object.assign(new Error('ASR unav
   assert.equal(state.getSnapshot().messages.kaka[0].id, 'original-user'); state.dispose();
 });
 
- test('memory correction includes the observed revision and resetting memories does not clear chat or drafts', async () => {
+ test('companion client does not expose memory correction or permanent deletion actions', async () => {
   const { state, calls } = fixture((path, options) => path === '' ? root() : options.method ? {} : { messages: [row('kept', 28)] });
   await state.initialize(); await state.refreshMessages('kaka'); state.setDraft('kaka', { text: 'Keep this draft' });
-  await state.correctMemory('kaka', { recordId: 'memory-1', revisionId: 'revision-2' }, 'Corrected fact');
-  const patch = calls.find(call => call.method === 'PATCH');
-  assert.equal(patch.path, '/kaka/memories');
-  assert.equal(JSON.stringify(patch.body), JSON.stringify({ recordId: 'memory-1', expectedRevisionId: 'revision-2', text: 'Corrected fact' }));
-  await state.resetMemories('kaka');
-  const reset = calls.find(call => call.method === 'DELETE');
-  assert.equal(reset.path, '/kaka/memories'); assert.equal(reset.body.all, true);
+  assert.equal(state.correctMemory, undefined);
+  assert.equal(state.resetMemories, undefined);
+  assert.equal(calls.some(call => call.path.includes('/memories')), false);
   assert.equal(state.getSnapshot().messages.kaka[0].id, 'kept'); assert.equal(state.draft('kaka').text, 'Keep this draft'); state.dispose();
 });
 
@@ -463,24 +459,26 @@ test('queued voice gesture updates survive preparation failure, cancellation and
   }
 });
 
- test('personal information hides memory management and keeps explicit clear/reset confirmations in both languages', async () => {
+ test('personal information keeps the memory toggle but no memory browser, editor or reset action in either language', async () => {
   for (const language of ['zh', 'en']) {
     const f = companionUiFixture((path, options) => path === '' ? root() : options.method ? {} : { messages: [], status: { phase: 'idle' } }, language);
     await f.ui.state.initialize(); f.ui.state.open('kaka'); await tick(); f.ui.state.showProfile();
     const dictionary = loaded.DROY_COMPANION_COPY[language];
     let tree = f.render();
     assert.equal(treeNodes(tree).some(node => node.props.className === 'droy-im-memory-entry'), false);
-    assert.equal(treeNodes(tree).some(node => node.children.includes(dictionary.memoryHint)), false);
+    assert.equal(treeNodes(tree).some(node => /droy-im-memor(?:y|ies)/.test(node.props.className ?? '')), false);
+    assert.equal(treeNodes(tree).filter(node => node.props['data-droy-im-setting'] === 'memory').length, 1);
+    assert.equal(treeNodes(tree).filter(node => node.type === 'button' && node.props.className?.includes('is-danger')).length, 1);
     assert.equal(treeNodes(tree).some(node => node.children.includes(dictionary.modelHint)), false);
     let clear = treeNodes(tree).find(node => node.type === 'button' && node.children.includes(dictionary.clearChat));
     f.decline(); clear.props.onClick(); await tick(); assert.equal(f.calls.some(call => call.method === 'DELETE'), false);
     f.decline(false); clear.props.onClick(); await tick();
     assert.equal(f.calls.find(call => call.method === 'DELETE').path, '/kaka/messages');
     assert.ok(f.confirmations.at(-1).includes(dictionary.clearChatHint));
-    tree = f.render(); treeNodes(tree).find(node => node.type === 'button' && node.children.includes(dictionary.resetMemories)).props.onClick(); await tick();
-    assert.equal(f.calls.find(call => call.path === '/kaka/memories' && call.method === 'DELETE').body.all, true);
-    assert.ok(f.confirmations.at(-1).includes(dictionary.resetMemoriesHint));
-    assert.equal(f.calls.some(call => call.path.endsWith('/memories') && !call.method), false); f.ui.dispose();
+    assert.equal(f.calls.some(call => call.path.includes('/memories')), false);
+    assert.match(dictionary.deleteMessageHint, language === 'zh' ? /长期记忆保留/ : /long-term memories are kept/);
+    for (const key of ['memories', 'correctMemory', 'resetMemories']) assert.equal(dictionary[key], undefined);
+    f.ui.dispose();
   }
 });
 

@@ -82,10 +82,11 @@ public final class RuntimeService extends Service {
         }
         if (intent != null && !REFRESH.equals(intent.getAction())) BackgroundRuntime.startedByUser(this);
         synchronized (RuntimeService.class) {
-            if (historyMaintenance || NativeCompanionDeletion.pending(this)) {
+            if (historyMaintenance || NativeCompanionDeletion.pending(this) || NativeCompanionMemoryPurge.pending(this)) {
                 // A foreground/boot refresh may arrive while accepted tasks drain.
                 // Keep the existing child alive; only reject a new launch.
                 if (starting || ready || process != null && process.isAlive()) return restartMode();
+                if (NativeCompanionMemoryPurge.pending(this)) NativeCompanionMemoryPurge.resume(this);
                 status = NativeLocale.text("正在清理伙伴数据", "Cleaning up companion data"); stopSelf(); return START_NOT_STICKY;
             }
         }
@@ -414,7 +415,7 @@ public final class RuntimeService extends Service {
     }
 
     static synchronized boolean beginHistoryChange(Context context) {
-        return !NativeCompanionDeletion.pending(context) && beginHistoryChange();
+        return !NativeCompanionDeletion.pending(context) && !NativeCompanionMemoryPurge.pending(context) && beginHistoryChange();
     }
 
     static synchronized boolean beginCompanionHistoryChange() {
@@ -514,6 +515,7 @@ public final class RuntimeService extends Service {
                 boolean paused = ProductPermissions.stopped(this);
                 if (paused && !bridge.policy.isStopped()) {
                     bridge.policy.stop();
+                    io.droyagent.app.embedding.EmbeddingRuntime.cancelAllIfCreated();
                     HardwareRuntime.stopAll(this);
                     io.droyagent.androiduse.ProcessMemoryTools.get(this).closeAll();
                 }
@@ -523,6 +525,7 @@ public final class RuntimeService extends Service {
     }
     void stopOperations() {
         if (bridge != null) bridge.policy.stop();
+        io.droyagent.app.embedding.EmbeddingRuntime.cancelAllIfCreated();
         HardwareRuntime.releaseTransient(this);
         io.droyagent.androiduse.ProcessMemoryTools.get(this).closeAll();
         ToolProgress.clearScreenOperations();

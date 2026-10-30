@@ -19,6 +19,7 @@ const installed = createRequire(new URL('../../dsh/package.json', import.meta.ur
 const hooks = registerHooks({ resolve(specifier, context, next) {
   if (context.parentURL === new URL('../attachments.mjs', import.meta.url).href && specifier === './publish.mjs')
     return { url: new URL('./fixtures/host-publish.mjs', import.meta.url).href, shortCircuit: true };
+  if (specifier === '@droyagent/memory/memos') return { url: new URL('../../memory/memos/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier === '@droyagent/memory/store') return { url: new URL('../../memory/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier.startsWith('@deepseek-ai/')) return { url: pathToFileURL(installed.resolve(specifier)).href, shortCircuit: true };
   return next(specifier, context);
@@ -179,7 +180,7 @@ test('creation commits interaction settings and backgrounds with the same defaul
   const conflict = await api('', 'POST', { ...input, settings: { ...settings, allowProfanity: true } });
   assert.equal(conflict.status, 409); assert.equal(conflict.value.error, 'COMPANION_CREATION_CONFLICT');
   const partial = await f.store.createProfile(create('partial-interaction-create', 'Partial settings', { settings: { memoryEnabled: false, quietHours: null } }));
-  assert.deepEqual(partial.profile.settings, { proactiveEnabled: false, memoryEnabled: false, allowProfanity: true,
+  assert.deepEqual(partial.profile.settings, { proactiveEnabled: true, memoryEnabled: false, allowProfanity: true,
     quietHours: { enabled: false, start: '22:00', end: '09:00' } });
   const invalid = [
     { settings: { memoryEnabled: 'false' } }, { settings: { unrelated: true } },
@@ -385,4 +386,37 @@ test('a committed creation survives a lost startup response and safely recovers 
   assert.equal(recovered.value.profile.id, receipt.profile.id);
   assert.equal(recovered.value.profile.settings.memoryEnabled, false);
   assert.equal((await f.store.profiles()).length, 2);
+});
+
+test('new role creation exposes and persists enabled proactive default while legacy choices remain unchanged', async t => {
+  const f = await fixture(t, { legacy: defaultProfiles() }), { api } = await f.serve();
+  assert.equal((await f.store.getProfile('kaka')).settings.proactiveEnabled, false);
+  const catalog = await api('/templates');
+  assert.ok(catalog.value.templates.every(template => template.settings.proactiveEnabled));
+  assert.ok(catalog.value.templates.every(template => template.customPersonaDefaults.behaviorStyle));
+  const input = create('complete-role', 'Fictional custom role', { templateId: 'maimai',
+    personalityOverride: 'Fictional calm male programmer.', behaviorStyleOverride: 'Listen first.', replyStyleOverride: 'Be concise.' });
+  const result = await api('', 'POST', input);
+  assert.equal(result.status, 201);
+  assert.equal(result.value.profile.settings.proactiveEnabled, true);
+  const patched = await api('/' + result.value.profile.id, 'PATCH', { behaviorStyleOverride: 'Ask less.', replyStyleOverride: 'Use dry humor.' });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.value.behaviorStyle, 'Ask less.'); assert.equal(patched.value.replyStyle, 'Use dry humor.');
+  assert.equal((await f.store.getProfile('kaka')).settings.proactiveEnabled, false);
+  await assert.rejects(f.store.createProfile(create('invalid-role', 'Invalid fixture', { behaviorStyleOverride: null })), code('COMPANION_INVALID_INPUT'));
+});
+
+test('creation receipts from before proactive default change replay without changing existing settings', async t => {
+  const f = await fixture(t);
+  const input = create('old-default-receipt', 'Fictional original');
+  const original = await f.store.createProfile({ ...input, settings: { proactiveEnabled: false } });
+  await f.reopen(db => {
+    const profile = JSON.parse(db.prepare('SELECT data FROM profiles WHERE id=?').get(original.profile.id).data);
+    delete profile.templateVersion;
+    db.prepare('UPDATE profiles SET data=? WHERE id=?').run(JSON.stringify(profile), profile.id);
+  });
+  const replayed = await f.store.createProfile(input);
+  assert.equal(replayed.replayed, true); assert.equal(replayed.profile.id, original.profile.id);
+  assert.equal(replayed.profile.settings.proactiveEnabled, false);
+  await assert.rejects(f.store.createProfile({ ...input, name: 'Changed fixture' }), code('COMPANION_CREATION_CONFLICT'));
 });

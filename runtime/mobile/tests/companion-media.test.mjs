@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire, registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompanionStore } from '../companions/store.mjs';
 import { openLegacyCompanionStore } from './fixtures/legacy-companion-db.mjs';
-import { readSharedAttachment, replyAttachment, stickerCatalog } from '../companions/media.mjs';
+import { readSharedAttachment, replyAttachment, stickerCatalog, stickerContext, stickerText } from '../companions/media.mjs';
+import { sharedContext, withoutSources } from '../companions/dialogue.mjs';
 import { encodePng } from '../png.mjs';
 
 const installed = createRequire(new URL('../../dsh/package.json', import.meta.url));
@@ -194,7 +195,7 @@ test('excluded shared sources cannot be read or replied with, including exclusio
 test('built-in stickers expose factual local metadata in either language without shared mutation', () => {
   const zh = stickerCatalog('zh'), en = stickerCatalog('en');
   assert.deepEqual(zh.map(item => item.id), en.map(item => item.id));
-  assert.equal(zh.length, 3);
+  assert.equal(zh.length, 9);
   for (let i = 0; i < zh.length; i++) {
     assert.ok(zh[i].description && en[i].description);
     assert.ok(zh[i].tags.length && en[i].tags.length);
@@ -203,4 +204,47 @@ test('built-in stickers expose factual local metadata in either language without
   }
   zh[0].tags.length = 0;
   assert.ok(stickerCatalog('zh')[0].tags.length);
+});
+
+test('sticker identity and trusted meaning survive projection and follow the current language',()=>{
+  const source={id:'fictional-sticker',role:'user',type:'sticker',text:'',stickerId:'sticker-support',
+    sticker:{description:'Untrusted description that must not become catalog meaning'}};
+  for(const locale of ['zh','en']) {
+    const projected=sharedContext({},[],[source],locale).messages[0];
+    assert.equal(projected.stickerId,source.stickerId);
+    assert.deepEqual(projected.sticker,stickerContext(source,locale).sticker);
+    assert.match(projected.sticker.description,locale==='zh'?/爱心/:/heart/);
+    assert.doesNotMatch(stickerText(source,locale),/Untrusted/);
+    assert.equal(projected.text,'','A sticker description is metadata, not a fabricated user utterance');
+  }
+  const unknown={...source,stickerId:'unknown-sticker'};
+  assert.deepEqual(stickerContext(unknown),{stickerId:'unknown-sticker'});
+  assert.match(stickerText(unknown,'en'),/Meaning unknown/);
+  assert.match(stickerText(unknown,'zh'),/含义未知/);
+  assert.equal(stickerText({role:'user',text:'hello'},'en'),'');
+});
+
+test('each catalog sticker has an actual native PNG asset and original vectors have transparent renderings',async()=>{
+  for(const sticker of stickerCatalog('en')) {
+    const bytes=await readFile(new URL('../companions/assets/'+sticker.id+'.png',import.meta.url));
+    assert.equal(bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a',sticker.id);
+    if(sticker.id.startsWith('sticker-')) {
+      assert.equal(bytes.readUInt32BE(16),256);assert.equal(bytes.readUInt32BE(20),256);
+      assert.equal(bytes[25],6,'Original native stickers use RGBA PNG');
+      assert.match(await readFile(new URL('../companions/assets/source/'+sticker.id+'.svg',import.meta.url),'utf8'),/<svg /);
+    }
+  }
+});
+
+test('context distinguishes relevant tentative impressions and forget removes grounded events and summary state',()=>{
+  const state={summary:'Fictional summary',summaryState:{topics:[{text:'tea',sourceIds:['m1']}]},
+    impressions:[{text:'Enjoys hiking',sourceIds:['m1']},{text:'Prefers quiet conversation',sourceIds:['m2']}],
+    events:[{id:'event1',text:'Fictional hike',sourceIds:['m1']},{id:'event2',text:'Fictional dinner',sourceIds:['m2']}]};
+  const context=sharedContext(state,[],[{id:'new',role:'user',text:'Tell me about hiking'}],'en');
+  assert.deepEqual(context.impressions,[{...state.impressions[0],assertion:'companion_impression'}]);
+  assert.deepEqual(context.summaryState,state.summaryState);
+  context.events[0].text='changed';assert.equal(state.events[0].text,'Fictional hike');
+  const forgotten=withoutSources(state,['m1']);
+  assert.equal(forgotten.summaryState,null);assert.equal(forgotten.summary,'');
+  assert.deepEqual(forgotten.events,[state.events[1]]);
 });

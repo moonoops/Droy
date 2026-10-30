@@ -12,6 +12,7 @@ import { createCompanionMaintenanceLease } from '../companions/maintenance-runti
 
 const installed = createRequire(new URL('../../dsh/package.json', import.meta.url));
 const hooks = registerHooks({ resolve(specifier, context, next) {
+  if (specifier === '@droyagent/memory/memos') return { url: new URL('../../memory/memos/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier === '@droyagent/memory/store') return { url: new URL('../../memory/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier.startsWith('@deepseek-ai/')) return { url: pathToFileURL(installed.resolve(specifier)).href, shortCircuit: true };
   return next(specifier, context);
@@ -80,10 +81,15 @@ async function fixture(t, options = {}) {
   ctx.provide('llm', { async prepareCall(config, signal) {
     return { config, async *stream(input) {
       let data; try { data = JSON.parse(input.messages[0].content[0].text); } catch {}
-      const kind = data?.existing ? 'learning' : data?.stage ? 'learning-stage' : data?.candidates ? 'recall' : 'reply';
+      const kind = data?.activity && Array.isArray(data?.evidence) ? 'proactive'
+        : data?.existing ? 'learning' : data?.stage ? 'learning-stage' : data?.candidates ? 'recall' : 'reply';
       const call = { kind, config, signal, input }; calls.model.push(call); await options.beforeStream?.(call);
       signal.throwIfAborted();
-      yield { type: 'text-delta', text: kind === 'learning-stage' ? '[]' : kind === 'learning' ? JSON.stringify({ impressions: [], expressions: [], jargon: [], memories: [] })
+      const proactiveSource=kind==='proactive'?data.evidence.find(item=>item.kind==='message'):null;
+      if(kind==='proactive')assert.ok(proactiveSource,'proactive fixture decisions require a supplied user source');
+      yield { type: 'text-delta', text: kind === 'proactive' ? JSON.stringify({action:'contact',kind:'check_in',
+        reason:'Continue the fictional shared hiking topic',sourceIds:[proactiveSource.id],nextCheckMinutes:5})
+        : kind === 'learning-stage' ? '[]' : kind === 'learning' ? JSON.stringify({ impressions: [], expressions: [], jargon: [], memories: [] })
         : kind === 'recall' ? JSON.stringify({ recordIds: [] }) : 'Synthetic companion response.' };
       yield { type: 'finish', reason: { kind: 'stop' } };
     } };
@@ -102,6 +108,8 @@ async function fixture(t, options = {}) {
 test('proactive pause preserves its deadline and stored state; resume fires once and freezes its next trigger', async t => {
   clock(t); const f = await fixture(t);
   await f.store.updateProfile(f.id, { settings: { proactiveEnabled: true } });
+  await f.store.appendMessage(f.id,{id:'proactive-source',role:'user',text:'I enjoy fictional weekend hiking.',
+    createdAt:new Date(NOW-60000).toISOString(),status:'sent'});
   await f.store.updateState(f.id, { lastUserAt: new Date(NOW - 60000).toISOString(), proactiveNextAt: new Date(NOW + 100).toISOString() });
   const saved = await f.store.getState(f.id); f.runtime.scheduleProactive(f.id, saved.proactiveNextAt);
   const lease = f.lease('proactive-window'); assert.equal((await lease.suspend()).quiet, true);
@@ -111,7 +119,9 @@ test('proactive pause preserves its deadline and stored state; resume fires once
   await eventually(() => f.calls.created.some(agent => agent.deliveries.length), 'one resumed proactive delivery');
   const agent = f.calls.created[0]; assert.equal(agent.deliveries.length, 1); agent.retire();
   const second = f.lease('next-proactive-window'); assert.equal((await second.suspend()).quiet, true);
-  t.mock.timers.tick(10000); assert.equal(agent.deliveries.length, 1); assert.equal(f.calls.created.length, 1);
+  const nextAt=Date.parse((await f.store.getState(f.id)).proactiveNextAt),modelCalls=f.calls.model.length;
+  assert.ok(nextAt>Date.now());t.mock.timers.tick(nextAt-Date.now()+10000);
+  assert.equal(agent.deliveries.length, 1); assert.equal(f.calls.created.length, 1);assert.equal(f.calls.model.length,modelCalls);
   assert.deepEqual(f.calls.cancelled, []); assert.equal((await f.store.getProfile(f.id)).model, null);
 });
 
@@ -134,6 +144,8 @@ test('an already accepted Replyer completes publication and notification without
 test('an entered proactive callback completes after hold while its next timer remains suspended', async t => {
   clock(t); const f = await fixture(t), entered = deferred(), finish = deferred(); t.after(() => finish.resolve());
   await f.store.updateProfile(f.id, { settings: { proactiveEnabled: true } });
+  await f.store.appendMessage(f.id,{id:'proactive-source',role:'user',text:'I enjoy fictional weekend hiking.',
+    createdAt:new Date(NOW-60000).toISOString(),status:'sent'});
   await f.store.updateState(f.id, { lastUserAt: new Date(NOW - 60000).toISOString() });
   const getState = f.store.getState.bind(f.store); let gated = false;
   f.store.getState = async id => { const saved = await getState(id); if (!gated) { gated = true; entered.resolve(); await finish.promise; } return saved; };
@@ -143,7 +155,10 @@ test('an entered proactive callback completes after hold while its next timer re
   await eventually(() => f.calls.created.some(agent => agent.deliveries.length), 'already entered proactive callback');
   const agent = f.calls.created[0], owner = await f.store.sessionOwner(agent.id);
   const finishing = f.runtime.finishTurn(owner, { data: { reason: { kind: 'completed' } } }); agent.retire(); await finishing;
-  assert.equal((await observing).quiet, true); t.mock.timers.tick(10000); assert.equal(agent.deliveries.length, 1);
+  assert.equal((await observing).quiet, true);
+  const nextAt=Date.parse((await f.store.getState(f.id)).proactiveNextAt),modelCalls=f.calls.model.length;
+  assert.ok(nextAt>Date.now());t.mock.timers.tick(nextAt-Date.now()+10000);
+  assert.equal(agent.deliveries.length, 1);assert.equal(f.calls.model.length,modelCalls);
   lease.resume(); t.mock.timers.tick(0);
   await eventually(() => agent.deliveries.length === 2, 'next proactive callback resumes once');
   lease.resume(); assert.equal(agent.deliveries.length, 2); assert.deepEqual(f.calls.cancelled, []);

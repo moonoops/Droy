@@ -1,6 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, mkdir, copyFile } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, copyFile, cp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { registerHooks } from 'node:module';
@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
 const sourceImports = registerHooks({ resolve(specifier, context, next) {
+  if (specifier === '@droyagent/memory/memos') return { url: new URL('../../memory/memos/store.mjs', import.meta.url).href, shortCircuit: true };
   if (specifier === '@droyagent/memory/store') return { url: new URL('../../memory/store.mjs', import.meta.url).href, shortCircuit: true };
   return next(specifier, context);
 } });
@@ -21,7 +22,7 @@ async function fixture(t) {
   const open = async companionId => {
     const memory = await CompanionMemory.open({ directory, companionId }); memories.set(companionId, memory); return memory;
   };
-  t.after(async () => { await Promise.all([...memories.values()].map(memory => memory.close())); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => { await Promise.all([...memories.values()].map(memory => memory.close())); await rm(directory, { recursive: true, force: true }); await rm(directory + '.memory-vault', { recursive: true, force: true }); });
   return { directory, open, async close(companionId) { await memories.get(companionId).close(); memories.delete(companionId); } };
 }
 
@@ -92,10 +93,11 @@ test('memory resolves its package export from both staged mobile deployment loca
   for (const name of ['package.json', 'store.mjs', 'store-worker.mjs', 'schema.mjs']) {
     await copyFile(new URL('../../memory/' + name, import.meta.url), join(memoryPackage, name));
   }
+  await cp(new URL('../../memory/memos/', import.meta.url), join(memoryPackage, 'memos'), { recursive: true });
   const layouts = [join(root, 'mobile', 'companions'), join(root, 'node_modules', '@droyagent', 'mobile', 'companions')];
   for (const layout of layouts) {
     await mkdir(layout, { recursive: true });
-    for (const name of ['memory.mjs', 'profiles.mjs']) await copyFile(new URL('../companions/' + name, import.meta.url), join(layout, name));
+    for (const name of ['memory.mjs', 'memory-spaces.mjs', 'profiles.mjs']) await copyFile(new URL('../companions/' + name, import.meta.url), join(layout, name));
     await mkdir(join(layout,'maibot'),{recursive:true});
     await copyFile(new URL('../companions/maibot/persona-source.json',import.meta.url),join(layout,'maibot','persona-source.json'));
   }

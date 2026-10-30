@@ -4,19 +4,34 @@
 // Droy's distribution is AGPL-3.0; upstream notices are retained in ./maibot/.
 
 import {renderMaiBotPrompt} from './maibot-prompts.mjs';
+import {COMPANION_PERSONAS} from './profiles.mjs';
 
 export const expressionDefaults = Object.freeze({enabled:true,mode:'fast',minimumCandidates:10,maxSelected:5,candidatePoolSize:50});
+
+// Authored role examples are prompt material, not evidence of anything the user said.
+const personaExamples={
+  kaka:{
+    zh:[['用户想倾诉','你说，我听着。'],['一起面对小挫折','这关有点难缠，我们拆开看看？'],['话题自然结束','好，那先这样。']],
+    en:[['The user wants to vent',"Go on, I'm listening."],['Facing a small setback together',"This one's a bit stubborn. Want to break it down?"],['The conversation naturally ends','All right, leave it there for now.']],
+  },
+  maimai:{
+    zh:[['对有趣的细节好奇','然后呢，怎么变成这样的'],['遇到轻松的小槽点','这也行啊'],['不认同一个观点','这个我倒不太同意']],
+    en:[['Curious about an interesting detail','Wait, how did it get to that?'],['Lightly teasing an amusing detail',"Apparently that's a thing now."],['Disagreeing with a view',"Not sure I agree with that one."]],
+  },
+};
 
 const copy = {
   zh: {
     situation:'情景',style:'风格',habits:'你可以视情况自由使用以下句式：',habit:(s,e)=>`- 当"${s}"时，可以用"${e}"来表达。`,
     intent:'表达选择意图：',focus:'贴合对象',reply_act:'回复动作',scene:'表达场景',tone:'期望语气',prefer:'优先表达',avoid:'避免表达',
     reference:'回复信息参考：',reason:'Planner 推理：',history:'真实聊天上下文：',target:'正在回复的消息：',language:'当前界面和默认回复语言是中文；保留候选原文，只返回选择结果。',
+    examples:'角色表达示例（不是历史对话或用户事实）：只参考语气，按当前情境重新表达；不必套用，也不要为了使用示例强行接话。',
   },
   en: {
     situation:'Situation',style:'Style',habits:'You may freely use the following expressions when appropriate:',habit:(s,e)=>`- When "${s}", you can express yourself with "${e}".`,
     intent:'Expression selection intent:',focus:'Focus',reply_act:'Reply act',scene:'Scene',tone:'Desired tone',prefer:'Prefer',avoid:'Avoid',
     reference:'Reply reference:',reason:'Planner reasoning:',history:'Actual chat context:',target:'Message being answered:',language:'The current interface and default reply language is English; preserve candidate text and return only the selection result.',
+    examples:'Role expression examples (not conversation history or facts about the user): use only as tone references and phrase your response for the current situation. Do not force a reply or copy an example.',
   },
 };
 
@@ -62,14 +77,31 @@ export function expressionQuery(args={},locale='zh') {
   return parts.join('\n\n');
 }
 
-function normalizedCandidates(context) {
+function normalizedCandidates(context,profile) {
   // The caller supplies only this companion's scope. There is no global pool,
   // cross-companion cache, or implicit sharing of learned styles.
-  return (context.expressions??[]).filter(item=>item.id&&item.situation&&(item.expression||item.style)).map(item=>({
+  return (context.expressions??[]).filter(item=>item.id&&item.situation&&(item.expression||item.style)
+    &&(!profile?.personaRevision||(item.personaRevision??1)===profile.personaRevision)).map(item=>({
     ...item,expression:item.expression??item.style,
     // Existing Droy learning tracks repeated evidence instead of a numeric count.
     count:item.count??Math.max(1,new Set(item.sourceIds??[]).size),sourceIds:[...(item.sourceIds??[])],
   }));
+}
+
+export function roleExpressionExamples(profile,locale='zh') {
+  const l=locale==='en'?'en':'zh',template=COMPANION_PERSONAS[profile?.templateId];
+  if(!template||['personalityOverride','behaviorStyleOverride','replyStyleOverride'].some(key=>profile[key]?.trim()))return [];
+  if(['personality','behaviorStyle','replyStyle'].some(key=>
+    (typeof profile[key]==='string'?profile[key]:profile[key]?.[l])!==template[key][l]))return [];
+  return (personaExamples[profile.templateId]?.[l]??[]).map(([situation,expression],index)=>({
+    id:`persona-example:${profile.templateId}:${l}:${index+1}`,situation,expression,origin:'persona-example',
+  }));
+}
+
+function withRoleExamples(selection,profile,locale,enabled) {
+  const examples=enabled?roleExpressionExamples(profile,locale):[],c=copy[locale==='en'?'en':'zh'];
+  return {...selection,examples,prompt:[selection.prompt,examples.length?c.examples+'\n'+examples
+    .map(item=>c.habit(item.situation,item.expression)).join('\n'):''].filter(Boolean).join('\n\n')};
 }
 
 function result(expressions,locale,selectionMode,modelCalls,extra={}) {
@@ -83,12 +115,13 @@ function result(expressions,locale,selectionMode,modelCalls,extra={}) {
  * optional embedding retrieval followed by the upstream contextual selector.
  * generate receives a normal {system,messages,purpose,signal} request.
  * retrieve, when supplied, must return IDs from the provided scoped candidates. */
-export async function selectExpressions({context={},args={},locale='zh',random=Math.random,generate,retrieve,signal,options={}}={}) {
-  const settings={...expressionDefaults,...options},all=normalizedCandidates(context),c=copy[locale==='en'?'en':'zh'];
-  if(!settings.enabled||all.length<settings.minimumCandidates)return result([],locale,'skipped',0);
+export async function selectExpressions({profile,context={},args={},locale='zh',random=Math.random,generate,retrieve,signal,options={}}={}) {
+  const settings={...expressionDefaults,...options},all=normalizedCandidates(context,profile),c=copy[locale==='en'?'en':'zh'];
+  const finish=(...args)=>withRoleExamples(result(...args),profile,locale,settings.enabled);
+  if(!settings.enabled||all.length<settings.minimumCandidates)return finish([],locale,'skipped',0);
   signal?.throwIfAborted();
   let candidates=sampleCandidates(all,random,settings.minimumCandidates),retrievalMode='weighted';
-  if(settings.mode!=='fine')return result(candidates,locale,'fast',0,{retrievalMode});
+  if(settings.mode!=='fine')return finish(candidates,locale,'fast',0,{retrievalMode});
   const query=expressionQuery(args,locale);
   if(retrieve) {
     const ids=await retrieve({query,candidates:all,limit:settings.candidatePoolSize,signal});
@@ -96,7 +129,7 @@ export async function selectExpressions({context={},args={},locale='zh',random=M
     const retrieved=[...new Set(ids)].filter(id=>byId.has(id)).slice(0,settings.candidatePoolSize).map(id=>byId.get(id));
     if(retrieved.length){candidates=retrieved;retrievalMode='embedding';}
   }
-  if(!generate)return result(candidates,locale,'fast',0,{retrievalMode,warning:'COMPANION_EXPRESSION_SELECTOR_UNAVAILABLE'});
+  if(!generate)return finish(candidates,locale,'fast',0,{retrievalMode,warning:'COMPANION_EXPRESSION_SELECTOR_UNAVAILABLE'});
   const numbered=candidates.map((item,index)=>`${index+1}: ${c.situation}=${item.situation} | ${c.style}=${item.expression}`);
   const history=(context.messages??[]).slice(-10).map(message=>`${message.role}: ${message.text??''}`).join('\n');
   const target=(context.messages??[]).find(message=>message.id===(args.msg_id??args.target_message_id??args.targetMessageId));
@@ -105,7 +138,7 @@ export async function selectExpressions({context={},args={},locale='zh',random=M
   signal?.throwIfAborted();
   let parsed;
   try {parsed=JSON.parse(String(raw?.text??raw).replace(/^\s*`{3}(?:json)?\s*/iu,'').replace(/\s*`{3}\s*$/u,''));}
-  catch(error){if(!(error instanceof SyntaxError))throw error;return result([],locale,'fine',1,{retrievalMode,warning:'COMPANION_INVALID_EXPRESSION_SELECTION'});}
+  catch(error){if(!(error instanceof SyntaxError))throw error;return finish([],locale,'fine',1,{retrievalMode,warning:'COMPANION_INVALID_EXPRESSION_SELECTION'});}
   const ids=Array.isArray(parsed?.selected_ids)?[...new Set(parsed.selected_ids)].filter(id=>Number.isInteger(id)&&id>=1&&id<=candidates.length).slice(0,settings.maxSelected):[];
-  return result(ids.map(id=>candidates[id-1]),locale,'fine',1,{retrievalMode});
+  return finish(ids.map(id=>candidates[id-1]),locale,'fine',1,{retrievalMode});
 }

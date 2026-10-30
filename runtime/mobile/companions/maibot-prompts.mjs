@@ -1,4 +1,6 @@
+import { resolvePersona } from './profiles.mjs';
 import { companionReplyText } from './reply-text.mjs';
+import { stickerText } from './media.mjs';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { responseLanguagePrompts } from '../prompt.mjs';
@@ -50,6 +52,7 @@ export function renderMaiBotPrompt(name, locale, variables) {
 
 const copy = {
   zh: {
+    actionPolicy: '根据人格的行为习惯和当前上下文决定是否发言。明确的问题、求助和任务应可靠处理；结束语、确认或无需回应的通知可以用 companion_quiet 自然收尾，不必每次追问或硬找话题。等待用户补充时使用 companion_wait。主动唤醒不代表必须发消息；若选择联系，本次只发一条有依据的可见回复，然后结束等待用户，不连续自问自答。',
     identity: '你的名字是{name}。\n{personality}',
     privateScene: '在当前场景中，你正在和用户进行一对一聊天。',
     privateHistory: '现在的上下文聊天记录只是你与这位用户当前的互动，你们之间可能有更多过去的关系和信息没有展现在上下文中。',
@@ -90,11 +93,13 @@ const copy = {
     emoji: '随本次回复附加的表情包：',
     keyword: '【关键词反应】\n最新消息命中了预设反应规则，请在回复时优先参考以下要求：\n',
     summary: '较早聊天的摘要（不是逐字原文）：\n',
+    impressions: '伙伴根据过往交流形成的暂时印象，不是已确认事实；用户当前表达和纠正优先，不据此给用户贴标签：\n',
     context: '与本次回复有关的记忆和已确认信息：\n',
     profanity: '当前未开启脏话：保留你的态度、直率和吐槽，用不含脏话的措辞表达。',
     retroExtra: '以下是你在回复时需要参考的信息，现在请你阅读以下内容，进行决策\n',
   },
   en: {
+    actionPolicy: 'Decide whether to speak from this persona’s behavior and the current context. Handle clear questions, requests for help and tasks reliably; endings, acknowledgements and notices needing no answer may close naturally with companion_quiet. Do not always ask a follow-up or force a topic. Use companion_wait for expected additions. A proactive wake does not require a message; if you reach out, send only one grounded visible reply, then stop and wait for the user instead of continuing a conversation with yourself.',
     identity: 'Your name is {name}.\n{personality}',
     privateScene: 'In the current scenario, you are having a one-to-one conversation with the user.',
     privateHistory: 'The current chat log only shows your current interactions with this user. There may be more past relationships and information between you that are not shown in the context.',
@@ -135,6 +140,7 @@ const copy = {
     emoji: 'Sticker attached to this reply: ',
     keyword: '[Keyword reaction]\nThe latest message matched configured reaction rules. Refer to these requirements in your reply:\n',
     summary: 'Summary of earlier conversation (not a verbatim transcript):\n',
+    impressions: 'Tentative impressions formed from earlier conversations, not confirmed facts. The user’s current words and corrections take precedence; do not label the user from these impressions:\n',
     context: 'Relevant memories and confirmed information for this reply:\n',
     profanity: 'Profanity is currently disabled. Keep your opinions, directness, and teasing, using wording without swear words.',
     retroExtra: 'Read the following reference information when deciding how to reply:\n',
@@ -142,9 +148,9 @@ const copy = {
 };
 
 function localProfile(profile, locale) {
-  const l = language(locale), field = value => typeof value === 'string' ? value : value?.[l] ?? '';
+  const l = language(locale);
   return { ...profile, name: !profile.nameCustomized && profile.name === profile.displayName?.zh ? profile.displayName[l] : profile.name,
-    personality: profile.personalityOverride?.trim() || field(profile.personality), behaviorStyle: field(profile.behaviorStyle), replyStyle: field(profile.replyStyle) };
+    ...resolvePersona(profile, l) };
 }
 
 function privateAttention(locale, options) {
@@ -192,7 +198,7 @@ export function buildPlannerPrompt({ profile, locale = 'zh', kind = 'chat', opti
     subagent_rule: kind === 'chat' && can('companion_work') ? c.work : '',
   });
   if (kind === 'chat') {
-    prompt += '\n' + c.protocol + '\n' + c.quotePolicy;
+    prompt += '\n' + c.protocol + '\n' + c.quotePolicy + '\n' + c.actionPolicy;
     if (can('companion_stickers') && can('companion_emoji')) prompt += '\n' + c.stickers;
     if (options.useNewSendLogic && can('companion_stickers')) prompt += '\n' + c.attachedEmoji;
   } else prompt += '\n' + c.protocol + '\n' + c.workOwner;
@@ -220,9 +226,11 @@ function temporaryStyle(locale, options) {
   return candidates[Math.floor(random() * candidates.length)];
 }
 
-function messageText(message) {
-  if (typeof message.text === 'string') return message.role === 'assistant' ? companionReplyText(message.text) : message.text;
-  return (message.content ?? []).filter(block => block.type === 'text').map(block => block.text).join('\n');
+function messageText(message, locale='zh') {
+  const text=typeof message.text === 'string'
+    ? message.role === 'assistant' ? companionReplyText(message.text) : message.text
+    : (message.content ?? []).filter(block => block.type === 'text').map(block => block.text).join('\n');
+  return [text,stickerText(message,language(locale))].filter(Boolean).join('\n');
 }
 
 function realHistory(context) {
@@ -240,7 +248,7 @@ function historyMessages(history, locale, options) {
     const voiceSource = message.type === 'voice' ? (language(locale) === 'zh'
       ? '[用户发送的是语音消息。下文仅为转写；空转写表示未识别到内容，不要猜测录音内容。]\n'
       : '[The user sent a voice message. The following is its transcript; an empty transcript means no speech was recognized. Do not invent the recording content.]\n') : '';
-    const content = [{ type: 'text', text: (metadata && message.role !== 'assistant' ? '[' + metadata + ']\n' : '') + voiceSource + messageText(message) + mediaText }];
+    const content = [{ type: 'text', text: (metadata && message.role !== 'assistant' ? '[' + metadata + ']\n' : '') + voiceSource + messageText(message,locale) + mediaText }];
     if (options.enableVisualMessage) {
       const existing = (message.content ?? []).filter(block => block.type === 'image');
       content.push(...(existing.length ? structuredClone(existing) : attachments.filter(upload => upload.mediaType?.startsWith('image/') && upload.ref).map(upload => ({ type: 'image', attachment: structuredClone(upload.ref) }))));
@@ -254,7 +262,7 @@ function historyMessages(history, locale, options) {
 
 function keywordReactions(target, history, options, locale) {
   const latest = target ?? history.findLast(message => message.role === 'user');
-  const text = latest ? messageText(latest) : '', reactions = [];
+  const text = latest ? messageText(latest,locale) : '', reactions = [];
   for (const rule of options.keywordReaction?.keywordRules ?? []) {
     if (rule.keywords?.some(keyword => keyword && text.includes(keyword))) reactions.push(rule.reaction);
   }
@@ -270,22 +278,23 @@ function keywordReactions(target, history, options, locale) {
 function contextReference(context, locale) {
   const c = copy[language(locale)], references = [
     ...(context.memories ?? []).map(record => record.payload?.text ?? record.text),
-    ...(context.impressions ?? []).map(record => record.text),
     ...(context.jargon ?? []).map(record => record.term + ': ' + record.meaning),
   ].filter(Boolean);
-  return [context.summary ? c.summary + context.summary : '', references.length ? c.context + references.join('\n') : ''].filter(Boolean).join('\n\n');
+  const impressions = (context.impressions ?? []).map(record => record.text).filter(Boolean);
+  return [context.summary ? c.summary + context.summary : '', references.length ? c.context + references.join('\n') : '',
+    impressions.length ? c.impressions + impressions.join('\n') : ''].filter(Boolean).join('\n\n');
 }
 
 function targetBlock(target, locale) {
   const c = copy[language(locale)];
   if (target?.type === 'task') return renderMaiBotTemplate(c.taskTarget, { id: target.id });
-  return target ? renderMaiBotTemplate(target.role === 'assistant' ? c.selfTarget : c.target, { id: target.id, text: messageText(target) }) : c.noTarget;
+  return target ? renderMaiBotTemplate(target.role === 'assistant' ? c.selfTarget : c.target, { id: target.id, text: messageText(target,locale) }) : c.noTarget;
 }
 
 function taskReference(target, locale) {
   if (target?.type !== 'task') return '';
   const c = copy[language(locale)], task = target.task;
-  const reference = renderMaiBotTemplate(c.taskReference, { id: target.id, title: task.title ?? messageText(target),
+  const reference = renderMaiBotTemplate(c.taskReference, { id: target.id, title: task.title ?? messageText(target,locale),
     state: c.taskStates[task.state] ?? task.state, summary: task.summary ?? '' });
   return task.error ? reference + '\n' + c.taskError + task.error : reference;
 }
@@ -343,7 +352,7 @@ export function buildReplyerRequest({ profile, locale = 'zh', context = {}, args
   const repeated = target && history.findLast(message => message.role === 'assistant' && message.replyTo === target.id);
   const attachment = [args.attach_image || args.attach_pic ? c.image + JSON.stringify(args.attach_image ?? args.attach_pic) : '',
     args.emoji_id ? c.emoji + (context.availableStickers?.find(sticker => sticker.id === args.emoji_id)?.description ?? args.emoji_id) : ''].filter(Boolean).join('\n');
-  add([clock, targetBlock(target, locale), repeated ? renderMaiBotTemplate(c.repeated, { text: messageText(repeated) }) : '', replyRequirements,
+  add([clock, targetBlock(target, locale), repeated ? renderMaiBotTemplate(c.repeated, { text: messageText(repeated,locale) }) : '', replyRequirements,
     keywordReactions(target?.type === 'task' ? null : target, history, options, locale), attachment ? c.attachment + attachment : '', c.final].filter(Boolean).join('\n\n'));
   add(args.reply_style === '简短表达' ? c.short : args.reply_style === '长回复' ? c.long : '');
   return { system, messages };

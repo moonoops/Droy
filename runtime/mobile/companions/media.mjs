@@ -8,6 +8,18 @@ const stickers = [
     en:{label:'Happy',description:'A white dumpling laughs with closed eyes and open arms, expressing cheerful delight.',tags:['happy','amused','celebrate']} },
   { id:'test-sticker-curious',zh:{label:'疑惑',description:'白色团子歪头思考，头上有问号，表示疑惑或好奇。',tags:['疑惑','好奇','思考']},
     en:{label:'Curious',description:'A white dumpling tilts its head with a question mark, expressing curiosity or puzzlement.',tags:['puzzled','curious','thinking']} },
+  { id:'sticker-support',zh:{label:'支持你',description:'白色团子抱着粉色爱心微笑，表达关心、支持或安慰。',tags:['关心','支持','安慰']},
+    en:{label:'Here for you',description:'A white dumpling smiles while holding a pink heart, offering care, support or comfort.',tags:['care','support','comfort']} },
+  { id:'sticker-rest',zh:{label:'休息一下',description:'白色团子闭着眼睛，旁边有月亮和星星，表达困倦、休息或晚安。',tags:['困倦','休息','晚安']},
+    en:{label:'Take a rest',description:'A white dumpling closes its eyes beside a moon and star, expressing sleepiness, rest or goodnight.',tags:['sleepy','rest','goodnight']} },
+  { id:'sticker-surprised',zh:{label:'惊讶',description:'白色团子睁圆眼睛、张着嘴，旁边有感叹号，表达惊讶或意外。',tags:['惊讶','意外']},
+    en:{label:'Surprised',description:'A white dumpling opens its eyes and mouth wide beside an exclamation mark, expressing surprise.',tags:['surprised','unexpected']} },
+  { id:'sticker-sad',zh:{label:'难过',description:'白色团子低垂眉眼、流下一滴眼泪，表达难过、失落或委屈。',tags:['难过','失落','委屈']},
+    en:{label:'Sad',description:'A white dumpling lowers its brows and sheds a tear, expressing sadness, disappointment or hurt.',tags:['sad','disappointed','hurt']} },
+  { id:'sticker-wave',zh:{label:'挥挥手',description:'白色团子微笑着挥手，可以表示打招呼或道别。',tags:['招呼','道别','挥手']},
+    en:{label:'Wave',description:'A white dumpling smiles and waves, offering a greeting or goodbye.',tags:['hello','goodbye','wave']} },
+  { id:'sticker-thinking',zh:{label:'想一想',description:'白色团子托着下巴，头上有三个圆点，表示思考或斟酌。',tags:['思考','斟酌']},
+    en:{label:'Thinking',description:'A white dumpling rests a hand on its chin under three dots, expressing thought or consideration.',tags:['thinking','considering']} },
 ];
 const copy={
   zh:{format:'暂不支持解析这个文件格式。可以提供 UTF-8 文本、JSON、CSV 或 Markdown，也可以发送图片。',
@@ -36,6 +48,22 @@ const metadata=upload=>({attachmentId:upload.id,name:upload.name,mediaType:uploa
 export function stickerCatalog(locale='zh') {
   const language=locale==='en'?'en':'zh';
   return stickers.map(sticker=>({id:sticker.id,url:'/droy/companions/assets/'+sticker.id+'.png',...structuredClone(sticker[language])}));
+}
+
+/** Resolve meaning from the shipped catalog, never from message-supplied metadata. */
+export function stickerContext(message, locale='zh') {
+  if(typeof message?.stickerId!=='string'||!message.stickerId)return {};
+  const sticker=stickerCatalog(locale).find(item=>item.id===message.stickerId);
+  return {stickerId:message.stickerId,...(sticker?{sticker:{id:sticker.id,label:sticker.label,
+    description:sticker.description,tags:sticker.tags}}:{})};
+}
+
+export function stickerText(message, locale='zh') {
+  const {stickerId,sticker}=stickerContext(message,locale);
+  if(!stickerId)return '';
+  const known=sticker?`${sticker.label}: ${sticker.description}`
+    :locale==='en'?'Meaning unknown; do not infer an emotion.':'含义未知，不要推测情绪。';
+  return locale==='en'?`[Sticker ${JSON.stringify(stickerId)} — ${known}]`:`[表情 ${JSON.stringify(stickerId)} — ${known}]`;
 }
 
 async function sharedUpload({store,companionId,attachmentId,signal}) {

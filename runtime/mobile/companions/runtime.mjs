@@ -1,4 +1,6 @@
 import { companionReplyText } from './reply-text.mjs';
+import { inputBatchDelay } from './input-timing.mjs';
+import { buildProactiveContext,proactiveDecisionPrompt,parseProactiveDecision,proactiveNextCheckAt } from './proactive-policy.mjs';
 import { randomUUID } from 'node:crypto';
 import { mkdir,realpath } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -7,9 +9,11 @@ import { defineTool } from '@deepseek-ai/dsh-tools';
 import { createUserMessage,createAssistantMessage } from '@deepseek-ai/dsh-llm';
 import { applyWebSearchTool,applyWebFetchTool } from '@deepseek-ai/dsh-tool-web';
 import { CompanionMemory } from './memory.mjs';
+import { CompanionMemorySpaces } from './memory-spaces.mjs';
+import { consumeCompanionMemoryAuthorization } from './memory-management.mjs';
 import { CompanionLearning } from './learning.mjs';
 import { installCompanionMaintenance } from './maintenance-runtime.mjs';
-import { stickerCatalog,readSharedAttachment,replyAttachment } from './media.mjs';
+import { stickerCatalog,stickerContext,readSharedAttachment,replyAttachment } from './media.mjs';
 import { prepareReply,publishReply } from './delivery.mjs';
 import { localizedProfile, profileName } from './profiles.mjs';
 import { dialoguePrompts } from './dialogue-prompts.mjs';
@@ -47,17 +51,18 @@ const memorySourceIds=(id,records)=>records.flatMap(record=>[
 export class CompanionRuntime {
   constructor({ctx,store,directory,options = {},notify = () => {}}) {
     this.ctx = ctx; this.store = store; this.directory = directory; this.notify = notify;
-    this.options = {debounceMs:650,historyMessages:80,learningMessages:6,
+    this.options = {historyMessages:80,learningMessages:6,
       proactiveIntervalMs:1800000,proactiveIdleMs:900000,...options};
     this.owners = new Map(); this.live = new Map(); this.memories = new Map(); this.states = new Map();
     this.listeners = new Set(); this.handles = new Map(); this.routes = new WeakMap(); this.closed = false;
     this.lifetime=new AbortController();this.background=new Set();this.decorated=new WeakSet();
     this.restrictedAgents=new Map();
+    this.memoryManagement=new Set();
     this.workspaceStarts=new Map();this.instanceStarts=new Map();
-    this.contextSources=new Map();this.learningSignals=new Map();this.turnMemories=new Map();
+    this.contextSources=new Map();this.learningSignals=new Map();this.turnMemories=new Map();this.turnProfiles=new Map();this.plannerRevisions=new WeakMap();
     this.learner=new CompanionLearning({store,memoryFor:id=>this.memory(id),generate:(...args)=>this.generate(...args),
       getProfile:id=>this.profileForUse(id,{requireModel:false}),
-      getLocale:()=>this.locale(),options:{learningUserMessages:this.options.learningMessages}});
+      getLocale:()=>this.locale(),options:{learningUserMessages:this.options.learningMessages,factLearningUserMessages:this.options.factLearningMessages??1}});
     this.maintenance=installCompanionMaintenance(this);
   }
   locale() { return resolveMobileLocale(this.ctx); }
@@ -122,6 +127,8 @@ export class CompanionRuntime {
   isRestrictedAgent(agent) { return !!agent && this.ownsSession(agent.id) && this.decorated.has(agent); }
   isRestrictedSession(id) { return this.isRestrictedAgent(this.restrictedAgents.get(String(id))); }
   async initialize() {
+    this.memorySpaces=await CompanionMemorySpaces.open({directory:this.directory});
+    await this.recoverMemoryManagement();
     const profiles=await this.store.profiles(),managed=new Set(profiles.map(profile=>profile.workspaceId).filter(Boolean));
     if(!this.ctx.workspaceRegistry.list().some(workspace=>!managed.has(workspace.id))) {
       const path=this.ctx.workingDirectory.defaultDirectory,title=translateBackendText('默认空间',this.locale());
@@ -163,7 +170,7 @@ export class CompanionRuntime {
   }
   async start() {
     if(this.started||this.closed)return;this.started=true;
-    for(const profile of await this.store.profiles())await this.startInstance(profile.id);
+    for(const profile of await this.store.profiles())if(!this.memoryManagement.has(profile.id))await this.startInstance(profile.id);
   }
   prepareWorkspace(id) {
     if(this.workspaceStarts.has(id))return this.workspaceStarts.get(id);
@@ -196,12 +203,12 @@ export class CompanionRuntime {
       const covered=new Set(saved.replyDraft?.sourceMessageIds??[]);
       if(recoveringWait) {
         state.phase='waiting';this.scheduleWait(id,saved);
-      } else if(saved.replyDraft?.sourceMessageIds?.length&&state.pending.every(item=>covered.has(item.id))) {
+      } else if((saved.replyDraft?.sourceMessageIds?.length||saved.replyDraft?.proactive)&&state.pending.every(item=>covered.has(item.id))) {
         state.chatRecoveryScheduled=true;
-        state.timer=this.maintenance.recovery('chat:'+id,Date.now()+this.options.debounceMs,()=>{state.chatRecoveryScheduled=false;return this.recoverReply(id).catch(error=>this.report(id,error));});
+        state.timer=this.maintenance.recovery('chat:'+id,Date.now()+(this.options.debounceMs??0),()=>{state.chatRecoveryScheduled=false;return this.recoverReply(id).catch(error=>this.report(id,error));});
       } else {
         if(saved.replyDraft)await this.store.updateState(id,{replyDraft:null});
-        if(state.pending.length)state.timer=this.maintenance.recovery('chat:'+id,Date.now()+this.options.debounceMs,()=>this.flush(id).catch(error=>this.report(id,error)));
+        if(state.pending.length)state.timer=this.maintenance.recovery('chat:'+id,Date.now()+(this.options.debounceMs??0),()=>this.flush(id).catch(error=>this.report(id,error)));
         else this.scheduleWait(id,saved);
       }
       this.scheduleProactive(id,saved.proactiveNextAt);
@@ -209,7 +216,7 @@ export class CompanionRuntime {
       for(const owner of await this.store.listSessions(id,{kind:'work'})) {
         const taskMessage=await this.store.getMessage(id,owner.taskId);
         if(!taskMessage?.contextExcluded&&['running','queued','cancelling'].includes(taskMessage?.task?.state)) {
-          const timer=this.maintenance.recovery('work:'+owner.sessionId,Date.now()+this.options.debounceMs,()=>{
+          const timer=this.maintenance.recovery('work:'+owner.sessionId,Date.now()+(this.options.debounceMs??0),()=>{
             state.workRecoveryTimers.delete(timer);
             const operation=this.resumeWork(owner);this.background.add(operation);
             operation.catch(error=>this.report(id,error)).finally(()=>this.background.delete(operation));
@@ -260,9 +267,21 @@ export class CompanionRuntime {
     };
   }
   async memory(id) {
-    await this.store.getProfile(id);
+    if(this.closed)fail('COMPANION_CLOSED');
+    if(this.memoryManagement.has(id))fail('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS');
+    const profile=await this.store.getProfile(id);
+    if(this.memoryManagement.has(id))fail('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS');
+    if(this.closed)fail('COMPANION_CLOSED');
     if (!this.memories.has(id)) {
-      const opening = CompanionMemory.open({directory:this.directory,companionId:id});
+      const opening = CompanionMemory.open({directory:this.directory,companionId:id,profile,
+        spaces:this.memorySpaces,embed:this.options.embed,validateSources:async(sources,binding)=>{
+          const saved=await this.store.getState(id),boundary=Math.max(Number((binding.sourceCaptureBoundary??'seq:0').slice(4)),Number((saved.forgottenThrough??'seq:0').slice(4)));
+          for(const source of sources) {
+            if(!source.startsWith('im:'+id+':'))continue;
+            const messageId=source.slice(('im:'+id+':').length),cursor=await this.store.getMessageCursor(id,messageId);
+            if(!cursor||Number(cursor.slice(4))<=boundary||(saved.forgottenMessageIds??[]).includes(messageId))fail('MEMORY_SOURCE_FORGOTTEN');
+          }
+        }});
       this.memories.set(id,opening);
       opening.catch(()=>this.memories.delete(id));
     }
@@ -297,10 +316,10 @@ export class CompanionRuntime {
     }
     const memories={items:profile.settings.memoryEnabled?recalled.items:[]};
     const [clock,userProfile]=await Promise.all([this.clock(signal),this.store.getUserProfile()]);
-    const result={...sharedContext(state,memories,messages),...clock,
+    const result={...sharedContext(state,memories,messages,this.locale()),...clock,
       userProfile:{name:userProfile.name,bio:userProfile.bio??''},availableStickers:stickerCatalog(this.locale())};
     if(owner) {
-      const sourceContext={contextSourceIds:[...new Set([...messages.map(item=>item.id),
+      const sourceContext={contextSourceIds:[...new Set([...messages.map(item=>item.id),...(this.state(id).proactiveIntent?.sourceIds??[]),
         ...(this.contextSources.get(owner.sessionId)?.contextSourceIds??[]).filter(source=>source.startsWith('memory:')),
         ...memorySourceIds(id,memories.items),
         ...['impressions','expressions','jargon'].flatMap(key=>(result[key]??[]).flatMap(item=>item.sourceIds??[]))])],
@@ -315,14 +334,14 @@ export class CompanionRuntime {
     }
     return result;
   }
-  async generate(profile,system,input,{signal,onDelta,messages,sessionId=profile.chatSessionId ?? 'companion:'+profile.id} = {}) {
+  async generate(profile,system,input,{signal,onDelta,messages,preparedCall,sessionId=profile.chatSessionId ?? 'companion:'+profile.id} = {}) {
     signal=signal?AbortSignal.any([signal,this.lifetime.signal]):this.lifetime.signal;
     signal.throwIfAborted();
-    const {model}=await this.profileForUse(profile.id);
+    const model=preparedCall?.config??(await this.profileForUse(profile.id)).model;
     signal.throwIfAborted();
     // Resolve once per model request. Later global/profile edits apply to the
     // next request, while this prepared stream keeps its selected route.
-    const prepared = await this.ctx.llm.prepareCall(model,signal);
+    const prepared = preparedCall ?? await this.ctx.llm.prepareCall(model,signal);
     const history=messages?.map(item=>item.role==='assistant'
       ?createAssistantMessage({content:item.content,source:{provider:model.provider,model:model.model}})
       :createUserMessage({content:item.content,source:{kind:'user'}}));
@@ -385,8 +404,10 @@ export class CompanionRuntime {
       if(!agent.ctx.tools.get('web_fetch'))applyWebFetchTool(agent.ctx,30000,200000);
     }
     agent.ctx.on('system-prompt/assemble',async (_assembly,context,next) => {
+      const inputRevision=this.state(owner.companionId).revision;
       const assembly = await next();
       const profile = await this.profileForUse(owner.companionId), locale = this.locale();
+      this.turnProfiles.set(owner.sessionId,structuredClone(profile));this.plannerRevisions.set(agent,inputRevision);
       this.routes.set(agent,profile.model);
       assembly.variables = {...assembly.variables,provider:profile.model.provider,model:profile.model.model};
       assembly.sections = assembly.sections.filter(section=>![MOBILE_PROMPT_SECTION,COMPANION_PROMPT_SECTION].includes(section.name));
@@ -411,7 +432,19 @@ export class CompanionRuntime {
     },{prepend:true});
     const register = (name,descriptionKey,parameters,execute) => agent.ctx.tools.register(defineTool({
       name,description:this.copy()[descriptionKey],parameters,output:jsonOutput,
-      execute:async (args,exec) => this.maintenance.run('tool:'+name,()=>{exec.signal?.throwIfAborted();return execute(args,exec);}),
+      execute:async (args,exec) => this.maintenance.run('tool:'+name,()=>{
+        exec.signal?.throwIfAborted();
+        const state=this.state(owner.companionId);
+        if(owner.kind==='chat'&&['companion_reply','companion_emoji','companion_work'].includes(name)) {
+          if(state.pending.length||state.dispatching) {
+            exec.concludeTurn?.();return {superseded:true,reason:'new_messages_pending'};
+          }
+          const plannedRevision=this.plannerRevisions.get(agent);
+          if(plannedRevision!==undefined&&plannedRevision!==state.revision)
+            return {superseded:true,reason:'new_messages_queued'};
+        }
+        return execute(args,exec);
+      }),
     }));
     register('companion_reply','replyDescription',{
       msg_id:{type:'string',required:true},reply_reference:{type:'string',required:true},
@@ -422,8 +455,9 @@ export class CompanionRuntime {
       attach_pic:{type:'array',items:{type:'object',additionalProperties:false,properties:{msg_id:{type:'string',required:true},index:{type:'integer'}}}},
       ...(this.options.maibot?.useNewSendLogic?{attach_emoji:{type:'integer'}}:{}),
     },async(args,exec)=>{
+      const proactive=!!this.state(owner.companionId).proactiveIntent;
       const result = await this.reply(owner,args,exec.signal);
-      if(owner.kind==='work')exec.concludeTurn();
+      if(owner.kind==='work'||proactive)exec.concludeTurn();
       return result;
     });
     register('companion_wait','waitDescription',{seconds:{type:'number',required:true}},(args,exec)=>this.wait(owner,args,exec.signal));
@@ -434,7 +468,10 @@ export class CompanionRuntime {
       const profile = await this.store.getProfile(owner.companionId);
       if (!profile.settings.memoryEnabled) return {enabled:false,items:[]};
       const before=await this.store.getState(owner.companionId),turnRevision=this.state(owner.companionId).revision;
-      const result=await (await this.memory(owner.companionId)).query({text:args.query});
+      const page=await this.learner.contextMessages(owner.companionId,{signal:exec.signal});
+      let result;
+      try {result=await this.learner.recall(owner.companionId,page.messages,{query:args.query,signal:exec.signal});}
+      catch(error) {if(error.code==='COMPANION_LEARNING_STALE')fail('COMPANION_REPLY_SUPERSEDED');throw error;}
       exec.signal?.throwIfAborted();
       const saved=await this.store.getState(owner.companionId);
       if((saved.memoryRevision??0)!==(before.memoryRevision??0)||this.state(owner.companionId).revision!==turnRevision)fail('COMPANION_REPLY_SUPERSEDED');
@@ -462,7 +499,13 @@ export class CompanionRuntime {
         const message=await this.store.getMessage(owner.companionId,source);
         if(message?.role!=='user'||message.contextExcluded)fail('COMPANION_LEARNING_SOURCE_REQUIRED');
       }
-      return (await this.memory(owner.companionId)).remember({text:args.text,kind:args.kind,sourceRefs:args.sourceIds});
+      const memory=await this.memory(owner.companionId),evidence=[];
+      for(const source of args.sourceIds) {
+        const item=await this.store.getMessage(owner.companionId,source);
+        const text=item.text||item.transcript;if(!text)fail('COMPANION_LEARNING_SOURCE_REQUIRED');
+        evidence.push({sourceRef:memory.sourceRef(source),text,occurredAt:item.createdAt,role:'user'});
+      }
+      return memory.remember({text:args.text,kind:args.kind,sourceRefs:args.sourceIds,evidence,assertion:'model_inference'});
     });
     register('companion_forget','forgetDescription',{recordId:{type:'string',required:true},expectedRevisionId:{type:'string',required:true},requestMessageId:{type:'string',required:true}},async(args,exec)=>{
       const request=await this.store.getMessage(owner.companionId,args.requestMessageId);
@@ -478,7 +521,10 @@ export class CompanionRuntime {
       return this.startWork(owner.companionId,args);
     });
     register('companion_stickers','stickersDescription',{},()=>({items:this.stickers()}));
-    register('companion_emoji','emojiDescription',{msg_id:{type:'string'},quoteReply:{type:'boolean'}},(args,exec)=>this.sendEmoji(owner,args,exec.signal));
+    register('companion_emoji','emojiDescription',{msg_id:{type:'string'},quoteReply:{type:'boolean'}},async(args,exec)=>{
+      const proactive=!!this.state(owner.companionId).proactiveIntent;
+      const result=await this.sendEmoji(owner,args,exec.signal);if(proactive)exec.concludeTurn();return result;
+    });
     agent.ctx.tools.register(defineTool({name:'companion_attachment',description:this.copy().attachmentDescription,
       parameters:{attachmentId:{type:'string',required:true}},
       output:{schema:{type:'json'},render:(_args,value)=>[
@@ -487,7 +533,7 @@ export class CompanionRuntime {
       ]},execute:(args,exec)=>readSharedAttachment({ctx:this.ctx,store:this.store,companionId:owner.companionId,
         attachmentId:args.attachmentId,signal:exec.signal,locale:this.locale()})}));
     this.decorated.add(agent);this.restrictedAgents.set(agent.id,agent);
-    agent.ctx.effect(()=>()=>{this.restrictedAgents.delete(agent.id);this.contextSources.delete(agent.id);this.turnMemories.delete(agent.id);this.decorated.delete(agent);});
+    agent.ctx.effect(()=>()=>{this.restrictedAgents.delete(agent.id);this.contextSources.delete(agent.id);this.turnMemories.delete(agent.id);this.turnProfiles.delete(agent.id);this.decorated.delete(agent);});
   }
   async submit(id,input) {
     const finish=this.beginChat(id);
@@ -498,6 +544,7 @@ export class CompanionRuntime {
     const {clientId,text='',attachments=[],voice,replyTo,stickerId} = input;
     if (!text.trim() && !attachments.length && !voice && !stickerId) fail('COMPANION_EMPTY_MESSAGE');
     const state=this.state(id),existing=clientId ? await this.store.getMessage(id,clientId):null;
+    if(this.memoryManagement.has(id))fail('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS');
     const saved=await this.store.appendMessage(id,{...(clientId?{id:clientId,clientId}:{}),role:'user',
       type:voice?'voice':stickerId?'sticker':attachments[0]?.mediaType?.startsWith('image/')?'image':attachments.length?'file':'text',
       text,attachments,...(voice?{voice}:{}),...(replyTo?{replyTo,quoteReply:true}:{}),...(stickerId?{stickerId}:{}),
@@ -517,12 +564,16 @@ export class CompanionRuntime {
     state.revision++; state.pending.push(saved); state.replyAbort?.abort();
     clearTimeout(state.timer); clearTimeout(state.waitTimer);
     this.maintenance.cancelRecovery('chat:'+id);this.maintenance.cancelRecovery('wait:'+id);
-    if(this.options.maibot?.messageSteering)state.waitAbort?.abort('new_message');
+    state.waitAbort?.abort('new_message');
+    state.proactiveIntent=null;state.proactiveAbort?.abort('new_message');
     await this.store.updateState(id,current=>({...(state.waitAbort?{}:{waitingUntil:null,pendingIntent:null}),replyDraft:null,
-      ...(saved.role==='user'?{lastUserAt:new Date().toISOString()}:{}),
+      ...(saved.role==='user'?{lastUserAt:saved.createdAt??new Date().toISOString(),proactiveUnansweredCount:0}:{}),
       pendingMessageIds:[...new Set([...(current.pendingMessageIds??[]),saved.id])]}));
     state.phase='thinking'; this.emit(id);
-    state.timer=setTimeout(()=>this.flush(id).catch(error=>this.report(id,error)),this.options.debounceMs);
+    const now=Date.now();state.batchStartedAt??=now;
+    const delay=inputBatchDelay({now,firstAt:state.batchStartedAt,count:state.pending.length,lastReplyAt:state.lastReplyAt,
+      imageOnly:saved.type==='image'&&!saved.text?.trim(),overrideMs:this.options.debounceMs});
+    state.timer=setTimeout(()=>this.flush(id).catch(error=>this.report(id,error)),delay);
     } finally {finish();}
   }
   async transcribeVoice(id,messageId,text) {
@@ -557,14 +608,16 @@ export class CompanionRuntime {
   }
   async flush(id) {
     const finish=this.beginChat(id),cancelRevision=this.state(id).chatCancelRevision;
+    this.state(id).dispatching=(this.state(id).dispatching??0)+1;
     try {
+    this.state(id).batchStartedAt=null;clearTimeout(this.state(id).timer);
     const state=this.state(id),pending=await this.activePending(id,state.pending.splice(0).map(item=>item.id));
     if(cancelRevision!==state.chatCancelRevision)return;
     if (!pending.length || this.closed) {if(!this.closed){state.phase='idle';this.emit(id,'status');}return;}
     let agent;
     try {agent=await this.agent(id);}catch(error){if(cancelRevision===state.chatCancelRevision)state.pending.unshift(...pending);throw error;}
     if(this.closed||cancelRevision!==state.chatCancelRevision)return;
-    const content=pending.filter(item=>item.role==='user').map(item=>({id:item.id,text:item.text,type:item.type,voice:item.voice,attachments:item.attachments,replyTo:item.replyTo}));
+    const content=pending.filter(item=>item.role==='user').map(item=>({id:item.id,text:item.text,type:item.type,voice:item.voice,attachments:item.attachments,replyTo:item.replyTo,...stickerContext(item,this.locale())}));
     const taskResults=pending.filter(item=>item.role==='assistant'&&item.type==='task').map(item=>({taskId:item.id,...item.task}));
     const input=createUserMessage({source:{kind:'user'},content:[
       {type:'text',text:JSON.stringify({userMessages:content.map(item=>({...item,attachments:item.attachments?.map(upload=>({id:upload.id,name:upload.name,mediaType:upload.mediaType}))})),
@@ -576,24 +629,17 @@ export class CompanionRuntime {
     state.turnAction=null;
     state.inFlightIds=[...new Set([...(state.inFlightIds??[]),...pending.map(item=>item.id)])];
     if (agent.status === 'running') agent.steer(input); else agent.followup(input);
-    } finally {finish();}
+    } finally {this.state(id).dispatching--;finish();}
   }
   async reply(owner,args,signal) {
     const finish=owner.kind==='chat'?this.beginChat(owner.companionId):()=>{};
     try {
     const id=owner.companionId,state=this.state(id),revision=state.revision;
-    const profile=await this.profileForUse(id),locale=this.locale();
+    const profile=this.turnProfiles.get(owner.sessionId)??await this.profileForUse(id),locale=this.locale();
     const abort=new AbortController(); if(owner.kind==='chat')state.replyAbort=abort;
     const combined=signal ? AbortSignal.any([signal,abort.signal]):abort.signal;
     if(owner.kind==='chat')state.phase='typing'; this.emit(id,'status');
     const context=await this.context(id,owner,combined),options=this.options.maibot??{};
-    if(options.enableVisualMessage)for(const item of context.messages)for(const attachment of item.attachments??[]) {
-      if(attachment.mediaType?.startsWith('image/')) {
-        const verified=await readSharedAttachment({ctx:this.ctx,store:this.store,companionId:id,
-          attachmentId:attachment.id,signal:combined,locale});
-        if(verified.kind==='image')attachment.ref=verified.attachment;
-      }
-    }
     const replyTo=args.msg_id||args.replyTo;
     const target=replyTo?context.messages.find(item=>item.id===replyTo):null;
     if(args.quoteReply!==undefined&&typeof args.quoteReply!=='boolean')fail('COMPANION_INVALID_INPUT');
@@ -602,9 +648,21 @@ export class CompanionRuntime {
       {messages:messages.map(item=>({...item,content:typeof item.content==='string'?[{type:'text',text:item.content}]:item.content})),
         signal:requestSignal??combined,sessionId:owner.sessionId});
     const expressions=await selectExpressions({context,args,locale,generate,signal:combined,
-      random:options.random,options:options.expression});
-    const request=buildReplyerRequest({profile,locale,context,args,expressions:expressions.prompt,kind:owner.kind,options});
-    const text=companionReplyText(await generate(request));
+      random:options.random,options:options.expression,profile});
+    const route=await this.profileForUse(id),preparedCall=await this.ctx.llm.prepareCall(route.model,combined);
+    const visual=options.enableVisualMessage!==false&&(preparedCall.inputModalities
+      ?preparedCall.inputModalities.includes('image'):options.enableVisualMessage===true);
+    if(visual)for(const item of context.messages)for(const attachment of item.attachments??[]) {
+      if(attachment.mediaType?.startsWith('image/')) {
+        const verified=await readSharedAttachment({ctx:this.ctx,store:this.store,companionId:id,
+          attachmentId:attachment.id,signal:combined,locale});
+        if(verified.kind==='image')attachment.ref=verified.attachment;
+      }
+    }
+    const request=buildReplyerRequest({profile,locale,context,args,expressions:expressions.prompt,kind:owner.kind,
+      options:{...options,enableVisualMessage:visual}});
+    const text=companionReplyText(await this.generate(profile,request.system,null,{messages:request.messages.map(item=>({...item,
+      content:typeof item.content==='string'?[{type:'text',text:item.content}]:item.content})),signal:combined,sessionId:owner.sessionId,preparedCall}));
     combined.throwIfAborted();
     if (owner.kind === 'work') {
       state.workResults ??= new Map(); state.workResults.set(owner.sessionId,text);
@@ -630,8 +688,9 @@ export class CompanionRuntime {
     if(images.length) {
       parts.push({type:'image',text:'',attachments:images,...this.contextSources.get(owner.sessionId)});
     }
-    const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts});
+    const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts,proactive:state.proactiveIntent});
     const delivered=await this.publish(id,draft,combined),ids=delivered.messageIds;
+    if(delivered.suppressed){state.phase='idle';this.emit(id,'status');return {delivered:false,reason:'proactive_no_longer_appropriate'};}
     state.delivered++;state.turnAction='reply';state.replyAbort=null;state.phase='idle';delete state.error;this.emit(id,'status');
     let notification;
     try {notification=await this.notify({companionId:id,name:localizedProfile(profile,locale).name,text,messageId:ids[0]});}
@@ -660,8 +719,10 @@ export class CompanionRuntime {
     if(!selected)fail('COMPANION_INVALID_STICKER');
     if(revision!==state.revision)fail('COMPANION_REPLY_SUPERSEDED');
     const parts=[{type:'sticker',text:'',stickerId:selected.id,quoteReply:args.quoteReply===true,...this.contextSources.get(owner.sessionId),...(args.msg_id?{replyTo:args.msg_id}:{})}];
-    const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts});
-    const delivered=await this.publish(id,draft,signal);state.turnAction='emoji';state.delivered++;this.emit(id,'status');
+    const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts,proactive:state.proactiveIntent});
+    const delivered=await this.publish(id,draft,signal);
+    if(delivered.suppressed){state.phase='idle';this.emit(id,'status');return {delivered:false,reason:'proactive_no_longer_appropriate'};}
+    state.turnAction='emoji';state.delivered++;this.emit(id,'status');
     return {delivered:true,messageIds:delivered.messageIds,stickerId:selected.id,description:selected.description};
     } finally {finish();}
   }
@@ -695,7 +756,24 @@ export class CompanionRuntime {
   }
   async publish(id,draft,signal) {
     const finish=this.beginChat(id);
-    try {return await publishReply({store:this.store,companionId:id,draft,signal,onSent:()=>this.emit(id,'message')});}
+    try {
+      let result;
+      try {result=await publishReply({store:this.store,companionId:id,draft,signal,onSent:()=>this.emit(id,'message'),
+        beforeSend:draft.proactive?async()=>{
+          const profile=await this.store.getProfile(id),clock=await this.clock(signal),saved=await this.store.getState(id);
+          if(!profile.settings.proactiveEnabled||isQuietTime(profile.settings.quietHours,new Date(clock.currentTime),clock.timeZone)
+            ||this.state(id).pending.length||Date.parse(saved.lastUserAt??'')>Date.parse(draft.createdAt))fail('COMPANION_PROACTIVE_SUPERSEDED');
+        }:undefined});}
+      catch(error) {
+        if(error.code!=='COMPANION_PROACTIVE_SUPERSEDED')throw error;
+        await this.store.completeInputs(id,draft.sourceMessageIds,{draftId:draft.id,memoryRevision:draft.memoryRevision});
+        this.state(id).proactiveIntent=null;
+        return {messageIds:[],newMessageIds:[],suppressed:true};
+      }
+      if(result.newMessageIds?.length)this.state(id).lastReplyAt=Date.now();
+      if(draft.proactive)this.state(id).proactiveIntent=null;
+      return result;
+    }
     finally {finish();}
   }
   async recoverReply(id) {
@@ -745,8 +823,9 @@ export class CompanionRuntime {
       if(state.pending.length)state.timer=setTimeout(()=>this.flush(id).catch(error=>this.report(id,error)),this.options.debounceMs);
       return;
     }
+    state.proactiveIntent=null;
     if(event.data?.reason?.kind==='completed') {
-      state.waitCount=0;this.turnMemories.delete(owner.sessionId);
+      state.waitCount=0;state.proactiveIntent=null;this.turnMemories.delete(owner.sessionId);this.turnProfiles.delete(owner.sessionId);
       const consumed=new Set(state.inFlightIds??[]);state.inFlightIds=[];
       for(const messageId of consumed)state.admitted.delete(messageId);
       await this.store.completeInputs(id,[...consumed]);
@@ -766,6 +845,7 @@ export class CompanionRuntime {
     const task=(async()=>{try {
       let result;
       do {result=await this.learner.maintain(id,{signal:AbortSignal.any([this.lifetime.signal,controller.signal])});}while(result.hasMore&&!result.discarded&&!this.closed);
+      if(!this.closed&&!controller.signal.aborted)await this.refreshProactiveSchedule(id);
       return result;
     }finally{if(this.learningSignals.get(id)===controller)this.learningSignals.delete(id);state.learningPromise=null;}})();
     state.learningPromise=task;return task;
@@ -821,20 +901,107 @@ export class CompanionRuntime {
       await this.enqueue(id,saved);throw error;
     }
   }
+  async refreshProactiveSchedule(id) {
+    const revision=this.state(id).revision,profile=await this.profileForUse(id,{requireModel:false});
+    if(!profile.settings.proactiveEnabled)return;
+    const saved=await this.store.getState(id),clock=await this.clock();
+    const {context}=await this.proactiveContext(id,profile,saved,clock);
+    if(this.closed||this.state(id).revision!==revision)return;
+    const at=proactiveNextCheckAt(context);
+    await this.store.updateState(id,{proactiveNextAt:at});this.scheduleProactive(id,at);
+  }
+  async proactiveContext(id,profile,saved,clock) {
+    const now=Date.parse(clock.currentTime),messages=[];let before;
+    // A bounded observation window is reported to the model as observed data.
+    for(let pageNumber=0;pageNumber<5;pageNumber++) {
+      const page=await this.store.listMessages(id,{limit:200,...(before?{before}:{})});
+      messages.unshift(...page.messages);
+      if(!page.hasMore||!page.nextBefore||page.messages.some(item=>Date.parse(item.createdAt)<now-7*86400000))break;
+      before=page.nextBefore;
+    }
+    const events=profile.settings.memoryEnabled?await this.learner.activeEvents(id,{signal:this.lifetime.signal}):[];
+    const known=new Set(messages.map(item=>item.id));
+    for(const source of new Set(events.flatMap(item=>item.sourceIds??[])))if(!known.has(source)&&!source.startsWith('memory:')) {
+      const item=await this.store.getMessage(id,source);if(item)messages.push(item);
+    }
+    const visible=[],baseline=Number((saved.forgottenThrough??'seq:0').slice(4));
+    for(const item of messages)if(!item.contextExcluded&&!saved.forgottenMessageIds?.includes(item.id)) {
+      const cursor=await this.store.getMessageCursor(id,item.id);
+      if(cursor&&Number(cursor.slice(4))>baseline)visible.push(item);
+    }
+    const records=profile.settings.memoryEnabled?(await(await this.memory(id)).query({states:['active'],limit:80,maxBytes:60000})).items:[],memories=[];
+    for(const record of records) {
+      if(record.companionId!==id)fail('COMPANION_SOURCE_SCOPE');
+      if(record.state!=='active'||!record.payload||record.validFrom&&Date.parse(record.validFrom)>now
+        ||record.validUntil&&Date.parse(record.validUntil)<=now)continue;
+      if(!await this.learner.hasExcludedSources(id,record.sourceRefs,saved,{memoryRefs:true}))memories.push(record);
+    }
+    let recentOtherContactAt;
+    for(const other of await this.store.profiles())if(other.id!==id) {
+      const contact=(await this.store.getState(other.id)).proactiveLastContactAt;
+      if(contact&&(!recentOtherContactAt||Date.parse(contact)>Date.parse(recentOtherContactAt)))recentOtherContactAt=contact;
+    }
+    return {context:buildProactiveContext({profile:localizedProfile(profile,this.locale()),messages:visible,memories,events,state:saved,
+      now,timeZone:clock.timeZone,recentOtherContactAt}),memories};
+  }
+  async considerProactive(id) {
+    const state=this.state(id),revision=state.revision,saved=await this.store.getState(id);
+    const profile=await this.profileForUse(id,{requireModel:false}),clock=await this.clock();
+    if(!profile.settings.proactiveEnabled||!profile.model||!saved.lastUserAt)return new Date(Date.now()+3600000).toISOString();
+    const {context,memories}=await this.proactiveContext(id,profile,saved,clock);
+    const fallback=proactiveNextCheckAt(context);
+    if(this.closed||state.revision!==revision||state.phase!=='idle'||state.pending.length||state.dispatching
+      ||this.proactiveConsidering||[...this.states.entries()].some(([other,live])=>other!==id&&live.proactiveIntent)||isQuietTime(profile.settings.quietHours,new Date(clock.currentTime),clock.timeZone))return fallback;
+    this.proactiveConsidering=id;
+    const controller=new AbortController();state.proactiveAbort=controller;
+    const signal=AbortSignal.any([controller.signal,this.lifetime.signal]);
+    try {
+      const decision=parseProactiveDecision(await this.generate(profile,proactiveDecisionPrompt(this.locale()),context,{signal}),context);
+      signal.throwIfAborted();
+      const current=await this.store.getState(id);
+      if(state.revision!==revision||(current.memoryRevision??0)!==(saved.memoryRevision??0))return fallback;
+      const nextAt=proactiveNextCheckAt(context,decision);
+      await this.store.updateState(id,{proactiveDecision:{action:decision.action,kind:decision.kind,
+        sourceIds:decision.sourceIds,candidateId:decision.candidateId??null,consideredAt:clock.currentTime},
+        proactiveFailures:0,proactiveError:null});
+      if(decision.action==='contact')await this.wake(id,{kind:'proactive',decision,expectedRevision:revision,
+        expectedMemoryRevision:saved.memoryRevision??0,expectedPersonaRevision:profile.personaRevision??1,
+        sourceIds:decision.sourceIds,evidence:context.evidence.filter(item=>decision.sourceIds.includes(item.id)),
+        memories:memories.filter(item=>decision.sourceIds.includes('memory:'+item.recordId))});
+      return nextAt;
+    } finally {
+      if(state.proactiveAbort===controller)state.proactiveAbort=null;
+      if(this.proactiveConsidering===id)this.proactiveConsidering=null;
+    }
+  }
   scheduleProactive(id,nextAt) {
     const state=this.state(id);clearTimeout(state.proactiveTimer);
     if(this.closed)return;
     const next=Date.parse(nextAt||'');
     const deadline=Number.isFinite(next)?next:Date.now()+this.options.proactiveIntervalMs;
     state.proactiveTimer=this.maintenance.proactive(id,deadline,async()=>{
-      try {
-        const saved=await this.store.getState(id),profile=await this.profileForUse(id,{requireModel:false});
-        if(profile.settings.proactiveEnabled&&profile.model&&state.phase==='idle'&&!state.pending.length&&saved.lastUserAt
-          && Date.now()-Date.parse(saved.lastUserAt)>=this.options.proactiveIdleMs)
-          await this.wake(id,{kind:'proactive'});
-        const at=new Date(Date.now()+this.options.proactiveIntervalMs).toISOString();
-        await this.store.updateState(id,{proactiveNextAt:at});this.scheduleProactive(id,at);
-      }catch(error){if(!this.closed)this.report(id,error);}
+      let at,removed=false;
+      try {at=await this.considerProactive(id);}
+      catch(error) {
+        if(!this.closed&&error.name!=='AbortError'&&error!=='new_message') {
+          this.ctx.logger.warn('COMPANION_PROACTIVE_FAILED: '+(error.code||error.name));
+          try {
+            const current=await this.store.getState(id),failures=(current.proactiveFailures??0)+1;
+            await this.store.updateState(id,{proactiveFailures:failures,proactiveError:error.code||error.name});
+            at=new Date(Date.now()+Math.min(3600000,300000*2**Math.min(failures-1,4))).toISOString();
+          }catch(storageError) {
+            removed=storageError.code==='COMPANION_NOT_FOUND';
+            if(!removed)this.ctx.logger.warn('COMPANION_PROACTIVE_STATE_FAILED: '+(storageError.code||storageError.name));
+          }
+        }
+      } finally {
+        if(!this.closed&&!removed) {
+          at??=new Date(Date.now()+this.options.proactiveIntervalMs).toISOString();
+          try {await this.store.updateState(id,{proactiveNextAt:at});}
+          catch(error) {removed=error.code==='COMPANION_NOT_FOUND';if(!removed)this.ctx.logger.warn('COMPANION_PROACTIVE_STATE_FAILED: '+(error.code||error.name));}
+          if(!this.closed&&!removed)this.scheduleProactive(id,at);
+        }
+      }
     });
   }
   scheduleWait(id,saved) {
@@ -850,10 +1017,13 @@ export class CompanionRuntime {
     const finish=this.beginChat(id);
     try {
     if (this.closed) return;
-    const live=this.state(id),revision=live.revision,continuingWait=intent.kind==='wait';
+    const live=this.state(id),revision=intent.expectedRevision??live.revision,continuingWait=intent.kind==='wait';
+    if(live.revision!==revision)return;
     const saved=continuingWait?await this.store.getState(id):null;
     if(continuingWait&&(!saved.waitingUntil||JSON.stringify(saved.pendingIntent)!==JSON.stringify(intent)))return;
     const profile=await this.store.getProfile(id);
+    if(intent.expectedPersonaRevision!==undefined&&(profile.personaRevision??1)!==intent.expectedPersonaRevision)return;
+    if(intent.expectedMemoryRevision!==undefined&&((await this.store.getState(id)).memoryRevision??0)!==intent.expectedMemoryRevision)return;
     const clock=await this.clock();
     if(!continuingWait&&(!profile.settings.proactiveEnabled||isQuietTime(profile.settings.quietHours,new Date(clock.currentTime),clock.timeZone)))return;
     if(this.closed||live.revision!==revision)return;
@@ -871,19 +1041,30 @@ export class CompanionRuntime {
       const state=this.state(id);state.inFlightIds=[...new Set([...(intent.sourceMessageIds??[]),...state.pending.map(item=>item.id)])];
       state.pending=[];state.phase='thinking';
     }
-    const input=message(JSON.stringify({internalIntent:intent,consideration:continuingWait?this.copy().waitResumed:this.copy().proactive}));
+    if(!continuingWait) {
+      const latest=await this.store.getProfile(id);
+      if(!latest.settings.proactiveEnabled||live.revision!==revision||live.pending.length
+        ||intent.expectedPersonaRevision!==undefined&&(latest.personaRevision??1)!==intent.expectedPersonaRevision
+        ||isQuietTime(latest.settings.quietHours,new Date((await this.clock()).currentTime),clock.timeZone))return;
+      live.proactiveIntent={sourceIds:intent.sourceIds??[],decision:intent.decision??null};
+      const current=await this.store.getState(id);
+      if(live.revision!==revision||intent.expectedMemoryRevision!==undefined&&(current.memoryRevision??0)!==intent.expectedMemoryRevision){live.proactiveIntent=null;return;}
+      this.turnMemories.set(agent.id,{revision:revision+':'+(current.memoryRevision??0),items:intent.memories??[]});
+    }
+    const {memories:_memories,expectedRevision:_revision,expectedMemoryRevision:_memoryRevision,expectedPersonaRevision:_personaRevision,...publicIntent}=intent;
+    const input=message(JSON.stringify({internalIntent:publicIntent,consideration:continuingWait?this.copy().waitResumed:this.copy().proactive}));
     live.chatCancelRequested=false;
     if(agent.status==='running')agent.steer(input);else agent.followup(input);
     } finally {finish();}
   }
-  async invalidate(id,sourceIds,{reset=true,all=false}={}) {
-    const live=this.state(id);live.revision++;live.replyAbort?.abort();live.waitAbort?.abort();this.learningSignals.get(id)?.abort();
+  async invalidate(id,sourceIds,{reset=true,all=false,preserveMemorySources=false}={}) {
+    const live=this.state(id);live.revision++;live.replyAbort?.abort();live.waitAbort?.abort();live.proactiveAbort?.abort();live.proactiveIntent=null;this.learningSignals.get(id)?.abort();
     const {excludedIds,newlyExcluded}=await this.store.excludeDerivedMessages(id,sourceIds);
     const affected=[...new Set([...sourceIds,...excludedIds])];
     this.learner.invalidate(id);
     const state=await this.store.updateState(id,current=>({...withoutSources(current,affected),
       memoryRevision:(current.memoryRevision??0)+1,waitingUntil:null,pendingIntent:null,replyDraft:null,
-      forgottenMessageIds:[...new Set([...(current.forgottenMessageIds??[]),...sourceIds])]}));
+      forgottenMessageIds:[...new Set([...(current.forgottenMessageIds??[]),...(preserveMemorySources?[]:sourceIds)])]}));
     clearTimeout(this.state(id).waitTimer);this.state(id).chatWaitScheduled=false;this.state(id).replyAbort?.abort();
     this.maintenance.cancelRecovery('wait:'+id);
     const sources=new Set(affected),invalid=[];
@@ -907,8 +1088,8 @@ export class CompanionRuntime {
     return state;
   }
   async forget(id,input,{reset=true,requestMessageId}={}) {
-    const result=await (await this.memory(id)).forget(input);
-    const sourceIds=['memory:'+input.recordId,...result.forgottenSources.map(source=>source.replace('im:'+id+':','')),...(requestMessageId?[requestMessageId]:[])];
+    const result=await (await this.memory(id)).suppress({recordId:input.recordId,expectedRevisionId:input.expectedRevisionId,operationId:input.operationId??randomUUID()});
+    const sourceIds=['memory:'+input.recordId,...result.suppressedSources.map(source=>source.replace('im:'+id+':','')),...(requestMessageId?[requestMessageId]:[])];
     await this.invalidate(id,sourceIds,{reset});
     this.emit(id); return result;
   }
@@ -920,34 +1101,98 @@ export class CompanionRuntime {
   }
   async removeMessage(id,messageId) {
     if (!await this.store.getMessage(id,messageId)) return {removed:true};
-    await this.invalidate(id,[messageId]);
-    const memory=await this.memory(id);
-    let page,cursor;const matches=[];
-    do {
-      page=await memory.query({limit:100,maxBytes:262144,...(cursor?{cursor}:{})});cursor=page.nextCursor;
-      matches.push(...page.items.filter(item=>item.sourceRefs?.includes(memory.sourceRef(messageId))));
-    }while(cursor);
-    for(const item of matches)await memory.forget({recordId:item.recordId,expectedRevisionId:item.revisionId});
+    await this.invalidate(id,[messageId],{preserveMemorySources:true});
     const removed=await this.store.removeMessage(id,messageId);
     this.state(id).pending=this.state(id).pending.filter(item=>item.id!==messageId);
     await this.store.updateState(id,current=>({pendingMessageIds:(current.pendingMessageIds??[]).filter(value=>value!==messageId)}));
     this.emit(id);return removed??{removed:true};
   }
   async resetMemories(id) {
-    const memory=await this.memory(id);let page;
-    do {page=await memory.query({limit:100,maxBytes:262144});
-      for(const item of page.items)await memory.forget({recordId:item.recordId,expectedRevisionId:item.revisionId});
-    }while(page.items.length);
-    const latest=await this.store.listMessages(id,{limit:1});
-    const baseline=latest.nextAfter;
+    fail('COMPANION_MEMORY_WORKBENCH_REQUIRED');
+  }
+  async clearMemoryContext(id,baseline) {
     await this.store.updateState(id,{expressions:[],jargon:[],jargonCandidates:[],impressions:[],forgottenThrough:baseline,
-      learningCursor:baseline,summaryCursor:baseline,summary:'',summaryThrough:null});
-    await this.invalidate(id,[],{all:true});this.emit(id);return {reset:true};
+      learningCursor:baseline,factLearningCursor:baseline,factsThroughMessageId:null,events:[],summaryCursor:baseline,summary:'',summaryState:null,summaryThrough:null});
+    await this.invalidate(id,[],{all:true});this.turnMemories.clear();this.emit(id);
+  }
+  async listMemorySpaces() {
+    for(const profile of await this.store.profiles()) {
+      if(!await this.memorySpaces.current(profile.id))await this.memorySpaces.ensureActiveSpace(profile.id,{profile});
+    }
+    return this.memorySpaces.list();
+  }
+  async purgeMemorySpace(input,authorization) {
+    const grant=consumeCompanionMemoryAuthorization(authorization,{operation:'purge',...input});
+    const space=await this.memorySpaces.get(input.memorySpaceId);
+    if(!space||space.epoch!==grant.epoch)fail('COMPANION_MEMORY_REVISION_CONFLICT');
+    const active=space.state==='active',id=space.companionId;
+    if(this.memoryManagement.has(id))fail('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS');
+    this.memoryManagement.add(id);
+    try {
+    this.learningSignals.get(id)?.abort();
+    await this.cancel(id).catch(error=>{if(active||error.code!=='COMPANION_NOT_FOUND')throw error;});
+    await this.maintenance.drainMemorySpace(id);
+    const boundary=active?(await this.store.listMessages(id,{limit:1})).nextAfter:space.sourceCaptureBoundary;
+    await this.memorySpaces.beginPurge(space.memorySpaceId,{expectedRevision:input.expectedRevision,operationId:input.operationId,sourceCaptureBoundary:boundary});
+    return await this.finishMemoryPurge(await this.memorySpaces.get(space.memorySpaceId));
+    } finally {if((await this.memorySpaces.get(space.memorySpaceId))?.state!=='purging')this.memoryManagement.delete(id);}
+  }
+  async finishMemoryPurge(space,{queueOffline=true}={}) {
+    const id=space.companionId;this.memoryManagement.add(id);
+    try {
+      const profile=(await this.store.profiles()).find(item=>item.id===id);
+      if(profile) {
+        await this.cancel(id);
+        await this.clearMemoryContext(id,space.sourceCaptureBoundary??'seq:0');
+      }
+      const pending=this.memories.get(id);
+      if(pending) {await(await pending).close();this.memories.delete(id);}
+      // Live DSH lists cannot prove that older JSONL generations are gone.
+      // Only the native stopped-host maintenance runner may finish this purge.
+      if(queueOffline) {
+        if(!this.options.requestMemoryPurge)fail('COMPANION_MEMORY_SESSION_PURGE_REQUIRES_OFFLINE');
+        const receipt=await this.options.requestMemoryPurge({operation:'purge',memorySpaceId:space.memorySpaceId,operationId:space.purgeOperation});
+        if(receipt?.pending!==true&&receipt?.completed!==true)fail('COMPANION_MEMORY_PURGE_UNCONFIRMED');
+      }
+      return {completed:false,pending:true};
+    } finally {if((await this.memorySpaces.get(space.memorySpaceId))?.state!=='purging')this.memoryManagement.delete(id);}
+  }
+  async restoreMemorySpace(input,authorization) {
+    const grant=consumeCompanionMemoryAuthorization(authorization,{operation:'restore',...input});
+    const space=await this.memorySpaces.get(input.memorySpaceId);
+    if(!space||space.epoch!==grant.epoch)fail('COMPANION_MEMORY_REVISION_CONFLICT');
+    if(this.memoryManagement.has(space.companionId))fail('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS');
+    this.memoryManagement.add(space.companionId);
+    try {
+    await this.memorySpaces.beginRestore(space.memorySpaceId,{expectedRevision:input.expectedRevision,operationId:input.operationId});
+    await this.finishMemoryRestore(await this.memorySpaces.get(space.memorySpaceId));
+    this.emit(null,'profile');return {completed:true};
+    } finally {this.memoryManagement.delete(space.companionId);}
+  }
+  async finishMemoryRestore(space) {
+    const snapshot=await this.memorySpaces.persona(space.memorySpaceId);
+    await this.store.restoreRetainedProfile(snapshot);
+    await this.prepareWorkspace(space.companionId);
+    const profile=await this.store.getProfile(space.companionId);
+    await this.memorySpaces.restore(space.memorySpaceId,{workspaceId:profile.workspaceId,operationId:space.restoreOperation});
+  }
+  async recoverMemoryManagement() {
+    for(const metadata of await this.memorySpaces.list()) {
+      const space=await this.memorySpaces.get(metadata.memorySpaceId);
+      if(space.state==='purging')await this.finishMemoryPurge(space,{queueOffline:false});
+      else if(space.state==='retained'&&space.restoreOperation)await this.finishMemoryRestore(space);
+    }
+  }
+  async resumeMemoryPurges() {
+    for(const metadata of await this.memorySpaces.list({state:'purging'})) {
+      const space=await this.memorySpaces.get(metadata.memorySpaceId);
+      await this.options.requestMemoryPurge?.({operation:'purge',memorySpaceId:space.memorySpaceId,operationId:space.purgeOperation});
+    }
   }
   async clearHistory(id) {
     await this.cancel(id);await this.store.clearMessages(id);
     await this.invalidate(id,[],{all:true});
-    await this.store.updateState(id,{pendingMessageIds:[],summary:'',summaryThrough:null});
+    await this.store.updateState(id,{pendingMessageIds:[],summary:'',summaryState:null,summaryThrough:null,events:[]});
     this.emit(id);return {cleared:true};
   }
   async resetChat(id) {
@@ -973,7 +1218,7 @@ export class CompanionRuntime {
       const finish=this.beginChat(id);
       try {
       this.emit(id,'status');
-      state.revision++;state.chatWaitScheduled=false;state.chatRecoveryScheduled=false;
+      state.revision++;state.proactiveAbort?.abort();state.proactiveIntent=null;state.batchStartedAt=null;state.chatWaitScheduled=false;state.chatRecoveryScheduled=false;
       clearTimeout(state.timer);clearTimeout(state.waitTimer);state.pending=[];state.inFlightIds=[];state.replyAbort?.abort();state.waitAbort?.abort();
       this.maintenance.cancelRecovery('chat:'+id);this.maintenance.cancelRecovery('wait:'+id);
       await this.store.completeInputs(id,(await this.store.pendingMessages(id)).map(item=>item.id));

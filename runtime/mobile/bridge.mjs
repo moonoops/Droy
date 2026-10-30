@@ -105,6 +105,20 @@ export function createBridge({ port = process.env.DROY_BRIDGE_PORT, token = proc
     companion(signal) { return post('/companion', {}, signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : undefined); },
     notifications(payload, signal) { return post('/notifications', payload, signal); },
     memory(payload, signal) { return post('/memory', payload, signal ?? AbortSignal.timeout(45000)); },
+    companionMemory(payload, signal) { return post('/companion-memory', payload, signal ?? AbortSignal.timeout(15000)); },
+    async embedding(payload, caller) {
+      const timeout=AbortSignal.timeout(Math.max(1,Math.min(20000,(payload.deadlineAt??Date.now()+5000)-Date.now()+1000)));
+      const signal=caller?AbortSignal.any([caller,timeout]):timeout;
+      let cancellation;
+      const cancel=()=>{
+        if(payload.operation!=='embed')return;
+        cancellation??=post('/embedding',{operation:'cancel',requestId:payload.requestId,memorySpaceId:payload.memorySpaceId},AbortSignal.timeout(500));
+        cancellation.catch(()=>{});
+      };
+      signal.addEventListener('abort',cancel,{once:true});
+      try {signal.throwIfAborted();return await post('/embedding',payload,signal);}
+      finally {signal.removeEventListener('abort',cancel);if(cancellation)await cancellation;}
+    },
     history(payload, signal) { return post('/history', payload, signal ?? AbortSignal.timeout(15000)); },
     voice(payload, signal) { return post('/voice', payload, signal ?? AbortSignal.timeout(15000)); },
     notify(payload, signal) { return post('/notify', payload, signal); },

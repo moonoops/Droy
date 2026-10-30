@@ -121,6 +121,21 @@ and unsigned release builds do not authorize official signing.
 
 ## Project layout
 
+Companion semantic memory includes a pinned multilingual-e5-small quantized
+ONNX model and SentencePiece tokenizer. `tools/build.sh` runs
+`tools/prepare_embedding.py` after preparing the existing speech runtime, reusing
+its ONNX Runtime library. The first preparation downloads the resources listed
+in `tools/embedding.lock.json`; subsequent builds verify and reuse the cache.
+Model/tokenizer resources are about 123 MB, with an additional native library of
+about 2.6 MB. Generated resources remain under `runtime/generated/` and are not
+source files. No model API credentials are required for preparation or the
+embedding tests.
+
+伙伴语义记忆使用固定版本的多语言量化模型和分词器。构建脚本自动准备资源并复用
+语音模块已有的 ONNX Runtime；首次下载后按锁定哈希校验缓存。模型与分词器约
+123 MB，另有约 2.6 MB 原生库，生成资源不进入源码。准备和 embedding 测试不需要
+模型 API 凭据。
+
 `app/` contains the Android host; `android-use/` defines phone operations;
 `runtime/` contains the DSH integration and Droy plugins; `tools/` contains build
 and installation tools. Generated dependencies, runtime data and APKs are

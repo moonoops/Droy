@@ -30,7 +30,11 @@ public final class NativeRuntimeHost {
     public static Snapshot inspect(Context context) { return new Snapshot(context); }
 
     public static boolean companionMaintenanceActive() { return companionMaintenance; }
-    static void companionMaintenance(boolean active) { companionMaintenance = active; }
+    static synchronized void companionMaintenance(boolean active) { companionMaintenance = active; }
+    static synchronized boolean claimCompanionMaintenance() {
+        if (companionMaintenance) return false;
+        companionMaintenance = true; return true;
+    }
 
     public static String runtimeIdentity() {
         return RuntimeService.ready ? RuntimeService.runtimeIdentity : "";
@@ -82,6 +86,9 @@ public final class NativeRuntimeHost {
     }
 
     public static void start(Context context) {
+        if (context != null && NativeCompanionMemoryPurge.pending(context)) {
+            NativeCompanionMemoryPurge.resume(context); return;
+        }
         if (!RuntimeService.canStart()) return;
         if (NativeCompanionDeletion.pending(context)) { companionMaintenance = true; return; }
         context.startForegroundService(new Intent(context, RuntimeService.class));

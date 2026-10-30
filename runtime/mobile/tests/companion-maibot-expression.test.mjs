@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {selectExpressions,expressionWeights,weightedSampleExpressions,expressionQuery} from '../companions/maibot-expression.mjs';
 import {splitCompanionReply,processCompanionReply,mergeReplySegments} from '../companions/maibot-splitter.mjs';
 import {withoutSources,sharedContext} from '../companions/dialogue.mjs';
+import {defaultProfiles} from '../companions/profiles.mjs';
 
 const expressions=(length=12,prefix='kaka')=>Array.from({length},(_,i)=>({id:`${prefix}:e${i}`,situation:`情境${i}`,expression:`表达${i}`,sourceIds:[`${prefix}:m${i}`]}));
 
@@ -21,6 +22,34 @@ test('MaiBot fast selection skips small pools and makes no extra model request',
   assert.deepEqual(chosen.sourceIds,['kaka:m0','kaka:m1','kaka:m2','kaka:m3','kaka:m4']);
   assert.match(chosen.prompt,/视情况自由使用/);assert.doesNotMatch(chosen.prompt,/表达11/);
   assert.equal((await selectExpressions({context:{expressions:expressions()},options:{enabled:false}})).expressions.length,0);
+});
+
+test('new preset roles have bilingual examples without pretending to have learned user expressions',async()=>{
+  for(const profile of defaultProfiles())for(const locale of ['zh','en']) {
+    const selected=await selectExpressions({profile,locale,context:{expressions:expressions(2)},
+      generate:()=>{throw new Error('Role examples require no model call');}});
+    assert.equal(selected.selectionMode,'skipped');assert.equal(selected.modelCalls,0);
+    assert.deepEqual(selected.selectedIds,[]);assert.deepEqual(selected.sourceIds,[]);
+    assert.equal(selected.examples.length,3);
+    assert.ok(selected.examples.every(item=>item.origin==='persona-example'));
+    assert.match(selected.prompt,locale==='zh'?/不是历史对话或用户事实/:/not conversation history or facts/);
+    assert.doesNotMatch(selected.prompt,/表达0|表达1/);
+    assert.equal((await selectExpressions({profile,locale,options:{enabled:false}})).prompt,'');
+  }
+});
+
+test('edited roles never inherit preset examples or expression evidence from a previous persona revision',async()=>{
+  const original=defaultProfiles()[0];
+  for(const field of ['personalityOverride','behaviorStyleOverride','replyStyleOverride']) {
+    const selected=await selectExpressions({profile:{...original,[field]:'Fictional different role'}});
+    assert.deepEqual(selected.examples,[]);assert.equal(selected.prompt,'');
+  }
+  const edited={...original,personaRevision:2,personalityOverride:'Fictional quiet role'};
+  const old=expressions(12).map(item=>({...item,personaRevision:1}));
+  assert.deepEqual((await selectExpressions({profile:edited,context:{expressions:old}})).expressions,[]);
+  assert.deepEqual((await selectExpressions({profile:edited,context:{expressions:expressions(12)}})).expressions,[]);
+  const current=old.map(item=>({...item,personaRevision:2}));
+  assert.equal((await selectExpressions({profile:edited,context:{expressions:current},random:()=>0})).expressions.length,5);
 });
 
 test('upstream count weights are bounded and sampling is without replacement',()=>{

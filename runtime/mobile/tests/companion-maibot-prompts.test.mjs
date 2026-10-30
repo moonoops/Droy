@@ -15,6 +15,19 @@ const context = () => ({ currentTime: '2026-10-28T10:00:00+08:00', timeZone: 'As
   { id: 'u2', role: 'user', text: '下雨就改天吧', createdAt: '2026-10-28T10:00:00+08:00' },
 ] });
 
+test('sticker-only history and reply targets preserve verified meaning in both prompt languages',()=>{
+  for(const locale of ['zh','en']) {
+    const current={...context(),messages:[{id:'fictional-sticker',role:'user',type:'sticker',text:'',stickerId:'sticker-support',
+      sticker:{description:'Unverified invented meaning'}}]};
+    const request=buildReplyerRequest({profile:profile(),locale,context:current,args:{msg_id:'fictional-sticker'}});
+    const history=texts(request)[0],target=texts(request).at(-1);
+    assert.match(history,/sticker-support/);assert.match(target,/sticker-support/);
+    assert.match(history,locale==='zh'?/爱心/:/pink heart/);
+    assert.match(target,locale==='zh'?/爱心/:/pink heart/);
+    assert.doesNotMatch(texts(request).join('\n'),/Unverified invented meaning/);
+  }
+});
+
 test('paired prompts separate reply anchors from sparse visible quotes and preserve customized identity',()=>{
   for(const locale of ['zh','en']) {
     const p={...profile(),personalityOverride:'原样保留的自定义性格 / custom persona'};
@@ -230,5 +243,33 @@ test('reply model receives current user biography in both locales', () => {
     const current=context();current.userProfile={name:'Fictional Lin',bio:'Fictional architect'};
     const request=buildReplyerRequest({profile:profile(),locale,context:current,args:{msg_id:'u2'}});
     assert.match(request.system,/Fictional Lin/);assert.match(request.system,/Fictional architect/);
+  }
+});
+
+test('custom identity resolves a coherent role for both planners and replyers in either language', () => {
+  const original = profile(), snapshot = structuredClone(original);
+  for (const locale of ['zh', 'en']) {
+    const custom = { ...original, personalityOverride: 'Fictional male programmer; reserved and direct.' };
+    const planner = buildPlannerPrompt({ profile: custom, locale });
+    const replyer = buildReplyerRequest({ profile: custom, locale, context: context() });
+    for (const prompt of [planner, replyer.system]) {
+      assert.match(prompt, /Fictional male programmer/);
+      assert.doesNotMatch(prompt, /女大学生|female university student|Tieba|贴吧/);
+    }
+    const edited = { ...custom, behaviorStyleOverride: 'Ask only when clarification is needed.', replyStyleOverride: 'Dry humor without catchphrases.' };
+    assert.match(buildPlannerPrompt({ profile: edited, locale }), /Ask only when clarification is needed/);
+    assert.match(buildReplyerRequest({ profile: edited, locale, context: context() }).system, /Dry humor without catchphrases/);
+  }
+  assert.deepEqual(original, snapshot, 'resolving a custom instance never mutates its preset');
+});
+
+test('replyer labels tentative impressions separately and prioritizes the user correction', () => {
+  for (const locale of ['zh', 'en']) {
+    const request = buildReplyerRequest({ profile: profile(), locale, context: { ...context(),
+      memories: [{ text: 'Confirmed fictional memory' }], impressions: [{ text: 'Tentative fictional impression' }] } });
+    const references = texts(request).join('\n');
+    const marker = locale === 'zh' ? '不是已确认事实' : 'not confirmed facts';
+    assert.ok(references.indexOf(marker) > references.indexOf('Confirmed fictional memory'));
+    assert.ok(references.indexOf('Tentative fictional impression') > references.indexOf(marker));
   }
 });

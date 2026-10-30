@@ -103,8 +103,10 @@ python3 tools/prepare_audio.py
 python3 tools/prepare_voice_models.py
 if [ -n "${DROY_CMAKE:-}" ]; then
     python3 tools/prepare_qwen_tts.py --ndk "$ndk_dir" --cmake "$DROY_CMAKE"
+    python3 tools/prepare_embedding.py --ndk "$ndk_dir" --cmake "$DROY_CMAKE"
 else
     python3 tools/prepare_qwen_tts.py --ndk "$ndk_dir"
+    python3 tools/prepare_embedding.py --ndk "$ndk_dir"
 fi
 DROY_NDK_DIR="$ndk_dir" DROY_NODE_HEADERS="$runtime_dir/headers/node" tools/build_native.sh
 

@@ -9,6 +9,8 @@ import { once } from 'node:events';
 import { createRequire, registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { patchNativeCompanionMaintenance } from '../../../tools/native_companion_maintenance_patch.mjs';
+import { MemoryStore } from '../../memory/store.mjs';
+import { CompanionMemorySpaces } from '../companions/memory-spaces.mjs';
 const installed=createRequire(new URL('../../dsh/package.json',import.meta.url));
 const providerPath=installed.resolve('@deepseek-ai/dsh-session-persistence-jsonl');
 const patched=await realpath(await mkdtemp(join(tmpdir(),'droy-delete-sdk-')));
@@ -31,11 +33,15 @@ async function fixture(t,options={}){
   const root=join(home,'droy-companions'),store=await CompanionStore.open({directory:root});
   const keep=(await store.profiles())[0].id,target=(await store.createProfile({requestId:'synthetic-request',templateId:'kaka',name:'Synthetic target',model:null})).profile.id;
   const targetPath=join(root,target),keepPath=join(root,keep);await mkdir(join(targetPath,'work'),{recursive:true});await mkdir(join(targetPath,'chat'));await mkdir(join(keepPath,'work'),{recursive:true});
-  await put(join(targetPath,'memory','memory.sqlite'),'SYNTHETIC_TARGET_MEMORY');await put(join(targetPath,'memory.identity.json'),'{}');
+  const memory=await MemoryStore.open({directory:join(targetPath,'memory'),initialize:true});
+  await memory.record({operationId:'synthetic-memory',record:{kind:'fact',payload:{text:'SYNTHETIC_TARGET_MEMORY'},sourceRefs:['im:'+target+':remembered-source']}});await memory.close();
+  await store.appendMessage(target,{id:'remembered-source',role:'user',type:'text',text:'SYNTHETIC_REFERENCED_SOURCE'});
+  await store.appendMessage(target,{id:'unrelated-source',role:'user',type:'text',text:'SYNTHETIC_UNRELATED_SOURCE'});
   await put(join(keepPath,'work','keep.txt'),'keep');await store.updateProfile(target,{workspaceId:'target-workspace',chatSessionId:'target-chat'});
   await store.bindSession(target,{sessionId:'target-chat',workspaceId:'target-workspace',kind:'chat'});await store.bindSession(target,{sessionId:'target-work',workspaceId:'target-workspace',kind:'work',taskId:'target-task'});
   const blob=hash('synthetic-target-blob'),upload={id:'target-upload',name:'synthetic.png',mediaType:'image/png',bytes:21,ref:{attachmentId:'sha256:'+blob,bytes:21,mediaType:'image/png',width:2,height:2},url:'/droy/companions/'+target+'/attachments/target-upload'};
-  await store.putUpload(target,upload);await store.appendMessage(target,{id:'target-task',role:'assistant',type:'task',text:'SYNTHETIC_TARGET_TASK',task:{id:'target-task',sessionId:'target-work',state:'completed'}});await store.close();
+  await store.putUpload(target,upload);await store.updateMessage(target,'remembered-source',{attachments:[{id:'target-upload',name:'synthetic.png',mediaType:'image/png',bytes:21}]});
+  await store.appendMessage(target,{id:'target-task',role:'assistant',type:'task',text:'SYNTHETIC_TARGET_TASK',task:{id:'target-task',sessionId:'target-work',state:'completed'}});await store.close();
   await put(join(home,'attachments','v1','objects',blob.slice(0,2),blob),'synthetic-target-blob');
   const ws=(path,sessionIds)=>({path,title:'Synthetic',sessionIds,createdAt:'2030',updatedAt:'2030'});
   await put(join(home,'storages','workspace.json'),JSON.stringify({unit:{name:'workspace',version:2},global:{initialized:true,workspaceIds:['target-workspace','keep-workspace'],archivedSessionIds:[],pinnedSessionIds:[]},tables:{workspaces:{'target-workspace':ws(join(targetPath,'work'),['target-work']),'keep-workspace':ws(join(keepPath,'work'),['keep-fork'])}}}));
@@ -55,6 +61,11 @@ test('full local deletion removes descendants and keeps independent fork, then r
   const f=await fixture(t),job=await f.create(),prepared=await job.prepare();assert.equal(prepared.phase,'prepared');assert.deepEqual(prepared.removedSessionIds,['target-chat','target-child','target-work']);
   const local=await job.commit();assert.equal(local.phase,'local-complete');assert.equal(local.companionDeletion,'incomplete');assert.deepEqual(local.pending,['android']);
   await absent(f.targetPath);assert.deepEqual(await readSession(f.sessionsRoot,'keep-fork'),f.expected);await assert.rejects(readSession(f.sessionsRoot,'target-child'));
+  const spaces=await CompanionMemorySpaces.open({directory:f.root}),retained=await spaces.current(f.target);assert.equal(retained.state,'retained');
+  const retainedMemory=await MemoryStore.open({directory:retained.directory});
+  try{assert.equal((await retainedMemory.query()).items[0].payload.text,'SYNTHETIC_TARGET_MEMORY');}finally{await retainedMemory.close();}
+  const evidence=await readFile(join(retained.directory,'..','evidence.json'),'utf8');assert.equal(evidence.includes('SYNTHETIC_REFERENCED_SOURCE'),true);assert.equal(evidence.includes('SYNTHETIC_UNRELATED_SOURCE'),false);
+  assert.equal(await readFile(join(retained.directory,'..','evidence-blobs',hash('synthetic-target-blob')),'utf8'),'synthetic-target-blob');
   const journal=await readFile(join(f.home,'.companion-delete-delete-op.json'),'utf8');assert.equal(journal.includes('SYNTHETIC_PRIVATE'),false);assert.equal(journal.includes('SYNTHETIC_TARGET_MEMORY'),false);
   await assert.rejects(job.acknowledgeAndroid({}),{code:'MAINTENANCE_DELETE_ANDROID_RECEIPT_INVALID'});
   const done=await job.acknowledgeAndroid({version:1,scope:'android-companion-deletion',operationId:f.config.operationId,companionId:f.target,admissionEpoch:f.config.admissionEpoch,snapshotDigest:prepared.androidSnapshotDigest,retirementDigest:prepared.retirementDigest,complete:true});
