@@ -69,10 +69,10 @@ esac
 sdk_dir=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
 if [ -z "$sdk_dir" ]; then
     for candidate in "$workspace_dir/artifacts/toolchains/android-sdk" "$HOME/Library/Android/sdk" "$HOME/Android/Sdk"; do
-        if [ -d "$candidate/platforms/android-36" ]; then sdk_dir=$candidate; break; fi
+        if [ -d "$candidate/platforms/android-37.0" ]; then sdk_dir=$candidate; break; fi
     done
 fi
-[ -n "$sdk_dir" ] && [ -d "$sdk_dir/platforms/android-36" ] || fail 'Set ANDROID_HOME to an SDK with platforms;android-36 installed'
+[ -n "$sdk_dir" ] && [ -d "$sdk_dir/platforms/android-37.0" ] || fail 'Set ANDROID_HOME to an SDK with platforms;android-37.0 installed'
 sdk_dir=$(CDPATH= cd -- "$sdk_dir" && pwd)
 ANDROID_HOME=$sdk_dir
 ANDROID_SDK_ROOT=$sdk_dir

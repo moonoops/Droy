@@ -1,6 +1,5 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
     id 'org.jetbrains.kotlin.plugin.compose'
 }
 
@@ -13,6 +12,7 @@ abstract class GenerateBrandResources extends DefaultTask {
     @org.gradle.api.tasks.Optional @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getLogo()
     @OutputDirectory abstract DirectoryProperty getResourcesDirectory()
     @OutputDirectory abstract DirectoryProperty getAssetsDirectory()
+    @OutputDirectory abstract DirectoryProperty getNameResourcesDirectory()
 
     @TaskAction
     void generate() {
@@ -38,13 +38,14 @@ abstract class GenerateBrandResources extends DefaultTask {
             } finally { reader.dispose(); stream.close() }
         }
         File res = resourcesDirectory.get().asFile, assets = assetsDirectory.get().asFile
-        project.delete(res, assets)
-        new File(res, 'values').mkdirs()
+        File names = nameResourcesDirectory.get().asFile
+        project.delete(res, assets, names)
+        new File(names, 'values').mkdirs()
         new File(res, 'drawable-nodpi').mkdirs()
         new File(res, 'drawable-anydpi-v26').mkdirs()
         assets.mkdirs()
         String quotedName = groovy.json.JsonOutput.toJson(name).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        new File(res, 'values/droy_branding.xml').setText('<resources><string name="droy_app_name" formatted="false" translatable="false">' + quotedName + '</string></resources>\n', 'UTF-8')
+        new File(names, 'values/droy_branding.xml').setText('<resources><string name="droy_app_name" formatted="false" translatable="false">' + quotedName + '</string></resources>\n', 'UTF-8')
         File installedLogo = new File(assets, 'app-brand-logo.png')
         if (imageFile != null) java.nio.file.Files.copy(imageFile.toPath(), installedLogo.toPath())
         else javax.imageio.ImageIO.write(image, 'png', installedLogo)
@@ -94,6 +95,7 @@ def generateBrandResources = tasks.register('generateBrandResources', GenerateBr
     logo.set(rootProject.layout.file(providers.gradleProperty('droyAppIcon').map { rootProject.file(it) }))
     resourcesDirectory.set(layout.buildDirectory.dir('generated/droyBranding/res'))
     assetsDirectory.set(layout.buildDirectory.dir('generated/droyBranding/assets'))
+    nameResourcesDirectory.set(layout.buildDirectory.dir('generated/droyBranding/nameRes'))
 }
 
 abstract class GenerateDevelopmentResources extends DefaultTask {
@@ -214,9 +216,8 @@ tasks.named('preBuild').configure { dependsOn verifyQwenRuntime }
 
 android {
     namespace 'io.droyagent.app'
-    compileSdk 36
+    compileSdk 37
     buildFeatures { compose true }
-    kotlinOptions { jvmTarget = '17' }
     defaultConfig {
         applicationId 'io.droyagent.app'
         minSdk 30
@@ -232,8 +233,6 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
     sourceSets.main {
-        res.srcDir(generateBrandResources.map { it.resourcesDirectory })
-        assets.srcDir(generateBrandResources.map { it.assetsDirectory })
         jniLibs.srcDirs += [new File(nodeRuntimeDir, 'jniLibs'), '../runtime/generated/jniLibs']
         assets.srcDirs += [new File(nodeRuntimeDir, 'assets'), '../runtime/generated/assets', '../runtime/mobile/assets']
     }
@@ -250,6 +249,15 @@ android {
 }
 
 androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.sources.res.addGeneratedSourceDirectory(generateBrandResources) { it.resourcesDirectory }
+        variant.sources.assets.addGeneratedSourceDirectory(generateBrandResources) { it.assetsDirectory }
+    }
+    // Generated resource directories have equal priority. Keep the release name
+    // separate so debug uses only its paired development labels.
+    onVariants(selector().withBuildType('release')) { variant ->
+        variant.sources.res.addGeneratedSourceDirectory(generateBrandResources) { it.nameResourcesDirectory }
+    }
     onVariants(selector().withBuildType('debug')) { variant ->
         variant.sources.res.addGeneratedSourceDirectory(generateDevelopmentResources) { it.resourcesDirectory }
     }
@@ -263,7 +271,7 @@ dependencies {
     implementation 'org.commonmark:commonmark-ext-gfm-strikethrough:0.31.0'
     implementation files(rootProject.file('runtime/generated/audio/sherpa-onnx-1.13.8.aar'))
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.21'
-    def composeBom = platform('androidx.compose:compose-bom:2025.10.01')
+    def composeBom = platform('androidx.compose:compose-bom:2026.09.00')
     implementation composeBom
     androidTestImplementation composeBom
     implementation 'androidx.activity:activity-compose:1.11.0'
@@ -272,11 +280,11 @@ dependencies {
     implementation 'androidx.navigation:navigation-compose:2.9.8'
     implementation 'androidx.compose.ui:ui'
     implementation 'androidx.compose.foundation:foundation'
-    // 1.4 keeps MotionScheme internal; this version exposes the Expressive theme
-    // while retaining the current SDK/toolchain dependency baseline.
-    implementation 'androidx.compose.material3:material3:1.5.0-alpha01'
+    // Material 3 Expressive is pinned separately from the stable Compose BOM.
+    implementation 'androidx.compose.material3:material3:1.5.0-beta02'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
     androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
     implementation 'androidx.webkit:webkit:1.17.0'
     implementation 'androidx.core:core:1.17.0'
     implementation 'org.nanohttpd:nanohttpd:2.3.1'

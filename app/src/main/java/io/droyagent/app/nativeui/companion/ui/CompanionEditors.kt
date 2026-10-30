@@ -239,10 +239,13 @@ internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoa
             if (value.optString("type") == "upload") item("position") {
                 for ((axis, label) in listOf("x" to R.string.native_companion_creation_horizontal, "y" to R.string.native_companion_creation_vertical)) {
                     Text(stringResource(label), style = MaterialTheme.typography.labelLarge)
-                    Slider(value.optJSONObject("position")?.optDouble(axis, 50.0)?.toFloat() ?: 50f, { number ->
+                    val positionValue = value.optJSONObject("position")?.optDouble(axis, 50.0)?.toFloat() ?: 50f
+                    val positionSlider = remember(axis) { SliderState(positionValue, trackRange = 0f..100f) }
+                    positionSlider.value = positionValue
+                    Slider(state = positionSlider, onValueChange = { number ->
                         val next = JSONObject(selection); val position = next.optJSONObject("position") ?: JSONObject().put("x", 50).put("y", 50)
                         next.put("position", position.put(axis, number.toDouble())); select(next.toString())
-                    }, enabled = enabled, valueRange = 0f..100f)
+                    }, enabled = enabled)
                 }
             }
         }

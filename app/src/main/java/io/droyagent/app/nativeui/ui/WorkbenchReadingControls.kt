@@ -192,8 +192,10 @@ internal class WorkbenchReadingSize(private val preferences: SharedPreferences) 
                     Text(stringResource(R.string.native_font_preview), fontSize = selected.sp, lineHeight = (selected * 1.5f).sp)
                 }
             }
-            Slider(value = selected.toFloat(), onValueChange = { selected = kotlin.math.round(it).toInt() },
-                valueRange = 14f..22f, steps = 7, modifier = Modifier.fillMaxWidth().testTag("native-font-slider")
+            val slider = remember { SliderState(selected.toFloat(), steps = 7, trackRange = 14f..22f) }
+            slider.value = selected.toFloat()
+            Slider(state = slider, onValueChange = { selected = kotlin.math.round(it).toInt() },
+                modifier = Modifier.fillMaxWidth().testTag("native-font-slider")
                     .semantics { contentDescription = sizeLabel })
             if (editing) OutlinedTextField(input, { value ->
                 if (value.length <= 2 && value.all(Char::isDigit)) {

@@ -7,13 +7,14 @@ Run commands from the repository root. The build supports macOS and x86_64 Linux
 | Tool | Version |
 | --- | --- |
 | Java | JDK 17 |
+| Android Gradle Plugin / Gradle | 9.1.1 / 9.3.1 |
 | Kotlin / Compose compiler plugin | 2.2.21 |
-| Compose BOM / Material 3 | 2025.10.01 / 1.5.0-alpha01 |
+| Compose BOM / Material 3 | 2026.09.00 / 1.5.0-beta02 |
 | Navigation Compose | 2.9.8 |
 | Host Node.js | 22 or 24, with npm |
 | Python | 3.9+, with xz support |
 | patchelf | 0.19.2 |
-| Android SDK | Platform 36, Build Tools 35.0.0, Platform Tools |
+| Android SDK | Platform 37.0, Build Tools 36.0.0, Platform Tools |
 | Android NDK | 28.2.13676358 / r28c |
 | CMake | 3.22+ |
 
@@ -23,20 +24,28 @@ components after reviewing the Android SDK licenses:
 ```sh
 sdkmanager --sdk_root="$ANDROID_HOME" --licenses
 sdkmanager --sdk_root="$ANDROID_HOME" \
-  "platform-tools" "platforms;android-36" \
-  "build-tools;35.0.0" "ndk;28.2.13676358"
+  "platform-tools" "platforms;android-37.0" \
+  "build-tools;36.0.0" "ndk;28.2.13676358"
 ```
 
 The Gradle wrapper, npm lockfile and runtime manifests pin dependencies. The
 first build needs access to Android repositories, Gradle, npm, Termux and the
 model download sources declared in the manifests.
 
-The native workbench uses the public Material 3 Expressive motion API. Material
-3 is pinned separately from the BOM because version 1.4 keeps that API internal.
-Keep the Kotlin and Compose compiler plugin versions aligned when updating them.
-Navigation Compose 2.9.8 provides the native back stack, saved root pages and
-predictive back while retaining this SDK/toolchain baseline. Navigation 2.10
-requires a newer Compose/SDK baseline; upgrade that combination separately.
+The native workbench uses Material 3 Expressive. Material 3 1.5.0-beta02
+is pinned separately from the stable Compose BOM; BOM 2026.09.00 aligns Compose
+UI, Foundation, Runtime and instrumentation tests at 1.12.1. The Material 3
+artifact requires compile SDK 37 and AGP 9.1 or newer, so this build uses the
+37.0 platform, AGP 9.1.1 and Gradle 9.3.1. The minimum Android version remains
+API 30 and the app's target SDK remains 36.
+
+Kotlin compilation uses AGP's built-in Kotlin support. The Compose compiler
+plugin and Kotlin standard library remain at 2.2.21; keep compiler versions
+aligned when updating them. Navigation Compose remains at 2.9.8.
+
+Migration references: [Material 3 releases](https://developer.android.com/jetpack/androidx/releases/compose-material3#1.5.0-beta02),
+[AGP 9.1 compatibility](https://developer.android.com/build/releases/agp-9-1-0-release-notes),
+and [built-in Kotlin](https://developer.android.com/build/migrate-to-built-in-kotlin).
 
 ## Build
 

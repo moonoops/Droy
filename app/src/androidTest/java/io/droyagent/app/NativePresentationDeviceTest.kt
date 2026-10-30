@@ -45,6 +45,13 @@ class NativePresentationDeviceTest {
             compose.onNodeWithTag("native-tab-settings").performClick()
             compose.onNodeWithTag("native-settings-general").performScrollTo().performClick()
             awaitTag("native-product-body:general")
+            val configuration = Configuration(context.resources.configuration).apply {
+                setLocale(java.util.Locale.forLanguageTag(language))
+            }
+            val title = context.createConfigurationContext(configuration).getString(R.string.nps_general)
+            // The saved preference can arrive before the runtime locale reaches the UI.
+            compose.waitUntil(20_000) { compose.onAllNodesWithText(title).fetchSemanticsNodes(false).isNotEmpty() }
+            compose.onNodeWithText(title).assertIsDisplayed()
             for (tag in listOf("nps_name", "nps_sidebar", "nps_badge", "nps_welcome", "nps_composer"))
                 compose.onNodeWithTag("native-product-field:$tag").assertDoesNotExist()
             fixture.capture("native-presentation-general-$language")

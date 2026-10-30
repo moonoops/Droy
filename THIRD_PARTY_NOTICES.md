@@ -12,7 +12,7 @@ models, dictionaries and other resources retain their original licenses.
 | sherpa-onnx Android static dependencies | Includes GPL-3.0-or-later eSpeak NG, MIT Piper and other separately licensed dependencies. Full notices are included in APK assets `licenses/sherpa-static/`; matching source and build materials accompany the APK release. |
 | AndroidX and Kotlin libraries | Apache-2.0; versions are declared in the Gradle build files. |
 | NanoHTTPD 2.3.1 | BSD-3-Clause. [Fixed upstream license](https://github.com/NanoHttpd/nanohttpd/blob/nanohttpd-project-2.3.1/LICENSE.md); a copy is included under APK assets `licenses/nanohttpd/`. |
-| Gradle Wrapper, configured for Gradle 8.13 | Apache-2.0. The wrapper JAR retains `META-INF/LICENSE`, and the startup scripts retain their upstream notices. Build tooling only; not part of the APK. [Upstream](https://github.com/gradle/gradle/tree/v8.13.0). |
+| Gradle Wrapper, configured for Gradle 9.3.1 | Apache-2.0. The wrapper JAR retains `META-INF/LICENSE`, and the startup scripts retain their upstream notices. Build tooling only; not part of the APK. [Upstream](https://github.com/gradle/gradle/tree/v9.3.1). |
 
 The DSH MIT license is included in APK assets under `licenses/dsh/` and in
 the packaged upstream dependency. Other component notices accompany their

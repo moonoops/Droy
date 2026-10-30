@@ -145,8 +145,10 @@ private fun Readout(state: NativeVoiceState, enabled: Boolean, onAction: (Native
                 Text(stringResource(R.string.native_voice_rate_value, draft.rate))
             }
         }
-        Slider(draft.rate.toFloat(), { onAction(NativeVoiceAction.EditTts(draft.copy(rate = it.toDouble()))) },
-            valueRange = 0.5f..2f, enabled = enabled && draft.provider != "qwen3", modifier = Modifier.testTag("native-voice-rate"))
+        val rateSlider = remember { SliderState(draft.rate.toFloat(), trackRange = 0.5f..2f) }
+        rateSlider.value = draft.rate.toFloat()
+        Slider(state = rateSlider, onValueChange = { onAction(NativeVoiceAction.EditTts(draft.copy(rate = it.toDouble()))) },
+            enabled = enabled && draft.provider != "qwen3", modifier = Modifier.testTag("native-voice-rate"))
         if (state.credentialRetry) TextButton(onClick = { onAction(NativeVoiceAction.RetryCredential(credential)) }, enabled = enabled,
             modifier = Modifier.testTag("native-voice-retry-key")) { Text(stringResource(R.string.native_voice_retry_key)) }
     }

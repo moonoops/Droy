@@ -1,4 +1,6 @@
 // Run: ./gradlew -I tools/tests/build_variants.gradle :app:testBuildVariants
+import groovy.xml.XmlParser
+
 gradle.projectsEvaluated {
     def app = gradle.rootProject.project(':app')
     def resourceType = app.tasks.named('generateDevelopmentResources').get().getClass().superclass
