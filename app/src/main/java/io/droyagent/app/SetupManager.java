@@ -361,8 +361,13 @@ final class SetupManager {
         NativeRuntimeHost.Snapshot runtime = NativeRuntimeHost.inspect(context);
         NativeAuthorizationPolicy policy = new NativePermissionPolicyStore(ProductPermissions.preferences(context)).selected();
         boolean completed = installation.getBoolean("completed", false);
-        int step = installation.getInt("nativeWizardStep", completed ? 6 : 1);
+        int step = installation.getInt("nativeWizardStep", completed ? 5 : 1);
         if (step < 1 || step > 6) throw new IllegalStateException(NativeLocale.text("原生安装进度无效", "Invalid native setup progress"));
+        // The former summary page is folded into the final permission step.
+        if (step == 6) {
+            step = 5;
+            commit(installation.edit().putInt("nativeWizardStep", step));
+        }
         return new JSONObject().put("nativeSchemaVersion", 1).put("schemaVersion", installation.getInt("schemaVersion", SCHEMA))
             .put("completed", completed).put("required", !completed)
             .put("step", step)
@@ -377,7 +382,7 @@ final class SetupManager {
 
     static synchronized JSONObject nativeStep(Context context, int step) throws Exception {
         initialize(context);
-        if (step < 1 || step > 6) throw new IllegalArgumentException(NativeLocale.text("安装步骤应为 1–6", "Setup step must be 1–6"));
+        if (step < 1 || step > 5) throw new IllegalArgumentException(NativeLocale.text("安装步骤应为 1–5", "Setup step must be 1–5"));
         commit(store(context).edit().putInt("nativeWizardStep", step));
         return nativeRouteState(context);
     }
@@ -426,7 +431,7 @@ final class SetupManager {
         if (current.getBoolean("completed")) return current;
         if (!current.getBoolean("canComplete")) throw new IllegalStateException(NativeLocale.text("安装条件尚未完成", "Setup requirements are incomplete"));
         SharedPreferences installation = store(context);
-        SharedPreferences.Editor editor = installation.edit().putBoolean("completed", true).putInt("nativeWizardStep", 6)
+        SharedPreferences.Editor editor = installation.edit().putBoolean("completed", true).putInt("nativeWizardStep", 5)
             .putLong("nativeCompletedAt", System.currentTimeMillis());
         if (!installation.contains("completedAt")) editor.putLong("completedAt", System.currentTimeMillis());
         commit(editor);

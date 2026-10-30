@@ -32,7 +32,7 @@ data class NativeSetupLive(
 }
 
 /** Only non-secret identity fields are persisted; provider forms own their ephemeral key. */
-data class NativeSetupIdentityDraft(val name: String = "", val avatarUrl: String? = null, val edited: Boolean = false)
+data class NativeSetupIdentityDraft(val name: String = "", val avatarUrl: String? = null, val edited: Boolean = false, val bio: String? = null)
 
 data class NativeOnboardingState(
     val route: NativeSetupRoute? = null,

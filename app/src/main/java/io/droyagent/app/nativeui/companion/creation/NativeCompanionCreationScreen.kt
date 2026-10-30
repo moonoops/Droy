@@ -1,9 +1,13 @@
 package io.droyagent.app.nativeui.companion.creation
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,6 +17,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -21,13 +29,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
-import io.droyagent.app.nativeui.companion.ui.CompanionAvatar
+import io.droyagent.app.nativeui.companion.ui.CompanionImage
+import io.droyagent.app.nativeui.companion.ui.CompanionImageLoader
 import io.droyagent.app.nativeui.companion.ui.CompanionModelSelection
 import io.droyagent.app.nativeui.ui.DroyIcon
 import io.droyagent.app.nativeui.ui.DroyIconAction
 import io.droyagent.app.nativeui.ui.droyNavigationMotion
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun NativeCompanionCreationScreen(
     state: NativeCreationState,
@@ -88,7 +97,7 @@ fun NativeCompanionCreationScreen(
             }
         }, bottomBar = {
             if (state.page == NativeCreationPage.EDITOR) Surface(color = MaterialTheme.colorScheme.surface) {
-                Button(onClick = { focus.clearFocus(); keyboard?.hide(); model.create() }, enabled = state.canCreate,
+                Button(onClick = { focus.clearFocus(); keyboard?.hide(); model.create() }, enabled = state.canCreate, shapes = ButtonDefaults.shapes(),
                     modifier = Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
                         .padding(horizontal = 24.dp, vertical = 12.dp).heightIn(min = 56.dp).testTag("native-creation-create")) {
                     Text(stringResource(if (state.busy && state.creating) R.string.native_companion_creation_creating else R.string.native_companion_creation_create))
@@ -216,16 +225,47 @@ private fun CreationTemplates(state: NativeCreationState, model: NativeCompanion
     LazyColumn(modifier.fillMaxWidth().navigationBarsPadding().testTag("native-creation-templates"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (state.catalogError != null) item("error") { CreationError(state.catalogError, model::refresh, refresh = true) }
         if (state.editor != null) item("resume") { FilledTonalButton(onClick = { model.page(NativeCreationPage.EDITOR) }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("native-creation-resume")) { Text(stringResource(R.string.native_companion_creation_resume)) } }
-        items(state.templates, key = { it.id }) { template ->
-            CreationCard(Modifier.clickable(enabled = state.runtime.ready && state.canEdit && state.image == null, role = Role.Button) { choose(template) }.testTag("native-creation-template-${template.id}")) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    CompanionAvatar(template.name, template.avatarUrl, model::loadImage, size = 56.dp)
-                    Text(template.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    DroyIcon(R.drawable.native_companion_chevron_right, null)
+        items(state.templates.chunked(2), key = { row -> row.first().id }) { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { template ->
+                    CreationTemplateChoice(template, model::loadImage,
+                        enabled = state.runtime.ready && state.canEdit && state.image == null,
+                        modifier = Modifier.weight(1f), onClick = { choose(template) })
                 }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
         if (state.catalogLoaded && !state.loading && state.catalogError == null && state.templates.isEmpty()) item("empty") { Text(stringResource(R.string.native_companion_creation_no_templates)) }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun CreationTemplateChoice(template: NativeCreationTemplate, loader: CompanionImageLoader,
+    enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val interactions = remember { MutableInteractionSource() }
+    val pressed by interactions.collectIsPressedAsState()
+    val topCorner by animateDpAsState(if (pressed) 28.dp else 48.dp,
+        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec<Dp>(), label = "templateTopCorner")
+    val bottomCorner by animateDpAsState(if (pressed) 28.dp else 18.dp,
+        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec<Dp>(), label = "templateBottomCorner")
+    val shape = RoundedCornerShape(topStart = topCorner, topEnd = topCorner,
+        bottomStart = bottomCorner, bottomEnd = bottomCorner)
+    Column(modifier.alpha(if (enabled) 1f else .38f)
+        .clickable(interactionSource = interactions, indication = ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
+        .testTag("native-creation-template-${template.id}")) {
+        Surface(Modifier.fillMaxWidth().aspectRatio(.72f), shape = shape,
+            color = if (template.id == "maimai") MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer) {
+            CompanionImage(template.avatarUrl, null, loader, Modifier.fillMaxSize().clip(shape),
+                contentScale = ContentScale.Fit) {
+                DroyIcon(R.drawable.native_companion_person, null, Modifier.size(64.dp))
+            }
+        }
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(template.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            DroyIcon(R.drawable.native_companion_chevron_right, null)
+        }
     }
 }
 

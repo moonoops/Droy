@@ -2,12 +2,16 @@ package io.droyagent.app.nativeui.memory
 
 import io.droyagent.app.nativeui.ui.DroySwitch as Switch
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
@@ -20,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.ui.DroyIconAction
+import io.droyagent.app.nativeui.ui.droyNavigationMotion
 
 @Composable
 fun NativeMemoryScreen(
@@ -29,6 +34,8 @@ fun NativeMemoryScreen(
     modifier: Modifier = Modifier,
     onOpenPermissions: (() -> Unit)? = null,
 ) {
+    val pageStates = rememberSaveableStateHolder()
+    val navigationMotion = droyNavigationMotion()
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val snackbar = remember { SnackbarHostState() }
@@ -108,15 +115,26 @@ fun NativeMemoryScreen(
             if (state.conflict || state.error != null && state.error != "memory_result_unconfirmed") MemoryNotice(if (state.conflict) "MEMORY_REVISION_CONFLICT" else state.error!!,
                 if (state.conflict) model::reloadEditor else null,
                 actionText = stringResource(R.string.native_memory_reload_editor))
-            when (state.page) {
-                NativeMemoryPage.SETTINGS -> MemorySettings(state, model, onOpenPermissions, Modifier.weight(1f))
-                NativeMemoryPage.CAPTURE -> MemoryCapture(state, model, Modifier.weight(1f))
-                NativeMemoryPage.APPS -> MemoryApps(state, model, Modifier.weight(1f))
-                NativeMemoryPage.ENDPOINTS -> MemoryEndpoints(state, model, Modifier.weight(1f))
-                NativeMemoryPage.MAINTENANCE -> MemoryMaintenance(state, model, Modifier.weight(1f))
-                NativeMemoryPage.RECORDS -> MemoryRecords(state, model, Modifier.weight(1f))
-                NativeMemoryPage.DETAIL -> MemoryDetail(state, model, Modifier.weight(1f))
-                NativeMemoryPage.EDITOR -> MemoryEditor(state, model, Modifier.weight(1f))
+            AnimatedContent(targetState = state, contentKey = { it.page }, modifier = Modifier.weight(1f),
+                transitionSpec = {
+                    if (memoryPageDepth(targetState.page) < memoryPageDepth(initialState.page)) {
+                        navigationMotion.popEnter togetherWith navigationMotion.popExit
+                    } else navigationMotion.enter togetherWith navigationMotion.exit
+                }, label = "memory-page") { displayed ->
+                pageStates.SaveableStateProvider(displayed.page.name) {
+                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+                        when (displayed.page) {
+                            NativeMemoryPage.SETTINGS -> MemorySettings(displayed, model, onOpenPermissions, Modifier.fillMaxSize())
+                            NativeMemoryPage.CAPTURE -> MemoryCapture(displayed, model, Modifier.fillMaxSize())
+                            NativeMemoryPage.APPS -> MemoryApps(displayed, model, Modifier.fillMaxSize())
+                            NativeMemoryPage.ENDPOINTS -> MemoryEndpoints(displayed, model, Modifier.fillMaxSize())
+                            NativeMemoryPage.MAINTENANCE -> MemoryMaintenance(displayed, model, Modifier.fillMaxSize())
+                            NativeMemoryPage.RECORDS -> MemoryRecords(displayed, model, Modifier.fillMaxSize())
+                            NativeMemoryPage.DETAIL -> MemoryDetail(displayed, model, Modifier.fillMaxSize())
+                            NativeMemoryPage.EDITOR -> MemoryEditor(displayed, model, Modifier.fillMaxSize())
+                        }
+                    }
+                }
             }
         }
     }
@@ -128,6 +146,13 @@ fun NativeMemoryScreen(
         confirmButton = { TextButton(onClick = { forgetting = false; model.forget() }, modifier = Modifier.heightIn(min = 48.dp).testTag("native-memory-confirm-forget")) {
             Text(stringResource(R.string.native_memory_forget_confirm), color = MaterialTheme.colorScheme.error)
         } }, dismissButton = { TextButton(onClick = { forgetting = false }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.native_memory_cancel)) } })
+}
+
+private fun memoryPageDepth(page: NativeMemoryPage): Int = when (page) {
+    NativeMemoryPage.SETTINGS -> 0
+    NativeMemoryPage.APPS, NativeMemoryPage.DETAIL -> 2
+    NativeMemoryPage.EDITOR -> 3
+    else -> 1
 }
 
 @Composable

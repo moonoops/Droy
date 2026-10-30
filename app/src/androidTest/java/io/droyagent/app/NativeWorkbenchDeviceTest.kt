@@ -620,6 +620,7 @@ class NativeWorkbenchDeviceTest {
         compose.waitUntil(15_000) { onboardingModel.state.value.route?.step == 4 }
         awaitNode("native-setup-name")
         compose.onNodeWithTag("native-setup-name").performTextReplacement("Native setup user")
+        compose.onNodeWithTag("native-setup-bio").performScrollTo().performTextReplacement("Synthetic biography\nFor setup review")
         val avatar = insertMedia("native-setup-avatar.png", "image/png", images = true) { output ->
             val bitmap = Bitmap.createBitmap(48, 48, Bitmap.Config.ARGB_8888)
             try { bitmap.eraseColor(android.graphics.Color.rgb(116, 96, 168)); bitmap.compress(Bitmap.CompressFormat.PNG, 100, output) }
@@ -632,11 +633,13 @@ class NativeWorkbenchDeviceTest {
         awaitNode("native-setup-name")
         assertEquals(4, onboardingModel.state.value.route!!.step)
         assertEquals("Native setup user", onboardingModel.state.value.draft.name)
+        assertEquals("Synthetic biography\nFor setup review", onboardingModel.state.value.draft.bio)
         assertEquals(selectedAvatar, onboardingModel.state.value.draft.avatarUrl)
         capture("native-setup-identity-restored")
         compose.onNodeWithTag("native-setup-next").assertIsEnabled().performClick()
         compose.waitUntil(20_000) { onboardingModel.state.value.route?.step == 5 }
         assertEquals("Native setup user", companionModel.state.value.userProfile.name)
+        assertEquals("Synthetic biography\nFor setup review", companionModel.state.value.userProfile.bio)
         assertEquals(selectedAvatar, companionModel.state.value.userProfile.avatarUrl)
         compose.onNodeWithTag("native-permissions-first-use").assertIsEnabled().performClick()
         compose.waitUntil(10_000) { onboardingModel.state.value.route?.permissionPolicy == NativeAuthorizationPolicy.ON_FIRST_USE }
@@ -644,9 +647,7 @@ class NativeWorkbenchDeviceTest {
         for (key in SetupManager.capabilityKeys(context)) assertFalse("First-use strategy is not consent: $key", ProductPermissions.allowed(ProductPermissions.preferences(context), key))
         assertEquals(grants, systemPermissions.associateWith(context::checkSelfPermission))
         capture("native-setup-first-use-policy")
-        compose.onNodeWithTag("native-setup-next").assertIsEnabled().performClick()
-        compose.waitUntil(20_000) { onboardingModel.state.value.route?.step == 6 && onboardingModel.state.value.liveFresh && onboardingModel.state.value.live?.canComplete == true }
-        capture("native-setup-final-checks")
+        assertEquals(5, onboardingModel.state.value.route!!.step)
         compose.onNodeWithTag("native-setup-finish").assertIsEnabled().performClick()
         awaitNode("native-companion-messages")
         compose.onNodeWithTag("native-onboarding").assertDoesNotExist()
@@ -657,6 +658,7 @@ class NativeWorkbenchDeviceTest {
         compose.onNodeWithTag("native-tab-messages").assertIsSelected()
         compose.onNodeWithTag("native-onboarding").assertDoesNotExist()
         assertEquals("Native setup user", companionModel.state.value.userProfile.name)
+        assertEquals("Synthetic biography\nFor setup review", companionModel.state.value.userProfile.bio)
         assertEquals(listOf("kaka"), companionModel.state.value.companions.map { it.templateId })
         assertTrue(companionModel.state.value.companions.single().id.startsWith("companion-"))
         capture("native-setup-completed-messages")

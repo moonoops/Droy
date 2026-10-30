@@ -90,4 +90,9 @@
     <string name="native_voice_unsaved">放弃修改？</string>
     <string name="native_voice_discard">放弃修改</string>
     <string name="native_voice_continue_editing">继续编辑</string>
+    <string name="native_voice_sound_wake">声音与唤醒</string>
+    <string name="native_voice_output_source">声音来源</string>
+    <string name="native_voice_connection">服务配置</string>
+    <string name="native_voice_words">唤醒词</string>
+    <string name="native_voice_reset_rate">恢复默认</string>
 </resources>

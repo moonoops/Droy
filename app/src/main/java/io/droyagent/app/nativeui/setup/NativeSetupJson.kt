@@ -16,7 +16,7 @@ internal object NativeSetupJson {
         val completed = boolean(value, "completed")
         val required = boolean(value, "required")
         if (completed == required) malformed()
-        val step = integer(value, "step").also { if (it !in 1..6) malformed() }
+        val step = integer(value, "step").also { if (it !in 1..6) malformed() }.coerceAtMost(5)
         val locale = string(value, "locale").also { if (it !in setOf("zh", "en")) malformed() }
         val environment = value.getJSONObject("environment")
         val policy = value.getJSONObject("permissionPolicy")
@@ -59,15 +59,17 @@ internal object NativeSetupJson {
     fun profile(value: JSONObject): NativeUserProfile = decode {
         val name = string(value, "name")
         val url = string(value, "avatarUrl")
-        if (!validName(name, allowEmpty = true) || !validAvatar(url)) malformed()
-        NativeUserProfile(name, url)
+        val bio = if (value.has("bio")) string(value, "bio") else ""
+        if (!validName(name, allowEmpty = true) || !validAvatar(url) || !validBio(bio) || bio != bio.trim()) malformed()
+        NativeUserProfile(name, url, bio)
     }
 
     fun validateIdentity(draft: NativeSetupIdentityDraft): NativeUserProfile {
         val name = draft.name.trim()
         val url = draft.avatarUrl
-        if (!validName(name, allowEmpty = false) || url == null || !validAvatar(url)) throw NativeApiException("setup_identity_invalid")
-        return NativeUserProfile(name, url)
+        val bio = draft.bio?.trim() ?: throw NativeApiException("setup_identity_invalid")
+        if (!validName(name, allowEmpty = false) || url == null || !validAvatar(url) || !validBio(bio)) throw NativeApiException("setup_identity_invalid")
+        return NativeUserProfile(name, url, bio)
     }
 
     fun validAvatar(value: String): Boolean = avatar.matches(value)
@@ -88,15 +90,34 @@ internal object NativeSetupJson {
         return true
     }
 
-    fun identityRequest(value: NativeUserProfile): JSONObject = JSONObject().put("expectedProfile", JSONObject().put("name", value.name).put("avatarUrl", value.avatarUrl))
+    fun validBio(value: String): Boolean {
+        if (value.codePointCount(0, value.length) > 2000 || value.toByteArray(Charsets.UTF_8).size > 8000
+            || value.any { (it.code < 32 && it !in "\t\r\n") || it.code == 127 }) return false
+        var index = 0
+        while (index < value.length) {
+            if (Character.isHighSurrogate(value[index])) {
+                if (index + 1 >= value.length || !Character.isLowSurrogate(value[index + 1])) return false
+                index += 2
+            } else {
+                if (Character.isLowSurrogate(value[index])) return false
+                index++
+            }
+        }
+        return true
+    }
+
+    fun identityRequest(value: NativeUserProfile): JSONObject = JSONObject().put("expectedProfile", JSONObject().put("name", value.name).put("avatarUrl", value.avatarUrl).put("bio", value.bio))
 
     fun draft(value: JSONObject): NativeSetupIdentityDraft = decode {
-        if (integer(value, "version") != 1 || value.keys().asSequence().toSet() != setOf("version", "name", "avatarUrl", "edited")) malformed()
+        val version = integer(value, "version")
+        val expected = setOf("version", "name", "avatarUrl", "edited") + if (version == 2) setOf("bio") else emptySet()
+        if (version !in 1..2 || value.keys().asSequence().toSet() != expected) malformed()
         val url = if (value.isNull("avatarUrl")) null else string(value, "avatarUrl").also { if (!validAvatar(it)) malformed() }
-        NativeSetupIdentityDraft(string(value, "name"), url, boolean(value, "edited"))
+        NativeSetupIdentityDraft(string(value, "name"), url, boolean(value, "edited"),
+            if (version == 1 || value.isNull("bio")) null else string(value, "bio"))
     }
-    fun draftValue(value: NativeSetupIdentityDraft): JSONObject = JSONObject().put("version", 1).put("name", value.name)
-        .put("avatarUrl", value.avatarUrl ?: JSONObject.NULL).put("edited", value.edited)
+    fun draftValue(value: NativeSetupIdentityDraft): JSONObject = JSONObject().put("version", 2).put("name", value.name)
+        .put("avatarUrl", value.avatarUrl ?: JSONObject.NULL).put("edited", value.edited).put("bio", value.bio ?: JSONObject.NULL)
 
     private fun string(value: JSONObject, key: String): String = value.get(key) as? String ?: malformed()
     private fun boolean(value: JSONObject, key: String): Boolean = value.get(key) as? Boolean ?: malformed()

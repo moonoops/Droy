@@ -179,4 +179,5 @@
     <string name="native_memory_access_conversation">For this conversation</string>
     <string name="native_memory_access_error">Unable to verify this request. Try again shortly.</string>
     <string name="native_memory_access_allow">Allow this service</string>
+    <string name="native_memory_record_group">Records</string>
 </resources>

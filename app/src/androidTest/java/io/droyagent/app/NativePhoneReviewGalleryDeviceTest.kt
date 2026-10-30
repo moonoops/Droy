@@ -72,8 +72,7 @@ class NativePhoneReviewGalleryDeviceTest {
             compose.onNodeWithTag("native-permissions-back").performClick()
             waitTag("native-settings-general")
 
-            product("02-notifications", "notifications", "proactive")
-            product("03-notification-sorting", "notification-sorting", "notifications")
+            product("02-notifications", "notifications", "notifications")
             step = "04-pet"
             settingsEntry("pet", "native-product-settings:pet")
             waitTag("native-product-body:pet"); capture()
@@ -256,8 +255,7 @@ class NativePhoneReviewGalleryDeviceTest {
             backTo("native-memory-settings")
             backTo("native-settings-general")
 
-            product("25-notifications", "notifications", "proactive")
-            product("26-notification-sorting", "notification-sorting", "notifications")
+            product("25-notifications", "notifications", "notifications")
             product("27-pet", "pet", "pet")
             product("28-about", "about", "diagnostics")
             step = "29-web-search"

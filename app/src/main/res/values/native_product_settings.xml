@@ -133,4 +133,11 @@
     <string name="nps_discard">Discard</string>
     <string name="nps_continue_editing">Keep editing</string>
     <string name="nps_restore_default_confirm">Restore the default notification rules?</string>
+    <string name="nps_delivery_section">Send notifications</string>
+    <string name="nps_organization_section">Organize notifications</string>
+    <string name="nps_delivery_error">Could not load notification delivery settings.</string>
+    <string name="nps_organization_error">Could not load notification organization settings.</string>
+    <string name="nps_no_matching_apps">No matching apps</string>
+    <string name="nps_no_notification_history">No notification history</string>
+    <string name="nps_pet_display">Display</string>
 </resources>

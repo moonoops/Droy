@@ -13,6 +13,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -138,6 +140,8 @@ fun NativeAppShell(
         onDispose { lifecycle?.removeObserver(observer) }
     }
     var settingsRoot by rememberSaveable { mutableStateOf(true) }
+    var settingsBottomInset by remember { mutableStateOf(0.dp) }
+    val shellDensity = LocalDensity.current
     val keyboard = LocalSoftwareKeyboardController.current
     val snackbar = remember { SnackbarHostState() }
     val retryLabel = stringResource(R.string.native_retry)
@@ -544,7 +548,9 @@ fun NativeAppShell(
         },
         bottomBar = {
             if (rootPage && !WindowInsets.isImeVisible) NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier.testTag("native-root-navigation")) {
+                modifier = Modifier.testTag("native-root-navigation").onSizeChanged { size ->
+                    if (size.height > 0) settingsBottomInset = with(shellDensity) { size.height.toDp() }
+                }) {
                 val tabs = listOf(
                     Triple("messages", R.string.native_shell_messages, R.drawable.native_ui_chat_bubble),
                     Triple("workbench", R.string.native_workbench, R.drawable.native_ui_edit_square),
@@ -632,14 +638,25 @@ fun NativeAppShell(
                 NativeModelSettingsScreen(settings, settingsModel, onBack = ::back, embedded = false)
             }
             composable("settings") {
-                NativeSettingsScreen(settings, settingsModel, onMyProfile = { open("user-profile") },
+                // Removing the shell bar during exit must not expand this list's viewport and
+                // clamp its scroll offset before Navigation saves the outgoing destination.
+                val retainedInset = remember(padding) { object : PaddingValues {
+                    override fun calculateLeftPadding(layoutDirection: androidx.compose.ui.unit.LayoutDirection) = 0.dp
+                    override fun calculateRightPadding(layoutDirection: androidx.compose.ui.unit.LayoutDirection) = 0.dp
+                    override fun calculateTopPadding() = 0.dp
+                    // Scaffold updates its padding during measurement, before recomposition.
+                    override fun calculateBottomPadding() = if (settingsRoot)
+                        (settingsBottomInset - padding.calculateBottomPadding()).coerceAtLeast(0.dp) else 0.dp
+                } }
+                NativeSettingsScreen(settings, settingsModel,
+                    modifier = Modifier.padding(retainedInset).consumeWindowInsets(retainedInset), onMyProfile = { open("user-profile") },
                     onPermissions = { open("permissions") }, onModels = { open("settings-models") }, onRootChanged = { settingsRoot = it },
                     onOpenFeature = { feature -> open(when (feature) {
                         NativeSettingsFeature.GENERAL -> "product/general"
                         NativeSettingsFeature.MEMORY -> "memory"
                         NativeSettingsFeature.VOICE -> "voice"
                         NativeSettingsFeature.TOOLS -> "tools"
-                        NativeSettingsFeature.NOTIFICATIONS -> "product/proactive"
+                        NativeSettingsFeature.NOTIFICATIONS -> "product/notifications"
                         NativeSettingsFeature.NOTIFICATION_SORTING -> "product/notifications"
                         NativeSettingsFeature.PET -> "product/pet"
                         NativeSettingsFeature.WEB_SEARCH -> "web-search"
@@ -663,15 +680,7 @@ fun NativeAppShell(
                 NativeVoiceScreen(state, voiceModel::onAction, onBack = ::back, onPermissions = { open("permissions") })
             }
             composable("plugins") {
-                NativeSettingsGroup(stringResource(R.string.native_settings_plugins), ::back, listOf(
-                    Triple("web-search", stringResource(R.string.native_settings_web_search), R.drawable.native_settings_hub),
-                    Triple("subtask-models", stringResource(R.string.native_settings_subtask_models), R.drawable.native_settings_neurology),
-                    Triple("agent-loop", stringResource(R.string.native_advanced_loop), R.drawable.native_settings_settings),
-                    Triple("terminal", stringResource(R.string.native_settings_terminal), R.drawable.native_settings_hub),
-                    Triple("agent-team", stringResource(R.string.native_advanced_team), R.drawable.native_settings_neurology),
-                    Triple("session-titles", stringResource(R.string.native_advanced_titles), R.drawable.native_ui_edit_square),
-                    Triple("persistent-terminal", stringResource(R.string.native_advanced_persistent_terminal), R.drawable.native_settings_hub),
-                )) { section -> open(when (section) {
+                io.droyagent.app.nativeui.settings.NativePluginSettingsScreen(::back) { section -> open(when (section) {
                     "web-search" -> "web-search"
                     "subtask-models" -> "plugin-subtask-models"
                     "agent-loop" -> "plugin-agent-loop"

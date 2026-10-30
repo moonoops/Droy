@@ -2,6 +2,21 @@ package io.droyagent.app.nativeui.voice
 
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import io.droyagent.app.nativeui.ui.DroySettingsLink
+import io.droyagent.app.nativeui.ui.DroySettingsLinkGroup
+import io.droyagent.app.nativeui.ui.DroySettingsSectionTitle
+import io.droyagent.app.nativeui.ui.DroySettingsToggle
+import io.droyagent.app.nativeui.ui.droyNavigationMotion
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,6 +51,10 @@ fun NativeVoiceScreen(state: NativeVoiceState, onAction: (NativeVoiceAction) -> 
     val back = { if (dirty) discard = true else leave() }
     BackHandler(enabled = state.page != NativeVoicePage.HOME, onBack = back)
     val ready = state.runtime.ready && state.fresh && !state.saving
+    val homeScroll = rememberLazyListState()
+    val readoutScroll = rememberLazyListState()
+    val wakeScroll = rememberLazyListState()
+    val motion = droyNavigationMotion()
     Scaffold(modifier.fillMaxSize().testTag("native-voice"), containerColor = MaterialTheme.colorScheme.surface,
         contentWindowInsets = WindowInsets(0, 0, 0, 0), topBar = {
             Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -51,8 +70,15 @@ fun NativeVoiceScreen(state: NativeVoiceState, onAction: (NativeVoiceAction) -> 
                 }
             }
         }) { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).navigationBarsPadding().imePadding()
-            .testTag("native-voice-content"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        AnimatedContent(targetState = state.page, modifier = Modifier.padding(padding).consumeWindowInsets(padding),
+            transitionSpec = {
+                if (targetState == NativeVoicePage.HOME) (motion.popEnter togetherWith motion.popExit).apply { targetContentZIndex = -1f }
+                else motion.enter togetherWith motion.exit
+            }, label = "voice-page") { page ->
+        LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding()
+            .testTag("native-voice-content"), state = when (page) {
+                NativeVoicePage.HOME -> homeScroll; NativeVoicePage.READOUT -> readoutScroll; NativeVoicePage.WAKE -> wakeScroll
+            }, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (!state.runtime.ready && !state.runtime.active) item {
                 Text(stringResource(R.string.native_voice_runtime_unavailable), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (state.runtime.canStart) TextButton(onClick = { onAction(NativeVoiceAction.StartRuntime) }) {
@@ -60,23 +86,32 @@ fun NativeVoiceScreen(state: NativeVoiceState, onAction: (NativeVoiceAction) -> 
                 }
             }
             state.error?.let { code -> item { VoiceError(code, onAction) } }
-            when (state.page) {
+            when (page) {
                 NativeVoicePage.HOME -> {
-                    item { VoiceSection(stringResource(R.string.native_voice_input)) {
-                        Fact(R.string.native_voice_asr, stringResource(progressLabel(if (state.fresh) state.snapshot?.asr else null)))
+                    item { Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            DroyIcon(R.drawable.native_companion_mic, null)
+                            Text(stringResource(R.string.native_voice_asr), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            Text(stringResource(progressLabel(if (state.fresh) state.snapshot?.asr else null)),
+                                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         val permission = state.permissions
                         if (permission.known && (!permission.microphoneProduct || !permission.transcriptionProduct || !permission.microphoneSystem || permission.paused)) {
                             TextButton(onClick = onPermissions, modifier = Modifier.testTag("native-voice-permissions")) { Text(stringResource(R.string.native_voice_permissions)) }
                         }
                     } }
-                    item { Menu(R.string.native_voice_readout, state.snapshot?.tts?.provider?.let { stringResource(providerLabel(it)) },
-                        { onAction(NativeVoiceAction.Open(NativeVoicePage.READOUT)) }, "native-voice-open-readout") }
-                    item { Menu(R.string.native_voice_wake, if (state.snapshot?.actualWake?.enabled == true) stringResource(wakeLabel(state)) else null,
-                        { onAction(NativeVoiceAction.Open(NativeVoicePage.WAKE)) }, "native-voice-open-wake") }
+                    item { DroySettingsLinkGroup(stringResource(R.string.native_voice_sound_wake), listOf(
+                        DroySettingsLink(stringResource(R.string.native_voice_readout), R.drawable.native_companion_play_arrow,
+                            "native-voice-open-readout", state.snapshot?.tts?.provider?.let { stringResource(providerLabel(it)) }
+                                ?: stringResource(R.string.native_voice_unknown)) { onAction(NativeVoiceAction.Open(NativeVoicePage.READOUT)) },
+                        DroySettingsLink(stringResource(R.string.native_voice_wake), R.drawable.native_companion_mic,
+                            "native-voice-open-wake", stringResource(wakeLabel(state))) { onAction(NativeVoiceAction.Open(NativeVoicePage.WAKE)) },
+                    )) }
                 }
                 NativeVoicePage.READOUT -> item { Readout(state, ready, onAction, credential) { credential = it } }
                 NativeVoicePage.WAKE -> item { WakeSettings(state, ready, onAction, onPermissions) }
             }
+        }
         }
     }
     if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text(stringResource(R.string.native_voice_unsaved)) },
@@ -89,15 +124,13 @@ private fun Readout(state: NativeVoiceState, enabled: Boolean, onAction: (Native
     val draft = state.ttsDraft ?: return
     var clear by remember { mutableStateOf(false) }
     val resource = state.snapshot?.resources?.firstOrNull { it.provider == draft.provider }?.progress
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        VoiceSection(stringResource(R.string.native_voice_output_source)) {
                 Choice(stringResource(R.string.native_voice_provider), stringResource(providerLabel(draft.provider)), enabled,
                     listOf("system", "melo", "qwen3", "openai").map { it to stringResource(providerLabel(it)) }, draft.provider) { provider ->
                     onCredential("")
                     onAction(NativeVoiceAction.SelectProvider(provider))
                 }
-            }
             if (resource != null && !resource.ready) {
                 val downloading = resource.state in setOf("downloading", "verifying")
                 TextButton(onClick = { onAction(if (downloading) NativeVoiceAction.CancelDownload(draft.provider) else NativeVoiceAction.Download(draft.provider)) },
@@ -105,9 +138,10 @@ private fun Readout(state: NativeVoiceState, enabled: Boolean, onAction: (Native
                     Text(stringResource(if (downloading) R.string.native_voice_cancel_download else R.string.native_voice_download))
                 }
             }
+            if (resource != null && !resource.ready) Progress(if (state.fresh) resource else null)
+            if (draft.provider == "system" && state.snapshot?.systemReady != true) Text(stringResource(R.string.native_voice_system_not_ready), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (resource != null && !resource.ready) Progress(if (state.fresh) resource else null)
-        if (draft.provider == "system" && state.snapshot?.systemReady != true) Text(stringResource(R.string.native_voice_system_not_ready), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        VoiceSection(stringResource(if (draft.provider == "openai") R.string.native_voice_connection else R.string.native_voice_voice)) {
         if (draft.provider == "openai") {
             VoiceField(R.string.native_voice_url, draft.url, enabled) { onAction(NativeVoiceAction.EditTts(draft.copy(url = it))) }
             VoiceField(R.string.native_voice_model, draft.model, enabled) { onAction(NativeVoiceAction.EditTts(draft.copy(model = it))) }
@@ -115,7 +149,8 @@ private fun Readout(state: NativeVoiceState, enabled: Boolean, onAction: (Native
                 Box(Modifier.weight(1f)) { VoiceField(R.string.native_voice_voice_id, draft.voiceId, enabled) { onAction(NativeVoiceAction.EditTts(draft.copy(voiceId = it))) } }
                 PreviewButton(state, enabled, onAction)
             }
-            OutlinedTextField(credential, onCredential, enabled = enabled, singleLine = true,
+            TextField(credential, onCredential, enabled = enabled, singleLine = true,
+                shape = MaterialTheme.shapes.medium, colors = voiceFieldColors(),
                 label = { Text(stringResource(R.string.native_voice_api_key)) }, visualTransformation = PasswordVisualTransformation(),
                 placeholder = { Text(stringResource(if (state.snapshot?.hasKey == true) R.string.native_voice_key_saved else R.string.native_voice_key_empty)) },
                 modifier = Modifier.fillMaxWidth().testTag("native-voice-key"))
@@ -139,16 +174,19 @@ private fun Readout(state: NativeVoiceState, enabled: Boolean, onAction: (Native
                 PreviewButton(state, enabled, onAction)
             }
         }
+        }
+        VoiceSection(stringResource(R.string.native_voice_rate)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.native_voice_rate), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.native_voice_rate_value, draft.rate), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
             TextButton(onClick = { onAction(NativeVoiceAction.EditTts(draft.copy(rate = 1.0))) }, enabled = enabled && draft.provider != "qwen3") {
-                Text(stringResource(R.string.native_voice_rate_value, draft.rate))
+                Text(stringResource(R.string.native_voice_reset_rate))
             }
         }
         val rateSlider = remember { SliderState(draft.rate.toFloat(), trackRange = 0.5f..2f) }
         rateSlider.value = draft.rate.toFloat()
         Slider(state = rateSlider, onValueChange = { onAction(NativeVoiceAction.EditTts(draft.copy(rate = it.toDouble()))) },
             enabled = enabled && draft.provider != "qwen3", modifier = Modifier.testTag("native-voice-rate"))
+        }
         if (state.credentialRetry) TextButton(onClick = { onAction(NativeVoiceAction.RetryCredential(credential)) }, enabled = enabled,
             modifier = Modifier.testTag("native-voice-retry-key")) { Text(stringResource(R.string.native_voice_retry_key)) }
     }
@@ -167,23 +205,42 @@ private fun PreviewButton(state: NativeVoiceState, enabled: Boolean, onAction: (
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun WakeSettings(state: NativeVoiceState, enabled: Boolean, onAction: (NativeVoiceAction) -> Unit, onPermissions: () -> Unit) {
     val draft = state.wakeDraft ?: return
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        VoiceSwitch(stringResource(R.string.native_voice_enable_wake), state.snapshot?.actualWake?.enabled == true, enabled && state.snapshot?.wakeAvailable == true,
-            { onAction(NativeVoiceAction.SetWakeEnabled(it)) }, "native-voice-wake-enabled")
+        DroySettingsToggle(stringResource(R.string.native_voice_enable_wake), R.drawable.native_companion_mic,
+            state.snapshot?.actualWake?.enabled == true, enabled && state.snapshot?.wakeAvailable == true,
+            0, 1, Modifier.testTag("native-voice-wake-enabled"), emphasized = true) {
+            onAction(NativeVoiceAction.SetWakeEnabled(it))
+        }
+        val statusLabel = wakeLabel(state)
+        if (statusLabel != R.string.native_voice_off) Text(stringResource(statusLabel), style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
         if (state.snapshot?.actualWake?.enabled == true || state.snapshot?.wakeFailed == true) {
-            Text(stringResource(wakeLabel(state)), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (state.snapshot?.wakeState == "awaiting_user") TextButton(onClick = onPermissions) { Text(stringResource(R.string.native_voice_permissions)) }
             if (state.snapshot?.wakePreparation?.failed == true) TextButton(onClick = { onAction(NativeVoiceAction.PrepareWake) }, enabled = enabled) { Text(stringResource(R.string.native_voice_retry_prepare)) }
         }
-        Choice(stringResource(R.string.native_voice_timing), stringResource(if (draft.timing == "foreground") R.string.native_voice_foreground else R.string.native_voice_screen_on), enabled,
-            listOf("screen_on" to stringResource(R.string.native_voice_screen_on), "foreground" to stringResource(R.string.native_voice_foreground)), draft.timing) {
-            onAction(NativeVoiceAction.EditWake(draft.copy(timing = it)))
+        VoiceSection(stringResource(R.string.native_voice_timing)) {
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)) {
+                listOf("screen_on" to R.string.native_voice_screen_on, "foreground" to R.string.native_voice_foreground).forEachIndexed { index, (value, label) ->
+                    ToggleButton(checked = draft.timing == value,
+                        onCheckedChange = { onAction(NativeVoiceAction.EditWake(draft.copy(timing = value))) }, enabled = enabled,
+                        shapes = if (index == 0) ButtonGroupDefaults.connectedLeadingButtonShapes() else ButtonGroupDefaults.connectedTrailingButtonShapes(),
+                        modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 48.dp).testTag("native-voice-timing:$value")
+                            .semantics { role = Role.RadioButton; selected = draft.timing == value },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)) {
+                        Text(stringResource(label), textAlign = TextAlign.Center)
+                    }
+                }
+            }
         }
-        VoiceField(R.string.native_voice_chinese, draft.chinese, enabled) { onAction(NativeVoiceAction.EditWake(draft.copy(chinese = it))) }
-        VoiceField(R.string.native_voice_english, draft.english, enabled) { onAction(NativeVoiceAction.EditWake(draft.copy(english = it))) }
+        VoiceSection(stringResource(R.string.native_voice_words)) {
+            VoiceField(R.string.native_voice_chinese, draft.chinese, enabled) { onAction(NativeVoiceAction.EditWake(draft.copy(chinese = it))) }
+            VoiceField(R.string.native_voice_english, draft.english, enabled) { onAction(NativeVoiceAction.EditWake(draft.copy(english = it))) }
+        }
         if (state.wakeSyncRetry) TextButton(onClick = { onAction(NativeVoiceAction.RetryWakeSync) }, enabled = enabled,
             modifier = Modifier.testTag("native-voice-retry-wake")) { Text(stringResource(R.string.native_voice_retry_sync)) }
     }
@@ -191,71 +248,47 @@ private fun WakeSettings(state: NativeVoiceState, enabled: Boolean, onAction: (N
 
 @Composable
 private fun VoiceSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium); content()
-        }
-    }
-}
-@Composable
-private fun Menu(@StringRes title: Int, status: String?, onClick: () -> Unit, tag: String) {
-    Surface(onClick = onClick, shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth().testTag(tag)) {
-        Row(Modifier.padding(20.dp).heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(stringResource(title), style = MaterialTheme.typography.titleMedium)
-                status?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-            DroyIcon(R.drawable.native_settings_chevron_right, null)
-        }
-    }
-}
-@Composable
-private fun VoiceSwitch(label: String, value: Boolean, enabled: Boolean, change: (Boolean) -> Unit, tag: String) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        Switch(value, change, enabled = enabled, modifier = Modifier.testTag(tag))
-    }
-}
-@Composable private fun Fact(@StringRes label: Int, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text(stringResource(label), modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyMedium)
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        DroySettingsSectionTitle(title)
+        content()
     }
 }
 @Composable private fun VoiceField(@StringRes label: Int, value: String, enabled: Boolean, change: (String) -> Unit) {
-    OutlinedTextField(value, change, label = { Text(stringResource(label)) }, enabled = enabled, modifier = Modifier.fillMaxWidth(), maxLines = 3)
+    TextField(value, change, label = { Text(stringResource(label)) }, enabled = enabled,
+        shape = MaterialTheme.shapes.medium, colors = voiceFieldColors(), modifier = Modifier.fillMaxWidth(), maxLines = 3)
 }
+@Composable private fun voiceFieldColors() = TextFieldDefaults.colors(
+    unfocusedIndicatorColor = Color.Transparent,
+    disabledIndicatorColor = Color.Transparent,
+)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun Choice(label: String, selected: String, enabled: Boolean, choices: List<Pair<String, String>>, selectedId: String? = null, change: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    Surface(onClick = { expanded = true }, enabled = enabled && choices.size > 1,
-        color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(selected, style = MaterialTheme.typography.bodyLarge)
-            }
-            if (choices.size > 1) DroyIcon(R.drawable.native_ui_expand_more, null)
-        }
-    }
+    SegmentedListItem(onClick = { expanded = true }, enabled = enabled && choices.size > 1,
+        shapes = ListItemDefaults.segmentedShapes(0, 1),
+        colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+        supportingContent = { Text(selected) },
+        trailingContent = if (choices.size > 1) ({ DroyIcon(R.drawable.native_ui_expand_more, null) }) else null,
+    ) { Text(label, style = MaterialTheme.typography.labelLarge) }
     if (expanded) ModalBottomSheet(onDismissRequest = { expanded = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).navigationBarsPadding()) {
             Text(label, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 12.dp))
-            if (choices.size > 8) OutlinedTextField(query, { query = it }, singleLine = true,
+            if (choices.size > 8) TextField(query, { query = it }, singleLine = true,
+                shape = MaterialTheme.shapes.large, colors = voiceFieldColors(),
                 placeholder = { Text(stringResource(R.string.native_voice_search)) }, modifier = Modifier.fillMaxWidth())
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                items(choices.filter { it.second.contains(query, true) }, key = { it.first }) { (id, name) ->
+            val filtered = choices.filter { it.second.contains(query, true) }
+            LazyColumn(Modifier.heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(2.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
+                items(filtered.size, key = { filtered[it].first }) { index ->
+                    val (id, name) = filtered[index]
                     val checked = if (selectedId != null) selectedId == id else selected == name
-                    Surface(onClick = { expanded = false; query = ""; change(id) }, shape = MaterialTheme.shapes.large,
-                        color = if (checked) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        Row(Modifier.padding(horizontal = 12.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(checked, null); Text(name, modifier = Modifier.padding(start = 12.dp), style = MaterialTheme.typography.bodyLarge)
-                        }
-                    }
+                    val shapes = ListItemDefaults.segmentedShapes(index, filtered.size)
+                    SegmentedListItem(checked = checked, onCheckedChange = { expanded = false; query = ""; change(id) },
+                        shapes = shapes.copy(selectedShape = shapes.shape),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics { role = Role.RadioButton },
+                        leadingContent = { RadioButton(checked, null) },
+                    ) { Text(name, style = MaterialTheme.typography.bodyLarge) }
                 }
             }
         }

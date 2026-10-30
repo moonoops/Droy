@@ -3,13 +3,8 @@ package io.droyagent.app.nativeui.companion.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.togetherWith
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,16 +16,14 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.companion.data.*
 import io.droyagent.app.nativeui.data.NativeModel
+import io.droyagent.app.nativeui.ui.DroySettingsLink
+import io.droyagent.app.nativeui.ui.DroySettingsLinkGroup
 import io.droyagent.app.nativeui.ui.DroyIcon
-import org.json.JSONException
 import org.json.JSONObject
-import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -109,9 +102,12 @@ fun CompanionProfileScreen(
                 (if (forward) motion.exit else motion.popExit)).using(null)
         }, label = "companion-profile-pages") { page ->
     if (page == "personality") {
-        CompanionPersonalityPage(companion.personalityOverride, companion.personality, state.runtime.ready && !state.profileSaving,
-            { submittedSheet = "personality"; model.updateProfile(companionId, NativeCompanionProfilePatch(personalityOverride = it)) }, { sheet = null },
-            errorContent = { CompanionError(state.error, model::dismissError, modifier = Modifier.padding(horizontal = 20.dp)) })
+        CompanionPersonalityPage(companion.personalityOverride, companion.presetPersonality.ifBlank { companion.personality }, state.runtime.ready && !state.profileSaving,
+            { identity, behavior, reply -> submittedSheet = "personality"; model.updateProfile(companionId, NativeCompanionProfilePatch(personalityOverride = identity, behaviorStyleOverride = behavior, replyStyleOverride = reply)) }, { sheet = null },
+            errorContent = { CompanionError(state.error, model::dismissError, modifier = Modifier.padding(horizontal = 20.dp)) },
+            initialBehavior = companion.behaviorStyleOverride, initialReply = companion.replyStyleOverride,
+            presetBehavior = companion.presetBehavior, presetReply = companion.presetReply,
+            customBehavior = companion.customBehavior, customReply = companion.customReply)
     } else if (page == "interaction") {
         editorStates.SaveableStateProvider("interaction") {
             CompanionInteractionPage(companion.settings, state.runtime.ready && !state.profileSaving,
@@ -139,27 +135,29 @@ fun CompanionProfileScreen(
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding().navigationBarsPadding().verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (!state.runtime.ready) CompanionRuntime(state.runtime, model::startRuntime)
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 CompanionAvatar(name, avatar, imageLoader, size = 96.dp, label = stringResource(R.string.native_companion_view_avatar),
                     onClick = { avatarPreview = true },
                     modifier = Modifier.testTag("native-companion-avatar-edit"))
-                TextButton(onClick = { onChooseAvatar?.invoke(companionId) { avatar = it; avatarEdited = true } },
+                FilledTonalButton(onClick = { onChooseAvatar?.invoke(companionId) { avatar = it; avatarEdited = true } },
                     enabled = !state.profileSaving && onChooseAvatar != null && state.runtime.ready,
-                    modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.native_companion_change_avatar)) }
-            }
-            ProfileNameField(name, { name = it; nameEdited = true }, state.profileSaving || !state.runtime.ready, nameEdited, "native-companion-name")
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainer) {
-                Column {
-                    ProfileMenuRow(stringResource(R.string.native_companion_personality), enabled = !state.profileSaving && state.runtime.ready,
-                        tag = "native-companion-personality") { keyboard?.hide(); sheet = "personality" }
-                    ProfileMenuRow(stringResource(R.string.native_companion_model),
-                        value = if (companion.modelInherited) stringResource(R.string.native_companion_default_model)
-                            else companion.model?.name ?: stringResource(R.string.native_companion_default_model),
-                        enabled = !state.profileSaving && state.runtime.ready, tag = "native-companion-model") { keyboard?.hide(); sheet = "model" }
-                    ProfileMenuRow(stringResource(R.string.native_companion_interaction), enabled = !state.profileSaving && state.runtime.ready,
-                        tag = "native-companion-interaction") { keyboard?.hide(); sheet = "interaction" }
+                    modifier = Modifier.heightIn(min = 48.dp)) {
+                    DroyIcon(R.drawable.native_ui_photo_camera, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.native_companion_change_avatar))
                 }
             }
+            ProfileNameField(name, { name = it; nameEdited = true }, state.profileSaving || !state.runtime.ready, nameEdited, "native-companion-name")
+            DroySettingsLinkGroup(title = stringResource(R.string.native_companion_settings),
+                enabled = !state.profileSaving && state.runtime.ready, items = listOf(
+                    DroySettingsLink(stringResource(R.string.native_companion_personality), R.drawable.native_companion_person,
+                        "native-companion-personality") { keyboard?.hide(); sheet = "personality" },
+                    DroySettingsLink(stringResource(R.string.native_companion_model), R.drawable.native_settings_hub,
+                        "native-companion-model", supporting = if (companion.modelInherited) stringResource(R.string.native_companion_default_model)
+                            else companion.model?.name ?: stringResource(R.string.native_companion_default_model)) { keyboard?.hide(); sheet = "model" },
+                    DroySettingsLink(stringResource(R.string.native_companion_interaction), R.drawable.native_settings_tune,
+                        "native-companion-interaction") { keyboard?.hide(); sheet = "interaction" },
+                ))
             onDeleteCompanion?.let { delete -> TextButton(onClick = { deleteConfirm = true }, enabled = !state.profileSaving,
                 modifier = Modifier.fillMaxWidth().testTag("native-companion-delete-profile")) { Text(stringResource(R.string.native_companion_delete_profile), color = MaterialTheme.colorScheme.error) } }
             CompanionError(state.error, model::dismissError)
@@ -243,22 +241,27 @@ fun NativeUserProfileScreen(
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding().navigationBarsPadding().verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             if (!state.runtime.ready) CompanionRuntime(state.runtime, model::startRuntime)
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 CompanionAvatar(name, avatar, imageLoader, size = 96.dp, label = stringResource(R.string.native_companion_view_avatar),
                     onClick = { avatarPreview = true },
                     modifier = Modifier.testTag("native-user-avatar-edit"))
-                TextButton(onClick = { onChooseAvatar?.invoke(null) { avatar = it; avatarEdited = true } },
+                FilledTonalButton(onClick = { onChooseAvatar?.invoke(null) { avatar = it; avatarEdited = true } },
                     enabled = !state.profileSaving && onChooseAvatar != null && state.runtime.ready,
-                    modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.native_companion_change_avatar)) }
+                    modifier = Modifier.heightIn(min = 48.dp)) {
+                    DroyIcon(R.drawable.native_ui_photo_camera, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.native_companion_change_avatar))
+                }
             }
             ProfileNameField(name, { name = it; nameEdited = true }, state.profileSaving || !state.runtime.ready, nameEdited, "native-user-name")
-            OutlinedTextField(bio, { bio = it; bioEdited = true },
+            CompanionFilledField(bio, { bio = it; bioEdited = true },
                 Modifier.fillMaxWidth().testTag("native-user-bio"),
                 label = { Text(stringResource(R.string.native_companion_user_bio)) },
                 enabled = !state.profileSaving && state.runtime.ready, minLines = 3, maxLines = 6,
                 isError = bioTooLong,
                 supportingText = if (bioTooLong) ({ Text(stringResource(R.string.native_companion_user_bio_too_long)) }) else null,
-                shape = MaterialTheme.shapes.medium)
+                )
             CompanionError(state.error, model::dismissError)
         }
     }
@@ -269,8 +272,8 @@ fun NativeUserProfileScreen(
 @Composable
 private fun ProfileNameField(name: String, onChange: (String) -> Unit, saving: Boolean, edited: Boolean, tag: String) {
     val invalid = edited && (name.isBlank() || name.codePointCount(0, name.length) > 80)
-    OutlinedTextField(name, onChange, Modifier.fillMaxWidth().testTag(tag), label = { Text(stringResource(R.string.native_companion_name)) },
-        enabled = !saving, singleLine = true, isError = invalid, shape = MaterialTheme.shapes.medium,
+    CompanionFilledField(name, onChange, Modifier.fillMaxWidth().testTag(tag), label = { Text(stringResource(R.string.native_companion_name)) },
+        enabled = !saving, singleLine = true, isError = invalid,
         supportingText = if (invalid) ({ Text(stringResource(if (name.isBlank()) R.string.native_companion_name_required else R.string.native_companion_name_too_long)) }) else null)
 }
 
@@ -279,14 +282,6 @@ private fun ProfileSaveBar(saving: Boolean, enabled: Boolean, tag: String, onSav
     TextButton(onClick = onSave, enabled = enabled && !saving, modifier = Modifier.heightIn(min = 48.dp).testTag(tag)) {
         Text(stringResource(if (saving) R.string.native_companion_saving else R.string.native_companion_save))
     }
-}
-
-@Composable
-private fun ProfileMenuRow(title: String, value: String? = null, enabled: Boolean, tag: String, onClick: () -> Unit) {
-    ListItem(headlineContent = { Text(title) }, supportingContent = if (value != null) ({ Text(value, maxLines = 2, overflow = TextOverflow.Ellipsis) }) else null,
-        trailingContent = { DroyIcon(R.drawable.native_companion_chevron_right, null) },
-        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button, onClick = onClick).heightIn(min = 64.dp).testTag(tag))
 }
 
 @Composable
@@ -299,5 +294,5 @@ private fun DiscardProfileDialog(onDiscard: () -> Unit, onCancel: () -> Unit) {
 @Composable
 private fun CompanionModelPicker(companion: NativeCompanion, state: NativeCompanionState, onSelect: (NativeModel?) -> Unit, onClose: () -> Unit) {
     CompanionModelSelection(state.models, companion.model.takeUnless { companion.modelInherited }, state.defaultModel,
-        state.runtime.ready && !state.profileSaving, onSelect, Modifier.fillMaxWidth().heightIn(max = 640.dp).navigationBarsPadding())
+        state.runtime.ready && !state.profileSaving, onSelect, Modifier.fillMaxWidth().heightIn(max = 640.dp).navigationBarsPadding(), showTitle = true)
 }

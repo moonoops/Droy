@@ -90,4 +90,9 @@
     <string name="native_voice_unsaved">Discard changes?</string>
     <string name="native_voice_discard">Discard</string>
     <string name="native_voice_continue_editing">Keep editing</string>
+    <string name="native_voice_sound_wake">Sound and wake-up</string>
+    <string name="native_voice_output_source">Voice source</string>
+    <string name="native_voice_connection">Service configuration</string>
+    <string name="native_voice_words">Wake words</string>
+    <string name="native_voice_reset_rate">Reset</string>
 </resources>

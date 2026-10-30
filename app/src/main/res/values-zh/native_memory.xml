@@ -179,4 +179,5 @@
     <string name="native_memory_access_conversation">用于当前对话</string>
     <string name="native_memory_access_error">暂时无法确认请求状态，请稍后重试。</string>
     <string name="native_memory_access_allow">允许此服务</string>
+    <string name="native_memory_record_group">记录</string>
 </resources>

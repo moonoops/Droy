@@ -21,6 +21,9 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.Shape
+import io.droyagent.app.nativeui.ui.DroySettingsSectionTitle
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -74,10 +77,14 @@ fun NativePermissionsScreen(
     modifier: Modifier = Modifier,
     embedded: Boolean = false,
     onMemoryAccess: (() -> Unit)? = null,
+    onRootChanged: (Boolean) -> Unit = {},
 ) {
     var confirmation by rememberSaveable { mutableStateOf<String?>(null) }
     var page by rememberSaveable { mutableStateOf<String?>(null) }
     val pageStates = rememberSaveableStateHolder()
+    val rootChanged by rememberUpdatedState(onRootChanged)
+    LaunchedEffect(page) { rootChanged(page == null) }
+    DisposableEffect(Unit) { onDispose { rootChanged(true) } }
     val idle = state.fresh && !state.queue.active && !state.root.running
     val back = {
         if (page != null) page = if (page in setOf("system", "products")) null else "products" else {
@@ -91,8 +98,8 @@ fun NativePermissionsScreen(
     }
     Scaffold(modifier.fillMaxSize().testTag("native-permissions"), containerColor = MaterialTheme.colorScheme.surface,
         contentWindowInsets = WindowInsets(0, 0, 0, 0), topBar = {
-            if (!embedded) Surface(color = MaterialTheme.colorScheme.surface) {
-                Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!embedded || page != null) Surface(color = MaterialTheme.colorScheme.surface) {
+                Row(Modifier.fillMaxWidth().then(if (embedded) Modifier else Modifier.statusBarsPadding()).heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     DroyIconAction(R.drawable.native_settings_arrow_back, stringResource(R.string.native_permissions_back), back,
                         modifier = Modifier.testTag("native-permissions-back"))
                     Text(page?.takeUnless { it in setOf("system", "products") } ?: stringResource(when(page) { "system" -> R.string.native_permissions_system_permissions; "products" -> R.string.native_permissions_product_capabilities; else -> R.string.native_permissions_title }), style = MaterialTheme.typography.titleLarge,
@@ -116,7 +123,7 @@ fun NativePermissionsScreen(
             }
         } else LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).navigationBarsPadding()
             .testTag("native-permissions-content"), state = listState,
-            contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (state.error != null) item(key = "error") { PermissionError(state.error, onAction) }
             if (state.queue.active || state.queue.error != null) item(key = "queue") { QueueCard(state.queue, onAction) }
             items(state.pendingRequests, key = { "pending:${it.id}" }) { request ->
@@ -138,31 +145,52 @@ fun NativePermissionsScreen(
             }
             if (destination == null) {
             item(key = "policy") {
-                PermissionSection(stringResource(R.string.native_permissions_authorization)) {
-                    Button(onClick = { confirmation = "batch" }, enabled = idle,
-                        colors = ButtonDefaults.buttonColors(),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("native-permissions-set-up-all")) {
-                        Text(stringResource(R.string.native_permissions_set_up_all))
-                    }
-                    OutlinedButton(onClick = { onAction(NativePermissionAction.SelectPolicy(NativeAuthorizationPolicy.ON_FIRST_USE)) }, enabled = idle,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("native-permissions-first-use")
-                            .semantics { selected = state.policy == NativeAuthorizationPolicy.ON_FIRST_USE }) {
-                        Text(stringResource(R.string.native_permissions_ask_first_use))
-                        if (state.policy == NativeAuthorizationPolicy.ON_FIRST_USE) { Spacer(Modifier.width(8.dp)); DroyIcon(R.drawable.native_ui_check, null) }
+                Column {
+                    DroySettingsSectionTitle(stringResource(R.string.native_permissions_authorization))
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        val stacked = maxWidth < 320.dp || LocalDensity.current.fontScale > 1.3f
+                        val width = if (stacked) maxWidth else (maxWidth - 8.dp) / 2
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { confirmation = "batch" }, enabled = idle,
+                                modifier = Modifier.width(width).heightIn(min = 48.dp).testTag("native-permissions-set-up-all")
+                                    .semantics { selected = state.policy == NativeAuthorizationPolicy.BATCH }) {
+                                if (state.policy == NativeAuthorizationPolicy.BATCH) {
+                                    DroyIcon(R.drawable.native_ui_check, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                Text(stringResource(R.string.native_permissions_set_up_all))
+                            }
+                            val firstUse = state.policy == NativeAuthorizationPolicy.ON_FIRST_USE
+                            FilledTonalButton(onClick = { onAction(NativePermissionAction.SelectPolicy(NativeAuthorizationPolicy.ON_FIRST_USE)) }, enabled = idle,
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = if (firstUse) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = if (firstUse) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer),
+                                modifier = Modifier.width(width).heightIn(min = 48.dp).testTag("native-permissions-first-use")
+                                    .semantics { selected = firstUse }) {
+                                if (firstUse) {
+                                    DroyIcon(R.drawable.native_ui_check, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                Text(stringResource(R.string.native_permissions_ask_first_use))
+                            }
+                        }
                     }
                 }
             }
             item(key = "separate-title") { SectionTitle(R.string.native_permissions_separate_access) }
-            item(key = "accessibility") {
+            item(key = "independent-access") {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            run {
                 val label = when { !state.fresh -> R.string.native_permissions_unknown
                     state.accessibility.connected -> R.string.native_permissions_connected
                     state.accessibility.enabled -> R.string.native_permissions_waiting_connection
                     else -> R.string.native_permissions_not_enabled }
                 AccessCard(stringResource(R.string.native_permissions_accessibility), stringResource(label),
                     action = stringResource(R.string.native_permissions_settings), enabled = idle,
-                    onClick = { confirmation = "accessibility" }, tag = "native-permissions-accessibility")
+                    onClick = { confirmation = "accessibility" }, tag = "native-permissions-accessibility",
+                    shape = ListItemDefaults.segmentedShapes(0, 3).shape)
             }
-            item(key = "root") {
+            run {
                 val label = when {
                     !state.fresh -> R.string.native_permissions_unknown
                     state.root.running -> R.string.native_permissions_verifying
@@ -171,13 +199,13 @@ fun NativePermissionsScreen(
                     state.root.verified -> R.string.native_permissions_verified
                     else -> R.string.native_permissions_not_verified
                 }
-                Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Surface(shape = ListItemDefaults.segmentedShapes(1, 3).shape, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
                         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(stringResource(R.string.native_permissions_root), style = MaterialTheme.typography.bodyLarge)
-                                Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                PermissionStatus(stringResource(label))
                             }
                             TextButton(onClick = { confirmation = "root" }, enabled = idle,
                                 modifier = Modifier.heightIn(min = 48.dp).testTag("native-permissions-root")) {
@@ -195,7 +223,7 @@ fun NativePermissionsScreen(
                     }
                 }
             }
-            item(key = "shizuku") {
+            run {
                 val label = when {
                     !state.fresh -> R.string.native_permissions_unknown
                     !state.shizuku.installed -> R.string.native_permissions_not_installed
@@ -208,7 +236,10 @@ fun NativePermissionsScreen(
                 AccessCard(stringResource(R.string.native_permissions_shizuku), stringResource(label),
                     action = stringResource(if (open) R.string.native_permissions_open_shizuku else R.string.native_permissions_authorize),
                     enabled = idle && state.shizuku.installed,
-                    onClick = { if (open) onAction(NativePermissionAction.OpenShizuku) else confirmation = "shizuku" }, tag = "native-permissions-shizuku")
+                    onClick = { if (open) onAction(NativePermissionAction.OpenShizuku) else confirmation = "shizuku" }, tag = "native-permissions-shizuku",
+                    shape = ListItemDefaults.segmentedShapes(2, 3).shape)
+            }
+            }
             }
             item(key = "background-title") { SectionTitle(R.string.native_permissions_background_battery) }
             item(key = "background") {
@@ -319,7 +350,7 @@ fun NativePermissionsScreen(
 
 @Composable
 private fun SectionTitle(@StringRes label: Int) {
-    Text(stringResource(label), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 8.dp, top = 8.dp))
+    DroySettingsSectionTitle(stringResource(label))
 }
 
 @Composable
@@ -334,16 +365,24 @@ private fun PermissionSection(title: String, status: String? = null, content: @C
 }
 
 @Composable
-private fun AccessCard(title: String, status: String, action: String, enabled: Boolean, onClick: () -> Unit, tag: String) {
-    Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 8.dp).heightIn(min = 64.dp),
+private fun AccessCard(title: String, status: String, action: String, enabled: Boolean, onClick: () -> Unit, tag: String, shape: Shape = MaterialTheme.shapes.large) {
+    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 6.dp, bottom = 6.dp).heightIn(min = 64.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge)
-                Text(status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                PermissionStatus(status)
             }
             TextButton(onClick = onClick, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).testTag(tag)) { Text(action) }
         }
+    }
+}
+
+@Composable
+private fun PermissionStatus(status: String) {
+    Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant) {
+        Text(status, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
     }
 }
 

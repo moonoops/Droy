@@ -25,7 +25,7 @@ class NativeSetupJsonTest {
         assertEquals(2, parsed.step); assertEquals(5, parsed.legacyStep); assertEquals("usb", parsed.source)
         assertTrue(parsed.required); assertFalse(parsed.completed)
         val old = NativeSetupJson.route(route(step = 6, completed = true).put("legacyStep", 2))
-        assertTrue(old.completed); assertFalse(old.required); assertEquals(2, old.legacyStep)
+        assertEquals(5, old.step); assertTrue(old.completed); assertFalse(old.required); assertEquals(2, old.legacyStep)
     }
 
     @Test fun unknownOrMalformedRoutingDoesNotLookLikeACompletedInstallation() {
@@ -58,7 +58,7 @@ class NativeSetupJsonTest {
         val saved = NativeUserProfile("Saved user", avatar)
         val request = NativeSetupJson.identityRequest(saved)
         assertEquals(setOf("expectedProfile"), request.keys().asSequence().toSet())
-        assertEquals(setOf("name", "avatarUrl"), request.getJSONObject("expectedProfile").keys().asSequence().toSet())
+        assertEquals(setOf("name", "avatarUrl", "bio"), request.getJSONObject("expectedProfile").keys().asSequence().toSet())
         assertEquals("Saved user", request.getJSONObject("expectedProfile").getString("name"))
         assertFalse(request.toString().contains("confirmed"))
         assertFalse(request.toString().contains("completed"))
@@ -66,21 +66,50 @@ class NativeSetupJsonTest {
 
     @Test fun identityValidationKeepsUnicodeNamesButRejectsForeignAvatarsAndBrokenText() {
         val unicode = "😀".repeat(80)
-        assertEquals(unicode, NativeSetupJson.validateIdentity(NativeSetupIdentityDraft(unicode, avatar)).name)
-        assertEquals("用户", NativeSetupJson.validateIdentity(NativeSetupIdentityDraft("  用户  ", avatar)).name)
+        assertEquals(unicode, NativeSetupJson.validateIdentity(NativeSetupIdentityDraft(unicode, avatar, bio = "")).name)
+        assertEquals("用户", NativeSetupJson.validateIdentity(NativeSetupIdentityDraft("  用户  ", avatar, bio = "")).name)
         for (draft in listOf(NativeSetupIdentityDraft("", avatar), NativeSetupIdentityDraft("Name", "https://example.invalid/photo.png"),
             NativeSetupIdentityDraft("Name", "/droy/companions/kaka/attachments/other"), NativeSetupIdentityDraft("bad\nname", avatar),
             NativeSetupIdentityDraft("\uD800", avatar), NativeSetupIdentityDraft("a".repeat(81), avatar))) {
-            assertCode("setup_identity_invalid") { NativeSetupJson.validateIdentity(draft) }
+            assertCode("setup_identity_invalid") { NativeSetupJson.validateIdentity(draft.copy(bio = "")) }
         }
     }
 
     @Test fun interruptionDraftsContainOnlyNonSecretIdentityFields() {
         val value = NativeSetupJson.draftValue(NativeSetupIdentityDraft("Draft", avatar, true))
-        assertEquals(setOf("version", "name", "avatarUrl", "edited"), value.keys().asSequence().toSet())
+        assertEquals(setOf("version", "name", "avatarUrl", "edited", "bio"), value.keys().asSequence().toSet())
         assertEquals("Draft", NativeSetupJson.draft(value).name)
         assertTrue(NativeSetupJson.draft(value).edited)
         assertCode("malformed_response") { NativeSetupJson.draft(value.put("apiKey", "fictional-test-value")) }
+    }
+
+    @Test fun legacyProgressResumesAtTheFinalPermissionStepWithoutCompleting() {
+        val parsed = NativeSetupJson.route(route(step = 6))
+        assertEquals(5, parsed.step); assertTrue(parsed.required); assertFalse(parsed.completed)
+    }
+
+    @Test fun legacyDraftBiographyRemainsUnknownUntilTheSavedProfileIsRead() {
+        val legacy = JSONObject().put("version", 1).put("name", "Draft").put("avatarUrl", avatar).put("edited", true)
+        assertNull(NativeSetupJson.draft(legacy).bio)
+        val edited = NativeSetupIdentityDraft("Draft", avatar, true, "Biography\nTwo lines")
+        assertEquals(edited, NativeSetupJson.draft(NativeSetupJson.draftValue(edited)))
+        assertEquals("", NativeSetupJson.draft(NativeSetupJson.draftValue(edited.copy(bio = ""))).bio)
+    }
+
+    @Test fun optionalBiographyAcceptsMultilineUnicodeAndRejectsInvalidOrOversizedValues() {
+        for (bio in listOf("", "多行\nBiography\ttext", "😀".repeat(2000))) {
+            val value = NativeSetupJson.validateIdentity(NativeSetupIdentityDraft("User", avatar, bio = bio))
+            assertEquals(bio, value.bio)
+        }
+        for (bio in listOf("x".repeat(2001), "bad\u0000text", "\uD800")) {
+            assertFalse(NativeSetupJson.validBio(bio))
+            assertCode("setup_identity_invalid") { NativeSetupJson.validateIdentity(NativeSetupIdentityDraft("User", avatar, bio = bio)) }
+        }
+        val value = envelope()
+        value.getJSONObject("state").getJSONObject("identity").getJSONObject("profile").put("bio", "Saved biography")
+        assertEquals("Saved biography", NativeSetupJson.live(value).profile.bio)
+        assertEquals("Saved biography", NativeSetupJson.identityRequest(NativeSetupJson.live(value).profile)
+            .getJSONObject("expectedProfile").getString("bio"))
     }
 
     @Test fun privateConfigurationExtrasNeverReachTheTypedPublicState() {

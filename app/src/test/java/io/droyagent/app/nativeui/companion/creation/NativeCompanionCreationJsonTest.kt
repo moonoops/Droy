@@ -43,6 +43,32 @@ class NativeCompanionCreationJsonTest {
         assertEquals("Fictional edited persona", value.getString("personalityOverride")); assertEquals("upload-fixture", value.getString("avatarUploadId"))
         assertFalse(value.has("avatarUrl")); assertEquals("19:35", value.getJSONObject("settings").getJSONObject("quietHours").getString("start"))
     }
+    @Test fun completePersonaSurvivesDraftRestoreAndSubmissionWithoutRewritingUserText() {
+        val source = "  Fictional reserved programmer.\nKeep these exact words.  "
+        val original = NativeCreationFixtures.journal().let { it.copy(editor = it.editor.copy(
+            personalityOverride = source, behaviorStyleOverride = "Listen before advising.", replyStyleOverride = "Dry humor.")) }
+        val frozen = original.copy(frozenPayload = NativeCreationJson.payload(original))
+        val restored = NativeCreationJson.journal(NativeCreationJson.journal(frozen))
+        assertEquals(source, restored.editor.personalityOverride)
+        assertEquals(original.editor.behaviorStyleOverride, restored.editor.behaviorStyleOverride)
+        assertEquals(original.editor.replyStyleOverride, restored.editor.replyStyleOverride)
+        val payload = JSONObject(restored.frozenPayload!!)
+        assertEquals(source, payload.getString("personalityOverride"))
+        assertEquals("Listen before advising.", payload.getString("behaviorStyleOverride"))
+        assertEquals("Dry humor.", payload.getString("replyStyleOverride"))
+        assertFalse(original.editor.copy(replyStyleOverride = "x".repeat(16385)).valid)
+    }
+    @Test fun oldFrozenDraftWithoutNewRoleFieldsRemainsRecoverable() {
+        val original = NativeCreationFixtures.journal().let { it.copy(frozenPayload = NativeCreationJson.payload(it)) }
+        val json = JSONObject(NativeCreationJson.journal(original))
+        json.getJSONObject("editor").remove("behaviorStyleOverride")
+        json.getJSONObject("editor").remove("replyStyleOverride")
+        json.getJSONObject("editor").getJSONObject("template").remove("customPersonaDefaults")
+        val restored = NativeCreationJson.journal(json.toString())
+        assertEquals(original.frozenPayload, restored.frozenPayload)
+        assertEquals("", restored.editor.behaviorStyleOverride)
+        assertEquals("", restored.editor.replyStyleOverride)
+    }
     @Test fun inheritedModelIsExplicitNullAndDoesNotChangeGlobalDefaults() {
         val value = JSONObject(NativeCreationJson.payload(NativeCreationFixtures.journal()))
         assertTrue(value.has("model")); assertTrue(value.isNull("model")); assertFalse(value.has("defaultModel"))

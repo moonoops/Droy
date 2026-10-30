@@ -28,14 +28,20 @@ function profileValue(value) {
     || /[\u0000-\u001f\u007f]/u.test(value.name)
     || [...value.name].some(char => char.length === 1 && /[\ud800-\udfff]/u.test(char))
     || !/^(?:\/droy\/companions\/assets\/user-default\.png|\/droy\/companions\/user-profile\/attachments\/[A-Za-z0-9_.:-]{1,160})$/u.test(value.avatarUrl)) return null;
-  return { name: value.name, avatarUrl: value.avatarUrl };
+  const bio = Object.hasOwn(value, 'bio') ? value.bio : '';
+  if (typeof bio !== 'string' || [...bio].length > 2000 || Buffer.byteLength(bio) > 8000 || bio !== bio.trim()
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(bio)
+    || [...bio].some(char => char.length === 1 && /[\ud800-\udfff]/u.test(char))) return null;
+  return { name: value.name, avatarUrl: value.avatarUrl, bio };
 }
 
 /** This digest binds confirmation to the saved identity, never to the old welcome address. */
 export function setupUserProfileFingerprint(profile) {
   const value = profileValue(profile);
   if (!value) throw new TypeError('INVALID_SETUP_PROFILE');
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  // Preserve confirmations from the pre-biography schema when no bio was saved.
+  const identity = { name: value.name, avatarUrl: value.avatarUrl, ...(value.bio ? { bio: value.bio } : {}) };
+  return createHash('sha256').update(JSON.stringify(identity)).digest('hex');
 }
 
 export class SetupError extends Error {
@@ -282,7 +288,7 @@ export function createSetupService(ctx, bridge) {
     async nativeComplete(signal) { return nativeEnvelope('nativeComplete', nativeSignal(signal)); },
     async nativeConfirmIdentity(input, signal) {
       if (!object(input) || Object.keys(input).length !== 1 || !Object.hasOwn(input, 'expectedProfile')
-        || !object(input.expectedProfile) || Object.keys(input.expectedProfile).sort().join(',') !== 'avatarUrl,name'
+        || !object(input.expectedProfile) || !['avatarUrl,bio,name', 'avatarUrl,name'].includes(Object.keys(input.expectedProfile).sort().join(','))
         || !profileValue(input.expectedProfile))
         throw nativeFailure(ctx, 'invalid', 'INVALID_NATIVE_SETUP_REQUEST');
       const bounded = nativeSignal(signal);
@@ -358,11 +364,11 @@ export function createSetupService(ctx, bridge) {
   };
 }
 
-async function requestBody(req) {
+async function requestBody(req, limit = MAX_BODY) {
   const parts = []; let bytes = 0;
   for await (const part of req) {
     bytes += part.length;
-    if (bytes > MAX_BODY) throw new SetupError('SETUP_REQUEST_TOO_LARGE', '安装请求过大。', 413);
+    if (bytes > limit) throw new SetupError('SETUP_REQUEST_TOO_LARGE', '安装请求过大。', 413);
     parts.push(Buffer.from(part));
   }
   let value;
@@ -399,7 +405,7 @@ export function installSetupServices(ctx, bridge) {
         if (native && (new URL(req.url, 'http://127.0.0.1').pathname !== path || new URL(req.url, 'http://127.0.0.1').search
           || method === 'POST' && !/^application\/json(?:\s*;|\s*$)/i.test(req.headers['content-type'] ?? '')))
           throw nativeFailure(ctx, 'invalid', 'INVALID_NATIVE_SETUP_REQUEST');
-        const input = method === 'POST' ? await requestBody(req) : {};
+        const input = method === 'POST' ? await requestBody(req, operation === 'nativeConfirmIdentity' ? 16384 : MAX_BODY) : {};
         if (operation !== 'test' && operation !== 'nativeConfirmIdentity' && Object.keys(input).length)
           throw new SetupError('INVALID_SETUP_REQUEST', '此安装检查不接受配置或凭据。');
         const result = operation === 'test' || operation === 'nativeConfirmIdentity' ? await service[operation](input, cancellation.signal) : await service[operation](cancellation.signal);

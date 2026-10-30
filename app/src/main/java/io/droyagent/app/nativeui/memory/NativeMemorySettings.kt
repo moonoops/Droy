@@ -17,32 +17,46 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
+import io.droyagent.app.nativeui.ui.DroySettingsToggle
+import io.droyagent.app.nativeui.ui.DroySettingsLink
+import io.droyagent.app.nativeui.ui.DroySettingsLinkGroup
+import io.droyagent.app.nativeui.ui.DroySettingsSectionTitle
 
 @Composable
 internal fun MemorySettings(state: NativeMemoryState, model: NativeMemoryViewModel, onPermissions: (() -> Unit)?, modifier: Modifier) {
     val status = state.status
     LazyColumn(modifier.fillMaxWidth().navigationBarsPadding().testTag("native-memory-settings"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (status != null) {
-            item("master") { MemoryCard {
-                MemorySwitch(stringResource(R.string.native_memory_master), status.settings.enabled,
-                    state.runtime.ready && !state.busy && state.unconfirmed == null,
-                    { model.settings("enabled", it) }, tag = "native-memory-master")
-                if (status.settings.enabled && !status.gateReady) {
+            item("master") {
+                DroySettingsToggle(stringResource(R.string.native_memory_master), R.drawable.native_settings_auto_stories,
+                    status.settings.enabled, state.runtime.ready && !state.busy && state.unconfirmed == null, 0, 1,
+                    Modifier.testTag("native-memory-master"), emphasized = true) { model.settings("enabled", it) }
+            }
+            if (status.settings.enabled && !status.gateReady) item("gate") {
+                Column {
                     Text(memoryMessage(status.gateReason), color = MaterialTheme.colorScheme.error)
                     onPermissions?.let { TextButton(onClick = it) { Text(stringResource(R.string.native_permissions_title)) } }
                 }
-                if (status.storageLimited == true) Text(stringResource(R.string.native_memory_storage_limited), color = MaterialTheme.colorScheme.error)
-                MemorySwitch(stringResource(R.string.native_memory_automatic), status.settings.automaticExtraction,
-                    state.runtime.ready && !state.busy && state.unconfirmed == null,
-                    { model.settings("automaticExtraction", it) })
-                status.maintenance?.lastCode?.takeUnless { it in setOf("MEMORY_DISABLED", "MEMORY_MAINTENANCE_STOPPED") }?.let {
-                    Text(memoryMessage(it), color = MaterialTheme.colorScheme.error)
+            }
+            if (status.storageLimited == true) item("storage") {
+                Text(stringResource(R.string.native_memory_storage_limited), color = MaterialTheme.colorScheme.error)
+            }
+            item("automatic") {
+                DroySettingsToggle(stringResource(R.string.native_memory_automatic), R.drawable.native_settings_tune,
+                    status.settings.automaticExtraction, state.runtime.ready && !state.busy && state.unconfirmed == null, 0, 1) {
+                    model.settings("automaticExtraction", it)
                 }
-            } }
+            }
+            status.maintenance?.lastCode?.takeUnless { it in setOf("MEMORY_DISABLED", "MEMORY_MAINTENANCE_STOPPED") }?.let { code ->
+                item("maintenance") { Text(memoryMessage(code), color = MaterialTheme.colorScheme.error) }
+            }
         }
-        item("capture") { MemoryCard {
-            MemoryLink(stringResource(R.string.native_memory_capture), { model.page(NativeMemoryPage.CAPTURE) }, tag = "native-memory-open-capture")
-        } }
+        item("capture") {
+            DroySettingsLinkGroup(stringResource(R.string.native_memory_record_group), listOf(
+                DroySettingsLink(stringResource(R.string.native_memory_capture), R.drawable.native_settings_auto_stories,
+                    "native-memory-open-capture") { model.page(NativeMemoryPage.CAPTURE) }
+            ))
+        }
     }
 }
 
@@ -53,35 +67,44 @@ internal fun MemoryCapture(state: NativeMemoryState, model: NativeMemoryViewMode
     var consent by rememberSaveable { mutableStateOf(false) }
     LazyColumn(modifier.fillMaxWidth().navigationBarsPadding().testTag("native-memory-capture"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (capture != null && config != null) {
-            item("master") { MemoryCard {
-                MemorySwitch(stringResource(R.string.native_memory_capture), config.enabled && !config.paused,
-                    state.runtime.ready && !state.busy && state.unconfirmed == null, {
-                        if (it && !config.allApplications) consent = true else model.capture("enabled", it)
-                    }, tag = "native-memory-capture-master")
-                if (!capture.failure.isNullOrBlank()) Text(memoryMessage(capture.failure), color = MaterialTheme.colorScheme.error)
-                if (config.enabled && !config.allApplications) TextButton(onClick = { consent = true }) {
-                    Text(stringResource(R.string.native_memory_update_scope))
+            item("master") {
+                DroySettingsToggle(stringResource(R.string.native_memory_capture), R.drawable.native_settings_auto_stories,
+                    config.enabled && !config.paused, state.runtime.ready && !state.busy && state.unconfirmed == null, 0, 1,
+                    Modifier.testTag("native-memory-capture-master"), emphasized = true) {
+                    if (it && !config.allApplications) consent = true else model.capture("enabled", it)
                 }
-            } }
-            item("sources") { MemoryCard {
-                Text(stringResource(R.string.native_memory_record_content), style = MaterialTheme.typography.titleSmall)
-                for ((key, checked, title) in listOf(Triple("activityEnabled", config.activityEnabled, R.string.native_memory_activity_source),
-                    Triple("pageTextEnabled", config.pageTextEnabled, R.string.native_memory_page_text), Triple("deviceStateEnabled", config.deviceStateEnabled, R.string.native_memory_device_source),
-                    Triple("locationEnabled", config.locationEnabled, R.string.native_memory_location_source))) {
-                    val enabled = config.enabled && !config.paused && state.runtime.ready && !state.busy && state.unconfirmed == null
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(checked, enabled = enabled, role = Role.Checkbox,
-                        onValueChange = { value ->
-                            model.captureWithPermission(key, value)
-                        }).testTag("native-memory-source-$key"), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Checkbox(checked, null, enabled = enabled)
-                        Text(stringResource(title), Modifier.padding(start = 12.dp))
+            }
+            if (!capture.failure.isNullOrBlank()) item("failure") { Text(memoryMessage(capture.failure), color = MaterialTheme.colorScheme.error) }
+            if (config.enabled && !config.allApplications) item("scope") {
+                TextButton(onClick = { consent = true }) { Text(stringResource(R.string.native_memory_update_scope)) }
+            }
+            item("sources") {
+                Column {
+                    DroySettingsSectionTitle(stringResource(R.string.native_memory_record_content))
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        listOf(Triple("activityEnabled", config.activityEnabled, R.string.native_memory_activity_source),
+                            Triple("pageTextEnabled", config.pageTextEnabled, R.string.native_memory_page_text),
+                            Triple("deviceStateEnabled", config.deviceStateEnabled, R.string.native_memory_device_source),
+                            Triple("locationEnabled", config.locationEnabled, R.string.native_memory_location_source)).forEachIndexed { index, (key, checked, title) ->
+                            val enabled = config.enabled && !config.paused && state.runtime.ready && !state.busy && state.unconfirmed == null
+                            val shapes = ListItemDefaults.segmentedShapes(index, 4)
+                            SegmentedListItem(checked = checked, onCheckedChange = { model.captureWithPermission(key, it) }, enabled = enabled,
+                                shapes = shapes.copy(selectedShape = shapes.shape),
+                                colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    selectedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                                trailingContent = { Checkbox(checked, null, enabled = enabled) },
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("native-memory-source-$key")) {
+                                Text(stringResource(title))
+                            }
+                        }
                     }
+                    if (config.enabled && (config.activityEnabled || config.pageTextEnabled) && capture.activityState == "waiting_permission")
+                        TextButton(onClick = { model.openPermission("accessibility") }) { Text(stringResource(R.string.native_memory_accessibility)) }
+                    if (config.enabled && config.locationEnabled && !capture.locationPermission)
+                        TextButton(onClick = { model.openPermission("location") }) { Text(stringResource(R.string.native_memory_location_permission)) }
                 }
-                if (config.enabled && (config.activityEnabled || config.pageTextEnabled) && capture.activityState == "waiting_permission")
-                    TextButton(onClick = { model.openPermission("accessibility") }) { Text(stringResource(R.string.native_memory_accessibility)) }
-                if (config.enabled && config.locationEnabled && !capture.locationPermission)
-                    TextButton(onClick = { model.openPermission("location") }) { Text(stringResource(R.string.native_memory_location_permission)) }
-            } }
+            }
         } else if (state.status != null) item("unavailable") { Text(stringResource(R.string.native_service_unavailable)) }
     }
     if (consent) AlertDialog(onDismissRequest = { consent = false }, title = { Text(stringResource(R.string.native_memory_capture)) },

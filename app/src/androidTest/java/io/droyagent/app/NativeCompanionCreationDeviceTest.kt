@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Base64
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -58,6 +59,63 @@ class NativeCompanionCreationDeviceTest {
             val id = rows.getJSONObject(index).getString("id")
             if (id in importedIds) store.complete(id, "work")
         }
+    }
+
+    @Test fun customPersonaPreviewEditsAllFieldsAndKeepsNewProactiveDefault() {
+        openCreation()
+        compose.onNodeWithTag("native-creation-template-maimai").performClick()
+        awaitNode("native-creation-name")
+        assertTrue(creation.state.value.editor!!.settings.proactiveEnabled)
+        compose.onNodeWithTag("native-creation-name").performTextReplacement("Fictional persona fixture")
+        compose.onNodeWithTag("native-creation-personality").performScrollTo().performClick()
+        awaitNode("native-companion-personality-input")
+        compose.onNodeWithTag("native-companion-personality-input").performTextReplacement("Fictional reserved male programmer.")
+        val locale = InstrumentationRegistry.getArguments().getString("nativeFixtureLocale", "en")
+        val expectedBehavior = if (locale == "zh") "根据上面的人格描述形成一致的行动习惯。" else "Let the personality above guide consistent actions."
+        compose.onNodeWithTag("native-companion-behavior-input").performScrollTo().assertTextContains(expectedBehavior, substring = true)
+        settleAndCapture("persona-custom-defaults-$locale")
+        compose.onNodeWithTag("native-companion-behavior-input").performTextReplacement("Listen before offering advice.")
+        compose.onNodeWithTag("native-companion-reply-style-input").performScrollTo().performTextReplacement("Dry humor and short replies.")
+        compose.onNodeWithTag("native-companion-reply-style-input").assertTextContains("Dry humor and short replies.")
+        settleAndCapture("persona-custom-fields-$locale")
+        compose.onNodeWithTag("native-companion-personality-save").performClick()
+        awaitNode("native-creation-name")
+        val editor = creation.state.value.editor!!
+        assertEquals("Listen before offering advice.", editor.behaviorStyleOverride)
+        assertEquals("Dry humor and short replies.", editor.replyStyleOverride)
+        awaitJournal(creation.state.value.journal!!.requestId)
+        fixture.recreate(); bindModels()
+        awaitNode("native-creation-name")
+        compose.waitUntil(20_000) { creation.state.value.canCreate }
+        assertEquals(editor, creation.state.value.editor)
+        compose.onNodeWithTag("native-creation-create").performClick()
+        compose.waitUntil(20_000) { companions.state.value.companions.any { it.name == "Fictional persona fixture" } }
+        val saved = profiles().single { it.getString("name") == "Fictional persona fixture" }
+        assertEquals("Fictional reserved male programmer.", saved.getString("personality"))
+        assertEquals("Listen before offering advice.", saved.getString("behaviorStyle"))
+        assertEquals("Dry humor and short replies.", saved.getString("replyStyle"))
+        assertTrue(saved.getJSONObject("settings").getBoolean("proactiveEnabled"))
+    }
+
+    @Test fun expandedStickerTrayScrollsAndSendsLastSticker() {
+        val id = companions.state.value.companions.single().id
+        compose.onNodeWithTag("native-tab-messages").performClick()
+        compose.onNodeWithTag("native-companion-conversation:$id").performClick()
+        compose.waitUntil(15_000) { companions.state.value.selectedCompanionId == id && companions.state.value.stickers.size == 9 && !companions.state.value.loading }
+        compose.onNodeWithTag("native-companion-composer-options").performClick()
+        val row = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.HorizontalScrollAxisRange))
+        row.performScrollToIndex(8)
+        val last = companions.state.value.stickers.last()
+        assertEquals("sticker-thinking", last.id)
+        compose.onNodeWithContentDescription(last.label).assertIsDisplayed()
+        val locale = InstrumentationRegistry.getArguments().getString("nativeFixtureLocale", "en")
+        settleAndCapture("expanded-stickers-$locale")
+        compose.onNodeWithContentDescription(last.label).performClick()
+        compose.waitUntil(15_000) { companions.state.value.messages.any { it.role == "user" && it.stickerId == last.id && it.status != "failed" } }
+        assertEquals(1, companions.state.value.messages.count { it.role == "user" && it.stickerId == last.id })
+        val sent = companions.state.value.messages.single { it.role == "user" && it.stickerId == last.id }
+        compose.onNodeWithTag("native-companion-message:${sent.id}").assertIsDisplayed()
+        settleAndCapture("expanded-sticker-sent-$locale")
     }
 
     @Test fun nativeTemplateCreationPersistsAllEditableFieldsAndOwnedAvatarAcrossRecreation() {
@@ -214,6 +272,13 @@ class NativeCompanionCreationDeviceTest {
         awaitNode("native-add-companion"); compose.onNodeWithTag("native-add-companion").performClick()
         compose.waitUntil(20_000) { creation.state.value.runtime.ready && creation.state.value.catalogLoaded && !creation.state.value.loading }
         if (assertVisible) awaitNode("native-companion-creation")
+    }
+    private fun settleAndCapture(name: String) {
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        SystemClock.sleep(250)
+        fixture.capture(name)
     }
     private fun awaitNode(tag: String) { compose.waitUntil(20_000) { compose.onAllNodesWithTag(tag).fetchSemanticsNodes(false).isNotEmpty() }; compose.waitForIdle() }
     private fun done() { compose.onNodeWithText(context.getString(R.string.native_companion_creation_apply)).performScrollTo().performClick() }

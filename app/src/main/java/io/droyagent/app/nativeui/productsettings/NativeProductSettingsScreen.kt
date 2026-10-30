@@ -2,6 +2,16 @@ package io.droyagent.app.nativeui.productsettings
 
 import io.droyagent.app.nativeui.ui.DroySwitch as Switch
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.lazy.rememberLazyListState
+import io.droyagent.app.nativeui.ui.DroySettingsLink
+import io.droyagent.app.nativeui.ui.DroySettingsLinkGroup
+import io.droyagent.app.nativeui.ui.DroySettingsSectionTitle
+import io.droyagent.app.nativeui.ui.DroySettingsToggle
+import io.droyagent.app.nativeui.ui.droyNavigationMotion
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.viewinterop.AndroidView
@@ -21,6 +31,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -56,6 +68,12 @@ fun NativeProductSettingsScreen(
     val section = initialSection
     val scope = rememberCoroutineScope()
     var snapshot by remember(section, presentation) { mutableStateOf(presentation.current(section)) }
+    var deliveryState by remember(section, presentation) { mutableStateOf(presentation.current(ProductSettingsSection.Proactive)) }
+    var deliveryFailed by remember { mutableStateOf(false) }
+    val overviewScroll = rememberLazyListState()
+    val appsScroll = rememberLazyListState()
+    val historyScroll = rememberLazyListState()
+    val navigationMotion = droyNavigationMotion()
     var pets by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var catalogError by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -74,6 +92,15 @@ fun NativeProductSettingsScreen(
     DisposableEffect(section) { onDispose { reportReady(false) } }
     val clipboard = LocalClipboardManager.current
     suspend fun refresh() {
+        if (section == ProductSettingsSection.Notifications) {
+            try {
+                deliveryState = controller.snapshot(ProductSettingsSection.Proactive).also {
+                    presentation.remember(ProductSettingsSection.Proactive, it)
+                }
+                deliveryFailed = false
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { deliveryFailed = true }
+        }
         snapshot = controller.snapshot(section).also { presentation.remember(section, it) }
         if (section == ProductSettingsSection.Pet) {
             try { pets = controller.pets(); catalogError = false }
@@ -129,7 +156,7 @@ fun NativeProductSettingsScreen(
     }
     val title = when (section) {
         ProductSettingsSection.General -> R.string.nps_general
-        ProductSettingsSection.Notifications -> when (notificationPage) { "apps" -> R.string.nps_app_management; "history" -> R.string.nps_archive; else -> R.string.nps_notifications }
+        ProductSettingsSection.Notifications -> when (notificationPage) { "apps" -> R.string.nps_app_management; "history" -> R.string.nps_archive; else -> R.string.native_settings_notifications }
         ProductSettingsSection.Proactive -> R.string.nps_proactive
         ProductSettingsSection.Pet -> R.string.nps_pet
         ProductSettingsSection.Diagnostics -> R.string.nps_diagnostics
@@ -147,63 +174,146 @@ fun NativeProductSettingsScreen(
         }) { padding ->
     Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).testTag(
         if (state != null && !busy && !failed) "native-product-body:${section.wire}" else "native-product-pending:${section.wire}")) {
-    LazyColumn(Modifier.fillMaxSize().navigationBarsPadding().imePadding().testTag("native-product-list:${section.wire}"),
-        contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (failed) item {
+    AnimatedContent(notificationPage, modifier = Modifier.fillMaxSize(), transitionSpec = {
+        if (targetState != null) (navigationMotion.enter togetherWith navigationMotion.exit).using(null)
+        else (navigationMotion.popEnter togetherWith navigationMotion.popExit).using(null)
+    }, label = "notificationNavigation") { displayedPage ->
+    LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding().testTag("native-product-list:${section.wire}"),
+        state = when (displayedPage) { "apps" -> appsScroll; "history" -> historyScroll; else -> overviewScroll },
+        contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(if (displayedPage in setOf("apps", "history")) 2.dp else 12.dp)) {
+        if (failed && !(section == ProductSettingsSection.Notifications && displayedPage == null && state == null)) item {
             Text(stringResource(failureMessage), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("native-product-error:${section.wire}"))
             TextButton(onClick = { run() }, enabled = !busy) { Text(stringResource(R.string.nps_retry)) }
+        }
+        if (section == ProductSettingsSection.Notifications && displayedPage == null) {
+                        item {
+                            Column(Modifier.testTag("native-notification-delivery")) {
+                                DroySettingsSectionTitle(stringResource(R.string.nps_delivery_section))
+                                val delivery = deliveryState
+                                if (delivery != null) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    DroySettingsToggle(stringResource(R.string.nps_message_notifications), R.drawable.native_ui_chat_bubble,
+                                        delivery.optBoolean("messagesEnabled"), !busy && !deliveryFailed, 0, 2,
+                                        Modifier.testTag("native-product-switch:nps_message_notifications")) {
+                                        run {
+                                            deliveryState = controller.proactive(JSONObject().put("messagesEnabled", it)).also { value ->
+                                                presentation.remember(ProductSettingsSection.Proactive, value)
+                                            }
+                                        }
+                                    }
+                                    DroySettingsToggle(stringResource(R.string.nps_task_notifications), R.drawable.native_ui_edit_square,
+                                        delivery.optBoolean("tasksEnabled"), !busy && !deliveryFailed, 1, 2,
+                                        Modifier.testTag("native-product-switch:nps_task_notifications")) {
+                                        run {
+                                            deliveryState = controller.proactive(JSONObject().put("tasksEnabled", it)).also { value ->
+                                                presentation.remember(ProductSettingsSection.Proactive, value)
+                                            }
+                                        }
+                                    }
+                                }
+                                if (deliveryFailed) {
+                                    Text(stringResource(R.string.nps_delivery_error), color = MaterialTheme.colorScheme.error)
+                                    TextButton(onClick = { run() }, enabled = !busy) { Text(stringResource(R.string.nps_retry)) }
+                                }
+                            }
+                        }
+            if (state == null && failed) item {
+                Column(Modifier.testTag("native-notification-organization")) {
+                    DroySettingsSectionTitle(stringResource(R.string.nps_organization_section))
+                    Text(stringResource(R.string.nps_organization_error), color = MaterialTheme.colorScheme.error)
+                    TextButton(onClick = { run() }, enabled = !busy) { Text(stringResource(R.string.nps_retry)) }
+                }
+            }
         }
         if (state != null) when (section) {
             ProductSettingsSection.General -> {
                 item { generalPreferences() }
-                item { Toggle(R.string.nps_return, state.optBoolean("returnToDroyOnCompletion"), busy) { run { controller.display("returnToDroyOnCompletion", it) } } }
+                item {
+                    DroySettingsToggle(stringResource(R.string.nps_return), R.drawable.native_settings_repeat,
+                        state.optBoolean("returnToDroyOnCompletion"), !busy, 0, 1,
+                        Modifier.testTag("native-product-switch:nps_return")) {
+                        run { controller.display("returnToDroyOnCompletion", it) }
+                    }
+                }
             }
             ProductSettingsSection.Notifications -> {
-                when (notificationPage) {
+                when (displayedPage) {
                     "apps" -> {
                         item {
-                            Row {
-                                TextButton(onClick = { run { controller.notifications(JSONObject().put("operation", "setApps").put("enabled", true).put("packageNames", JSONArray(state.optJSONArray("apps").rows().map { it.getString("packageName") }))) } }, enabled = !busy) { Text(stringResource(R.string.nps_all_on)) }
-                                TextButton(onClick = { run { controller.notifications(JSONObject().put("operation", "setApps").put("enabled", false).put("packageNames", JSONArray(state.optJSONArray("apps").rows().map { it.getString("packageName") }))) } }, enabled = !busy) { Text(stringResource(R.string.nps_all_off)) }
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(bottom = 12.dp)) {
+                                ProductFilledField(search, { search = it }, label = { Text(stringResource(R.string.nps_search)) },
+                                    singleLine = true, modifier = Modifier.fillMaxWidth().testTag("native-notification-app-search"),
+                                    leadingIcon = { DroyIcon(R.drawable.native_settings_search, null) })
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilledTonalButton(onClick = { run { controller.notifications(JSONObject().put("operation", "setApps").put("enabled", true).put("packageNames", JSONArray(state.optJSONArray("apps").rows().map { it.getString("packageName") }))) } }, enabled = !busy,
+                                        modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(stringResource(R.string.nps_all_on)) }
+                                    OutlinedButton(onClick = { run { controller.notifications(JSONObject().put("operation", "setApps").put("enabled", false).put("packageNames", JSONArray(state.optJSONArray("apps").rows().map { it.getString("packageName") }))) } }, enabled = !busy,
+                                        modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(stringResource(R.string.nps_all_off)) }
+                                }
                             }
-                            OutlinedTextField(search, { search = it }, label = { Text(stringResource(R.string.nps_search)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                         }
-                        items(state.optJSONArray("apps").rows().filter { it.optString("label").contains(search, true) || it.optString("packageName").contains(search, true) }, key = { it.getString("packageName") }) { app ->
+                        val filteredApps = state.optJSONArray("apps").rows().filter { it.optString("label").contains(search, true) || it.optString("packageName").contains(search, true) }
+                        if (filteredApps.isEmpty()) item { Text(stringResource(R.string.nps_no_matching_apps), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp)) }
+                        items(filteredApps.size, key = { filteredApps[it].getString("packageName") }) { index ->
+                            val app = filteredApps[index]
                             val managed = app.optString("mode") == "managed"
-                            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).toggleable(managed, !busy, Role.Switch) { value -> run {
+                            val shapes = ListItemDefaults.segmentedShapes(index, filteredApps.size)
+                            SegmentedListItem(checked = managed, onCheckedChange = { value -> run {
                                 controller.notifications(JSONObject().put("operation", "setAppMode").put("packageName", app.getString("packageName")).put("mode", if (value) "managed" else "allow"))
-                            } }, verticalAlignment = Alignment.CenterVertically) {
-                                Text(app.optString("label"), Modifier.weight(1f).padding(end = 12.dp))
-                                Switch(managed, null, enabled = !busy)
+                            } }, enabled = !busy, shapes = shapes.copy(selectedShape = shapes.shape),
+                                colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    selectedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                                leadingContent = { InstalledApplicationIcon(app.getString("packageName")) },
+                                trailingContent = { Switch(managed, null, enabled = !busy) },
+                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).semantics { role = Role.Switch }
+                                    .testTag("native-notification-app:${app.getString("packageName")}")) {
+                                Text(app.optString("label"))
                             }
                         }
                     }
                     "history" -> {
-                        if (state.optJSONArray("archive").rows().isEmpty()) item { Text(stringResource(R.string.nps_empty)) }
-                        items(state.optJSONArray("archive").rows()) { notice ->
-                            Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                        val archive = state.optJSONArray("archive").rows()
+                        if (archive.isEmpty()) item {
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 64.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.secondaryContainer) {
+                                    Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) { DroyIcon(R.drawable.native_settings_notifications, null, modifier = Modifier.size(32.dp)) }
+                                }
+                                Text(stringResource(R.string.nps_no_notification_history), style = MaterialTheme.typography.titleMedium)
+                            }
+                        }
+                        items(archive.size) { index ->
+                            val notice = archive[index]
+                            Surface(shape = ListItemDefaults.segmentedShapes(index, archive.size).shape, color = MaterialTheme.colorScheme.surfaceContainerLow) {
                                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(notice.optString("title"), style = MaterialTheme.typography.titleSmall)
-                                    Text(notice.optString("text"), style = MaterialTheme.typography.bodyMedium)
+                                    Text(notice.optString("text"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                     }
                     else -> {
-                        item { Toggle(R.string.nps_enabled, state.optBoolean("enabled"), busy) { enabled ->
-                            if (!enabled) run { controller.notifications(JSONObject().put("operation", "configure").put("enabled", false)) }
-                            else if (state.optBoolean("requiresReview")) textRuleEditor = true
-                            else confirmation = Confirmation(R.string.nps_cloud_hint) { controller.notifications(JSONObject().put("operation", "configure").put("enabled", true)) }
-                        } }
-                        if (state.optBoolean("requiresReview")) item { Text(stringResource(R.string.nps_review_rules), color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                        if (state.optBoolean("enabled") && (!state.optBoolean("permissionGranted") || !state.optBoolean("connected"))) item {
-                            TextButton(onClick = actions.onPermissions) { Text(stringResource(R.string.nps_permissions)) }
-                        }
                         item {
-                            ProductGroup {
-                                EditRow(R.string.nps_app_management, "", busy) { notificationPage = "apps" }
-                                EditRow(R.string.nps_rules, "", busy) { textRuleEditor = true }
-                                EditRow(R.string.nps_archive, "", busy) { notificationPage = "history" }
+                            Column(Modifier.testTag("native-notification-organization")) {
+                                DroySettingsSectionTitle(stringResource(R.string.nps_organization_section))
+                                DroySettingsToggle(stringResource(R.string.nps_enabled), R.drawable.native_settings_filter_list,
+                                    state.optBoolean("enabled"), !busy, 0, 1,
+                                    Modifier.testTag("native-product-switch:nps_enabled"), emphasized = true) { enabled ->
+                                    if (!enabled) run { controller.notifications(JSONObject().put("operation", "configure").put("enabled", false)) }
+                                    else if (state.optBoolean("requiresReview")) textRuleEditor = true
+                                    else confirmation = Confirmation(R.string.nps_cloud_hint) { controller.notifications(JSONObject().put("operation", "configure").put("enabled", true)) }
+                                }
+                                if (state.optBoolean("requiresReview")) Text(stringResource(R.string.nps_review_rules),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
+                                if (state.optBoolean("enabled") && (!state.optBoolean("permissionGranted") || !state.optBoolean("connected"))) {
+                                    TextButton(onClick = actions.onPermissions) { Text(stringResource(R.string.nps_permissions)) }
+                                }
+                                Spacer(Modifier.height(12.dp))
+                                DroySettingsLinkGroup(enabled = !busy, items = listOf(
+                                    DroySettingsLink(stringResource(R.string.nps_app_management), R.drawable.native_settings_hub, "native-product-field:nps_app_management") { notificationPage = "apps" },
+                                    DroySettingsLink(stringResource(R.string.nps_rules), R.drawable.native_settings_tune, "native-product-field:nps_rules") { textRuleEditor = true },
+                                    DroySettingsLink(stringResource(R.string.nps_archive), R.drawable.native_settings_notifications, "native-product-field:nps_archive") { notificationPage = "history" },
+                                ))
                             }
                         }
                     }
@@ -223,20 +333,33 @@ fun NativeProductSettingsScreen(
             }
             ProductSettingsSection.Pet -> {
                 item {
-                    ProductGroup {
-                        Toggle(R.string.nps_pet_enabled, state.optBoolean("petEnabled"), busy, contained = true) { run { controller.display("petEnabled", it) } }
+                    DroySettingsToggle(stringResource(R.string.nps_pet_enabled), R.drawable.native_settings_pets,
+                        state.optBoolean("petEnabled"), !busy, 0, 1, Modifier.testTag("native-product-switch:nps_pet_enabled")) {
+                        run { controller.display("petEnabled", it) }
+                    }
+                }
+                item {
+                    Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.tertiaryContainer,
+                        modifier = Modifier.fillMaxWidth()) {
                         key(state.optString("petId")) {
                             AndroidView(factory = { host.createPetPreview() }, modifier = Modifier.fillMaxWidth().height(176.dp)
                                 .padding(horizontal = 16.dp, vertical = 8.dp).testTag("native-product-pet-preview"))
                         }
                     }
                 }
+                item { DroySettingsSectionTitle(stringResource(R.string.nps_pet_display)) }
                 item {
-                    ProductGroup {
-                        for ((key, label) in listOf("petExternalDisplay" to R.string.nps_external, "petInternalDisplay" to R.string.nps_internal)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        listOf("petExternalDisplay" to R.string.nps_external, "petInternalDisplay" to R.string.nps_internal).forEachIndexed { index, (key, label) ->
                             val mode = state.optString(key)
                             val text = stringResource(when (mode) { "always" -> R.string.nps_always; "adaptive" -> R.string.nps_adaptive; else -> R.string.nps_off })
-                            EditRow(label, text, busy || !state.optBoolean("petEnabled")) { selectedMode = key }
+                            SegmentedListItem(onClick = { selectedMode = key }, enabled = !busy && state.optBoolean("petEnabled"),
+                                shapes = ListItemDefaults.segmentedShapes(index, 2),
+                                colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                                supportingContent = { Text(text) }, trailingContent = { DroyIcon(R.drawable.native_settings_chevron_right, null) },
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("native-product-field:${LocalContext.current.resources.getResourceEntryName(label)}")) {
+                                Text(stringResource(label))
+                            }
                         }
                     }
                 }
@@ -244,8 +367,7 @@ fun NativeProductSettingsScreen(
                     TextButton(onClick = actions.onOverlayPermission) { Text(stringResource(R.string.nps_overlay)) }
                 }
                 item {
-                    Text(stringResource(R.string.nps_artwork), style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                    DroySettingsSectionTitle(stringResource(R.string.nps_artwork))
                     if (catalogError) {
                         Text(stringResource(R.string.nps_catalog_error))
                         TextButton(onClick = { run() }, enabled = !busy) { Text(stringResource(R.string.nps_retry)) }
@@ -255,13 +377,17 @@ fun NativeProductSettingsScreen(
                     val selected = state.optString("petId") == pet.optString("id")
                     val enabled = !busy && pet.optString("status") == "ready"
                     Surface(shape = MaterialTheme.shapes.large,
+                        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                         color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                         contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface) {
-                        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).selectable(selected, enabled, Role.RadioButton) {
+                        Row(Modifier.fillMaxWidth().heightIn(min = 72.dp).selectable(selected, enabled, Role.RadioButton) {
                             run { controller.selectPet(pet.getString("id")) }
                         }.testTag("native-product-artwork:${pet.getString("id")}").padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            DroyIcon(R.drawable.native_settings_pets, null)
+                            // The host exposes artwork only for the selected pet; never substitute another pet's thumbnail.
+                            if (selected) key(pet.getString("id")) {
+                                AndroidView(factory = { host.createPetPreview() }, modifier = Modifier.size(56.dp))
+                            } else DroyIcon(R.drawable.native_settings_pets, null)
                             Text(pet.optString("name"), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                             RadioButton(selected, onClick = null, enabled = enabled)
                         }
@@ -270,12 +396,22 @@ fun NativeProductSettingsScreen(
             }
             ProductSettingsSection.Diagnostics -> {
                 item {
-                    Text("Droy", style = MaterialTheme.typography.headlineMedium)
-                    Text(stringResource(R.string.nps_about_description), style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(state.optString("droyVersion", stringResource(R.string.nps_unavailable)),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { diagnosticTaps = (diagnosticTaps + 1).coerceAtMost(7) }
-                            .padding(vertical = 12.dp).testTag("native-product-version"))
+                    Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer) {
+                            Box(Modifier.size(120.dp), contentAlignment = Alignment.Center) {
+                                InstalledApplicationIcon(LocalContext.current.packageName, 88.dp)
+                            }
+                        }
+                        Text("Droy", style = MaterialTheme.typography.headlineLarge)
+                        Text(stringResource(R.string.nps_about_description), style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                            Text(state.optString("droyVersion", stringResource(R.string.nps_unavailable)),
+                                modifier = Modifier.heightIn(min = 48.dp).clickable { diagnosticTaps = (diagnosticTaps + 1).coerceAtMost(7) }
+                                    .padding(horizontal = 20.dp, vertical = 12.dp).testTag("native-product-version"))
+                        }
+                    }
                     if (diagnosticTaps >= 7) {
                     val unavailable = stringResource(R.string.nps_unavailable)
                     val phase = when (state.optString("phase")) {
@@ -307,6 +443,7 @@ fun NativeProductSettingsScreen(
                 }
             }
         }
+    }
     }
     }
     }

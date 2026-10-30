@@ -13,16 +13,18 @@ data class NativeCreationTemplate(
     val id: String, val name: String, val suggestedName: String, val avatarUrl: String,
     val personality: String, val behaviorStyle: String, val replyStyle: String,
     val settings: NativeCompanionSettings, val backgroundJson: String,
+    val customBehavior: String = "", val customReply: String = "",
 )
 data class NativeCreationEditor(
     val template: NativeCreationTemplate, val name: String = template.suggestedName,
     val personalityOverride: String = "", val model: NativeModel? = null,
     val settings: NativeCompanionSettings = template.settings,
     val backgroundJson: String = template.backgroundJson, val avatarUpload: NativeCompanionAttachment? = null,
+    val behaviorStyleOverride: String = "", val replyStyleOverride: String = "",
 ) {
     val avatarUrl get() = avatarUpload?.url ?: template.avatarUrl
-    val dirty get() = name != template.suggestedName || personalityOverride.isNotEmpty() || model != null || settings != template.settings || backgroundJson != template.backgroundJson || avatarUpload != null
-    val valid get() = NativeCreationNames.valid(name) && personalityOverride.toByteArray().size <= 16384
+    val dirty get() = name != template.suggestedName || personalityOverride.isNotEmpty() || behaviorStyleOverride.isNotEmpty() || replyStyleOverride.isNotEmpty() || model != null || settings != template.settings || backgroundJson != template.backgroundJson || avatarUpload != null
+    val valid get() = NativeCreationNames.valid(name) && listOf(personalityOverride, behaviorStyleOverride, replyStyleOverride).all { it.toByteArray().size <= 16384 }
 }
 data class NativeCreationImageOperation(
     val id: String, val ownerRequestId: String, val draftId: String, val kind: NativeCreationImageKind,

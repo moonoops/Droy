@@ -44,9 +44,10 @@ class NativeOnboardingViewModel(application: Application) : AndroidViewModel(app
         catch (_: Exception) { coordinator.report("runtime_start_failed") }
     }
     fun name(value: String) = coordinator.name(value)
+    fun bio(value: String) = coordinator.bio(value)
     fun avatar(value: String) = coordinator.avatar(value)
     fun previous(step: Int) { coordinator.previous(step) }
-    fun next(step: Int, saveProfile: suspend (String, String?) -> NativeUserProfile) { coordinator.next(step, saveProfile) }
+    fun next(step: Int, saveProfile: suspend (String, String?, String?) -> NativeUserProfile) { coordinator.next(step, saveProfile) }
     fun complete() { coordinator.complete() }
     fun dismissError() = coordinator.dismissError()
 }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -61,7 +62,7 @@ async function fixture(t, options = {}) {
         if (!native.completed && !ready) throw new SetupError('NATIVE_SETUP_NOT_READY', 'Setup requirements are incomplete.', 409);
         native.completed = true;
       }
-      return { ...native, required: !native.completed, step: native.completed ? 6 : 1, canComplete: Boolean(ready),
+      return { ...native, required: !native.completed, step: native.completed ? 5 : 1, canComplete: Boolean(ready),
         identity: { saved: input.profileReady, confirmed: Boolean(confirmed) } };
     }
     if (input.operation === 'complete') native.completed = true;
@@ -225,6 +226,12 @@ test('native HTTP routes authenticate, reject forged completion bodies and retai
   for (const body of [{ completed: true }, { passed: true, toolsPassed: true }, { configFingerprint: 'a'.repeat(64) }, { apiKey: 'fictional-invalid-input' }])
     assert.equal((await fetch(`${base}/droy/setup/native/complete`, { method: 'POST', headers, body: JSON.stringify(body) })).status, 400);
   assert.equal(f.calls.some(value => value.operation === 'nativeComplete'), false);
+  await f.store.updateUserProfile({ name: 'Fixture user', bio: '好'.repeat(2000) });
+  const identity = await fetch(`${base}/droy/setup/native/identity-confirm`, {
+    method: 'POST', headers, body: JSON.stringify({ expectedProfile: await f.store.getUserProfile() }),
+  });
+  assert.equal(identity.status, 200);
+  assert.equal((await identity.json()).state.identity.profile.bio, '好'.repeat(2000));
   f.ctx.identityAvailable = false;
   const failure = await fetch(`${base}/droy/setup/native/status`, { headers });
   assert.equal(failure.status, 503);
@@ -232,4 +239,42 @@ test('native HTTP routes authenticate, reject forged completion bodies and retai
   assert.equal(response.code, 'NATIVE_SETUP_IDENTITY_UNAVAILABLE');
   assert.match(response.message, /profile/i);
   assert.ok(!JSON.stringify(response).includes(f.credential.value));
+});
+
+
+test('biography is returned, confirmed, and invalidates a receipt when changed', async t => {
+  const f = await fixture(t);
+  await f.store.updateUserProfile({ name: 'Fixture user', bio: 'One line\nSecond line' });
+  await f.service.test();
+  const old = await f.store.getUserProfile();
+  const confirmed = await f.service.nativeConfirmIdentity({ expectedProfile: old });
+  assert.equal(confirmed.state.identity.profile.bio, old.bio);
+  await f.store.updateUserProfile({ bio: 'Changed biography' });
+  assert.equal((await f.service.nativeStatus()).state.identity.confirmed, false);
+  await assert.rejects(f.service.nativeConfirmIdentity({ expectedProfile: old }), error => error.code === 'NATIVE_SETUP_IDENTITY_CHANGED');
+  await assert.rejects(f.service.nativeComplete(), error => error.code === 'NATIVE_SETUP_NOT_READY');
+  await f.service.nativeConfirmIdentity({ expectedProfile: await f.store.getUserProfile() });
+  assert.equal((await f.service.nativeComplete()).state.completed, true);
+  assert.equal(f.requests.length, 2, 'completion and profile checks do not run new model calls');
+});
+
+test('empty biography retains the existing identity fingerprint and omitted legacy bio stays compatible', async t => {
+  const f = await fixture(t);
+  const profile = { name: 'Fixture user', avatarUrl: '/droy/companions/assets/user-default.png' };
+  const oldFingerprint = createHash('sha256').update(JSON.stringify(profile)).digest('hex');
+  assert.equal(setupUserProfileFingerprint({ ...profile, bio: '' }), oldFingerprint);
+  await f.store.updateUserProfile(profile);
+  assert.equal((await f.service.nativeConfirmIdentity({ expectedProfile: profile })).state.identity.confirmed, true);
+  await f.store.updateUserProfile({ bio: 'Existing biography' });
+  await assert.rejects(f.service.nativeConfirmIdentity({ expectedProfile: profile }), error => error.code === 'NATIVE_SETUP_IDENTITY_CHANGED');
+});
+
+test('native confirmation rejects invalid biography text instead of dropping it', async t => {
+  const f = await fixture(t);
+  for (const bio of [null, 12, 'a'.repeat(2001), 'bad\u0000text', '\ud800']) {
+    await assert.rejects(f.service.nativeConfirmIdentity({ expectedProfile: {
+      name: 'Fixture user', avatarUrl: '/droy/companions/assets/user-default.png', bio,
+    } }), error => error.code === 'INVALID_NATIVE_SETUP_REQUEST');
+  }
+  assert.equal(f.calls.some(value => value.operation === 'nativeAcknowledgeIdentity'), false);
 });

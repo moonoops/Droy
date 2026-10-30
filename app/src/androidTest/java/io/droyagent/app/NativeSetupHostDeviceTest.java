@@ -63,7 +63,7 @@ public final class NativeSetupHostDeviceTest {
             .putBoolean("allowRoot", false).putString("assistantName", "Existing fixture name").commit());
         JSONObject state = NativeSetupHost.routeState(context);
         assertTrue(state.getBoolean("completed")); assertFalse(state.getBoolean("required"));
-        assertEquals(6, state.getInt("step")); assertEquals(4, state.getInt("legacyStep"));
+        assertEquals(5, state.getInt("step")); assertEquals(4, state.getInt("legacyStep"));
         assertFalse(state.getJSONObject("permissionPolicy").getBoolean("selected"));
         NativeSetupHost.setStep(context, 3);
         NativeSetupHost.acknowledge(context, "root", true);
@@ -79,7 +79,7 @@ public final class NativeSetupHostDeviceTest {
 
     @Test public void stepAndAcknowledgementsCannotReplaceIdentityConfirmationOrGrantPermissions() throws Exception {
         NativeSetupHost.routeState(context);
-        NativeSetupHost.setStep(context, 6);
+        NativeSetupHost.setStep(context, 5);
         NativeSetupHost.acknowledge(context, "welcome", true);
         NativeSetupHost.acknowledge(context, "accessibility", true);
         NativeSetupHost.acknowledge(context, "root", true);
@@ -92,6 +92,18 @@ public final class NativeSetupHostDeviceTest {
         assertThrows(IllegalArgumentException.class, () -> NativeSetupHost.acknowledge(context, "modelPassed", true));
         assertThrows(IllegalArgumentException.class, () -> NativeSetupHost.setStep(context, 7));
         assertThrows(IllegalArgumentException.class, () -> SetupManager.nativeAcknowledgeIdentity(context, null));
+    }
+
+    @Test public void oldSummaryStepResumesAtPermissionsWithoutChangingCompletionOrPolicy() throws Exception {
+        NativeSetupHost.routeState(context);
+        assertTrue(installation().edit().putInt("nativeWizardStep", 6).putBoolean("completed", false).commit());
+        JSONObject state = NativeSetupHost.routeState(context);
+        assertEquals(5, state.getInt("step"));
+        assertEquals(5, installation().getInt("nativeWizardStep", 0));
+        assertFalse(state.getBoolean("completed"));
+        assertTrue(state.getBoolean("required"));
+        assertFalse(state.getJSONObject("permissionPolicy").getBoolean("selected"));
+        assertThrows(IllegalArgumentException.class, () -> NativeSetupHost.setStep(context, 6));
     }
 
     @Test public void identityProofBecomesInvalidForAnyDifferentSavedProfileFingerprint() throws Exception {

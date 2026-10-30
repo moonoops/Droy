@@ -63,6 +63,14 @@ internal object NativeCompanionJson {
                 settings.getBoolean("proactiveEnabled"), settings.getBoolean("memoryEnabled"), settings.getBoolean("allowProfanity"),
                 settings.optJSONObject("quietHours")?.toString()), chatBackgroundJson = value.optJSONObject("chatBackground")?.toString(),
             templateId = value.stringOrNull("templateId"),
+            behaviorStyle = value.optString("behaviorStyle"), replyStyle = value.optString("replyStyle"),
+            behaviorStyleOverride = value.optString("behaviorStyleOverride"), replyStyleOverride = value.optString("replyStyleOverride"),
+            presetPersonality = value.optJSONObject("personaPreset")?.optString("personality") ?: value.optString("personality"),
+            presetBehavior = value.optJSONObject("personaPreset")?.optString("behaviorStyle") ?: value.optString("behaviorStyle"),
+            presetReply = value.optJSONObject("personaPreset")?.optString("replyStyle") ?: value.optString("replyStyle"),
+            customBehavior = value.optJSONObject("customPersonaDefaults")?.optString("behaviorStyle") ?: "",
+            customReply = value.optJSONObject("customPersonaDefaults")?.optString("replyStyle") ?: "",
+
         )
     }
 
@@ -100,6 +108,8 @@ internal object NativeCompanionJson {
     fun patch(value: NativeCompanionProfilePatch): JSONObject = JSONObject().apply {
         value.name?.let { put("name", it) }; value.avatarUrl?.let { put("avatarUrl", it) }
         value.personalityOverride?.let { put("personalityOverride", it) }
+        value.behaviorStyleOverride?.let { put("behaviorStyleOverride", it) }
+        value.replyStyleOverride?.let { put("replyStyleOverride", it) }
         value.model?.let { model -> put("model", JSONObject().put("provider", model.provider).put("model", model.id)
             .apply { model.reasoningEffort?.let { put("reasoningEffort", it) } }) }
         if (value.clearModel) put("model", JSONObject.NULL)

@@ -125,4 +125,13 @@
     <string name="native_companion_configure_model">请先在设置中配置模型，再开始聊天</string>
     <string name="native_companion_user_bio">简介</string>
     <string name="native_companion_user_bio_too_long">简介不能超过2000个字</string>
+    <string name="native_companion_persona_help">修改身份后，未自定义的行为与表达会随之更新；聊天经历保留。</string>
+    <string name="native_companion_persona_identity">身份与性格</string>
+    <string name="native_companion_persona_behavior">行为习惯</string>
+    <string name="native_companion_persona_reply">表达方式</string>
+    <string name="native_companion_proactive_dynamic">根据共同经历和聊天节奏决定是否联系你，遵循免打扰设置。</string>
+    <string name="native_companion_choose_model">选择模型</string>
+    <string name="native_companion_communication">交流方式</string>
+    <string name="native_companion_settings">伙伴设置</string>
+    <string name="native_companion_background_options">背景</string>
 </resources>

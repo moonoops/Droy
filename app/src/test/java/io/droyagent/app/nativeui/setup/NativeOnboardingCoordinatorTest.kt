@@ -42,7 +42,7 @@ class NativeOnboardingCoordinatorTest {
         var routeAction: suspend () -> NativeSetupRoute = { current }
         var stepAction: suspend (Int) -> NativeSetupRoute = { current = current.copy(step = it); current }
         var confirmAction: suspend (NativeUserProfile) -> NativeSetupLive = { saved -> profile = saved; confirmed = true; snapshot() }
-        var completeAction: suspend () -> NativeSetupLive = { current = current.copy(completed = true, required = false, step = 6); snapshot() }
+        var completeAction: suspend () -> NativeSetupLive = { current = current.copy(completed = true, required = false, step = 5); snapshot() }
         fun snapshot() = live(current, model, tools, profile, confirmed)
         override suspend fun route() = routeAction()
         override suspend fun setStep(step: Int): NativeSetupRoute { steps += step; events += "step:$step"; return stepAction(step) }
@@ -51,10 +51,10 @@ class NativeOnboardingCoordinatorTest {
         override suspend fun confirmIdentity(profile: NativeUserProfile): NativeSetupLive { confirms++; events += "confirm"; return confirmAction(profile) }
         override suspend fun complete(): NativeSetupLive { completions++; return completeAction() }
     }
-    private suspend fun unusedSave(name: String, url: String?): NativeUserProfile = error("Unexpected identity write: $name $url")
+    private suspend fun unusedSave(name: String, url: String?, bio: String?): NativeUserProfile = error("Unexpected identity write: $name $url")
 
     @Test fun anAlreadyCompletedInstallationDoesNotRestartChecksOrRewriteLegacyProgress() = runBlocking {
-        val repo = Repo(route(step = 6, completed = true, ready = false))
+        val repo = Repo(route(step = 5, completed = true, ready = false))
         val drafts = Drafts()
         val model = NativeOnboardingCoordinator(repo, drafts, this)
         model.loadDraft(); model.refreshLocal().join(); model.refreshLive().join(); model.complete().join()
@@ -119,7 +119,7 @@ class NativeOnboardingCoordinatorTest {
         val drafts = Drafts()
         val model = NativeOnboardingCoordinator(repo, drafts, this)
         model.refreshLocal().join(); model.refreshLive().join(); model.name("  New user  ")
-        model.next(4) { name, url -> repo.events += "save"; NativeUserProfile(name, requireNotNull(url)) }.join()
+        model.next(4) { name, url, bio -> repo.events += "save"; NativeUserProfile(name, requireNotNull(url), bio.orEmpty()) }.join()
         assertEquals(listOf("save", "confirm", "step:5"), repo.events)
         assertEquals("New user", repo.profile.name)
         assertEquals(5, model.state.value.route!!.step)
@@ -132,7 +132,7 @@ class NativeOnboardingCoordinatorTest {
         val model = NativeOnboardingCoordinator(repo, Drafts(), this)
         model.refreshLocal().join(); model.refreshLive().join(); model.name("My draft")
         var saves = 0
-        model.next(4) { _, _ -> saves++; throw NativeApiException("network_error") }.join()
+        model.next(4) { _, _, _ -> saves++; throw NativeApiException("network_error") }.join()
         assertEquals(1, saves); assertEquals(0, repo.confirms)
         assertEquals(4, model.state.value.route!!.step)
         assertEquals("My draft", model.state.value.draft.name)
@@ -145,7 +145,7 @@ class NativeOnboardingCoordinatorTest {
         }
         val model = NativeOnboardingCoordinator(repo, Drafts(), this)
         model.refreshLocal().join(); model.refreshLive().join(); model.name("My draft")
-        model.next(4) { name, url -> NativeUserProfile(name, requireNotNull(url)) }.join()
+        model.next(4) { name, url, bio -> NativeUserProfile(name, requireNotNull(url), bio.orEmpty()) }.join()
         assertEquals("NATIVE_SETUP_IDENTITY_CHANGED", model.state.value.error)
         assertEquals(4, model.state.value.route!!.step)
         assertEquals("My draft", model.state.value.draft.name)
@@ -154,18 +154,20 @@ class NativeOnboardingCoordinatorTest {
     @Test fun permissionProgressRequiresASelectedPolicyWithoutRequiringSystemGrants() = runBlocking {
         val repo = Repo(route(step = 5, policy = null))
         val model = NativeOnboardingCoordinator(repo, Drafts(), this)
-        model.refreshLocal().join(); model.next(5, ::unusedSave).join()
+        model.refreshLocal().join(); model.complete().join()
         assertEquals("setup_policy_required", model.state.value.error)
         assertEquals(5, model.state.value.route!!.step)
         repo.current = repo.current.copy(permissionPolicy = NativeAuthorizationPolicy.ON_FIRST_USE)
-        model.refreshLocal().join(); model.next(5, ::unusedSave).join()
-        assertEquals(6, model.state.value.route!!.step)
+        model.refreshLocal().join(); model.complete().join()
+        assertEquals(5, model.state.value.route!!.step)
+        assertEquals(false, model.state.value.requiresSetup)
+        assertEquals(1, repo.completions)
         assertTrue(repo.acknowledgements.isEmpty())
         assertEquals(0, repo.confirms)
     }
 
     @Test fun completionRechecksTheLiveFingerprintAndDoesNotSubmitAfterInvalidation() = runBlocking {
-        val repo = Repo(route(step = 6))
+        val repo = Repo(route(step = 5))
         val model = NativeOnboardingCoordinator(repo, Drafts(), this)
         model.refreshLocal().join(); model.refreshLive().join()
         repo.model = false
@@ -173,11 +175,12 @@ class NativeOnboardingCoordinatorTest {
         assertEquals(0, repo.completions)
         assertEquals(true, model.state.value.requiresSetup)
         assertFalse(model.state.value.live!!.canComplete)
-        assertEquals("NATIVE_SETUP_NOT_READY", model.state.value.error)
+        assertEquals("setup_model_required", model.state.value.error)
+        assertEquals(3, model.state.value.route!!.step)
     }
 
     @Test fun aLostCompletionReceiptIsResolvedByAReadWithoutRepeatingCompletion() = runBlocking {
-        val repo = Repo(route(step = 6)).apply {
+        val repo = Repo(route(step = 5)).apply {
             completeAction = { current = current.copy(completed = true, required = false); throw NativeApiException("network_error") }
         }
         val drafts = Drafts().apply { value = NativeSetupIdentityDraft("Draft", avatar, true) }
@@ -190,7 +193,7 @@ class NativeOnboardingCoordinatorTest {
     }
 
     @Test fun unknownCompletionAndFailedRefreshNeverLookLikeSuccess() = runBlocking {
-        val repo = Repo(route(step = 6)).apply {
+        val repo = Repo(route(step = 5)).apply {
             completeAction = { throw NativeApiException("network_error") }
             statusQueue.add { snapshot() }; statusQueue.add { throw NativeApiException("NATIVE_SETUP_STATE_UNAVAILABLE") }
         }
@@ -227,11 +230,68 @@ class NativeOnboardingCoordinatorTest {
         assertTrue(recreated.state.value.draft.edited)
     }
 
+    @Test fun aLegacyEditedDraftReadsAndPreservesTheExistingBiographyBeforeSaving() = runBlocking {
+        val repo = Repo(route(step = 4)).apply { profile = profile.copy(bio = "Existing biography") }
+        val drafts = Drafts().apply { value = NativeSetupIdentityDraft("Edited name", avatar, edited = true) }
+        val model = NativeOnboardingCoordinator(repo, drafts, this)
+        model.loadDraft(); model.refreshLocal().join()
+        model.next(4) { name, url, bio -> NativeUserProfile(name, requireNotNull(url), requireNotNull(bio)) }.join()
+        assertEquals("Edited name", repo.profile.name)
+        assertEquals("Existing biography", repo.profile.bio)
+        assertEquals("Existing biography", drafts.value!!.bio)
+        assertEquals(5, model.state.value.route!!.step)
+    }
+
+    @Test fun biographyEditsSurviveRefreshAndMustMatchTheSaveAndConfirmReceipts() = runBlocking {
+        val repo = Repo(route(step = 4))
+        val drafts = Drafts()
+        val model = NativeOnboardingCoordinator(repo, drafts, this)
+        model.refreshLocal().join(); model.refreshLive().join(); model.bio("  New biography\nTwo lines  ")
+        model.refreshLive().join()
+        assertEquals("  New biography\nTwo lines  ", model.state.value.draft.bio)
+        model.next(4) { name, url, bio -> NativeUserProfile(name, requireNotNull(url), requireNotNull(bio)) }.join()
+        assertEquals("New biography\nTwo lines", repo.profile.bio)
+        assertEquals(repo.profile.bio, drafts.value!!.bio)
+        assertEquals(1, repo.confirms)
+    }
+
+    @Test fun anExplicitlyClearedBiographyDoesNotGetRepopulatedFromTheSavedProfile() = runBlocking {
+        val repo = Repo(route(step = 4)).apply { profile = profile.copy(bio = "Old biography") }
+        val model = NativeOnboardingCoordinator(repo, Drafts(), this)
+        model.refreshLocal().join(); model.refreshLive().join(); model.bio(""); model.refreshLive().join()
+        model.next(4) { name, url, bio -> NativeUserProfile(name, requireNotNull(url), requireNotNull(bio)) }.join()
+        assertEquals("", repo.profile.bio)
+        assertEquals(5, model.state.value.route!!.step)
+    }
+
+    @Test fun aBiographyThatDoesNotMatchTheSaveReceiptCannotBeConfirmed() = runBlocking {
+        val repo = Repo(route(step = 4))
+        val model = NativeOnboardingCoordinator(repo, Drafts(), this)
+        model.refreshLocal().join(); model.refreshLive().join(); model.bio("Expected")
+        model.next(4) { name, url, _ -> NativeUserProfile(name, requireNotNull(url), "Other") }.join()
+        assertEquals("NATIVE_SETUP_IDENTITY_CHANGED", model.state.value.error)
+        assertEquals(0, repo.confirms)
+        assertEquals(4, model.state.value.route!!.step)
+        assertEquals("Expected", model.state.value.draft.bio)
+    }
+
+    @Test fun incompleteEnvironmentAndIdentityReturnToTheirOwnStepsWithoutFinishing() = runBlocking {
+        for ((repo, expectedStep, error) in listOf(
+            Triple(Repo(route(step = 5, ready = false)), 2, "setup_environment_required"),
+            Triple(Repo(route(step = 5)).apply { confirmed = false }, 4, "NATIVE_SETUP_IDENTITY_CHANGED"))) {
+            val model = NativeOnboardingCoordinator(repo, Drafts(), this)
+            model.refreshLocal().join(); model.complete().join()
+            assertEquals(expectedStep, model.state.value.route!!.step)
+            assertEquals(error, model.state.value.error)
+            assertEquals(0, repo.completions)
+        }
+    }
+
     @Test fun duplicateNextClicksCannotSaveOrConfirmTheIdentityTwice() = runBlocking {
         val repo = Repo(route(step = 4))
         val receipt = CompletableDeferred<NativeUserProfile>()
         var saves = 0
-        val save: suspend (String, String?) -> NativeUserProfile = { _, _ -> saves++; receipt.await() }
+        val save: suspend (String, String?, String?) -> NativeUserProfile = { _, _, _ -> saves++; receipt.await() }
         val model = NativeOnboardingCoordinator(repo, Drafts(), this)
         model.refreshLocal().join(); model.refreshLive().join()
         val first = model.next(4, save); val second = model.next(4, save); yield()

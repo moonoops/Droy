@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
@@ -18,6 +19,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import io.droyagent.app.nativeui.ui.DroySettingsLink
+import io.droyagent.app.nativeui.ui.DroySettingsLinkGroup
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -29,7 +33,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
+import io.droyagent.app.nativeui.ui.DroySettingsSectionTitle
+import io.droyagent.app.nativeui.companion.ui.CompanionFilledField
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
@@ -67,6 +74,7 @@ fun NativeModelSettingsScreen(
     NativeSettingsFlow(state, model, {}, {}, onRootChanged, modifier, modelsOnly = true, embedded = embedded, onModelsBack = onBack)
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun NativeSettingsFlow(
     state: NativeSettingsState,
@@ -81,6 +89,9 @@ private fun NativeSettingsFlow(
     onOpenFeature: ((NativeSettingsFeature) -> Unit)? = null,
     onModels: (() -> Unit)? = null,
 ) {
+    val homeScroll = rememberScrollState()
+    val homeBar = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(
+        snapAnimationSpec = MaterialTheme.motionScheme.fastSpatialSpec())
     var page by rememberSaveable(modelsOnly) { mutableStateOf(if (modelsOnly) "models" else "home") }
     var chooser by rememberSaveable { mutableStateOf<String?>(null) }
     var editingModel by remember { mutableStateOf<NativeSettingsModelEntry?>(null) }
@@ -139,14 +150,19 @@ private fun NativeSettingsFlow(
         "editor" -> if (state.editor?.isNew == true) R.string.native_settings_add_provider_title else R.string.native_settings_edit_provider_title
         else -> R.string.native_settings_title
     })
-    Scaffold(modifier.fillMaxSize().testTag("native-settings"), containerColor = MaterialTheme.colorScheme.surface,
+    Scaffold(modifier.fillMaxSize().then(if (page == "home") Modifier.nestedScroll(homeBar.nestedScrollConnection) else Modifier).testTag("native-settings"), containerColor = MaterialTheme.colorScheme.surface,
         contentWindowInsets = WindowInsets(0, 0, 0, 0), topBar = {
-            if (!(embedded && page == "models")) SettingsBar(title, page == "home", onBack = ::back,
+            if (page == "home") LargeTopAppBar(title = { Text(title) },
+                modifier = Modifier.testTag("native-settings-home-bar"),
+                expandedHeight = 88.dp, collapsedHeight = 64.dp, scrollBehavior = homeBar,
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface))
+            else if (!(embedded && page == "models")) SettingsBar(title, page == "home", onBack = ::back,
                 onRefresh = if (page == "editor") model::reloadEditor else model::refresh,
                 refreshEnabled = state.runtime.ready && !state.saving && !state.testing && !state.loading,
                 save = if (page == "editor") ({ flushProviderText(); closeKeyboard(); model.saveProvider(apiKey) }) else null,
                 saveEnabled = state.runtime.ready && state.writable && !state.saving && !state.testing && !state.discovering && !state.loading,
-                saving = state.saving, credentialPending = state.credentialPending)
+                saving = state.saving, credentialPending = state.credentialPending, insetStatusBar = !embedded)
         }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             if (state.error != null) SettingsError(state.error, model::dismissError,
@@ -158,7 +174,7 @@ private fun NativeSettingsFlow(
             when (page) {
                 "general" -> GeneralSettings(state, model, Modifier.weight(1f))
                 "models" -> ModelsSettings(state, model, onAdd = { chooser = "providers" }, onDefault = { chooser = "default" },
-                    onSubtask = { page = "subtask-models" }, showSubtaskModels = false, modifier = Modifier.weight(1f))
+                    onSubtask = { page = "subtask-models" }, showSubtaskModels = false, modifier = Modifier.weight(1f), onboarding = embedded)
                 "editor" -> state.editor?.let { draft -> ProviderEditor(state, draft, model, providerName, providerBaseUrl, apiKey, { apiKey = it },
                     onProtocol = { flushProviderText(); closeKeyboard(); chooser = "protocol" }, onManualModel = { flushProviderText(); closeKeyboard(); editingModel = null; editingModelPage = true },
                     onEditModel = { flushProviderText(); editingModel = it; editingModelPage = true },
@@ -167,7 +183,7 @@ private fun NativeSettingsFlow(
                 else -> SettingsHome(state, onMyProfile, onGeneral = {
                     if (onOpenFeature != null) onOpenFeature(NativeSettingsFeature.GENERAL) else page = "general"
                 }, onModels = { if (onModels != null) onModels() else page = "models" }, onPermissions = onPermissions,
-                    modifier = Modifier.weight(1f), onOpenFeature = onOpenFeature)
+                    modifier = Modifier.weight(1f), scroll = homeScroll, onOpenFeature = onOpenFeature)
             }
         }
     }
@@ -195,9 +211,9 @@ private fun NativeSettingsFlow(
 
 @Composable
 private fun SettingsBar(title: String, root: Boolean, onBack: () -> Unit, onRefresh: () -> Unit, refreshEnabled: Boolean,
-    save: (() -> Unit)?, saveEnabled: Boolean, saving: Boolean, credentialPending: Boolean) {
+    save: (() -> Unit)?, saveEnabled: Boolean, saving: Boolean, credentialPending: Boolean, insetStatusBar: Boolean = true) {
     Surface(color = MaterialTheme.colorScheme.surface) {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = if (root) 80.dp else 64.dp)
+        Row(Modifier.fillMaxWidth().then(if (insetStatusBar) Modifier.statusBarsPadding() else Modifier).heightIn(min = if (root) 80.dp else 64.dp)
             .padding(start = if (root) 24.dp else 8.dp, end = 16.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (!root) DroyIconAction(R.drawable.native_settings_arrow_back, stringResource(R.string.native_settings_back), onBack,
                 enabled = !saving, modifier = Modifier.testTag("native-settings-back"))
@@ -213,41 +229,31 @@ private fun SettingsBar(title: String, root: Boolean, onBack: () -> Unit, onRefr
 
 @Composable
 private fun SettingsHome(state: NativeSettingsState, onMyProfile: () -> Unit, onGeneral: () -> Unit, onModels: () -> Unit,
-    onPermissions: () -> Unit, modifier: Modifier, onOpenFeature: ((NativeSettingsFeature) -> Unit)?) {
-    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        SettingRow(stringResource(R.string.native_settings_my_profile), null, R.drawable.native_settings_person, onMyProfile,
-            modifier = Modifier.testTag("native-settings-my-profile"))
-        Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-            Column {
-                SettingRow(stringResource(R.string.native_settings_general), null, R.drawable.native_settings_tune, onGeneral,
-                    contained = true, modifier = Modifier.testTag("native-settings-general"))
-                SettingRow(stringResource(R.string.native_settings_models), state.defaultModel?.name, R.drawable.native_settings_neurology, onModels,
-                    contained = true, modifier = Modifier.testTag("native-settings-models"))
-                SettingRow(stringResource(R.string.native_permissions_title), null, R.drawable.native_engine_shield, onPermissions,
-                    contained = true, modifier = Modifier.testTag("native-settings-permissions"))
-                onOpenFeature?.let { open ->
-                    SettingRow(stringResource(R.string.native_settings_memory), null, R.drawable.native_settings_auto_stories,
-                        { open(NativeSettingsFeature.MEMORY) }, contained = true, modifier = Modifier.testTag("native-settings-memory"))
-                    SettingRow(stringResource(R.string.native_settings_voice), null, R.drawable.native_companion_mic,
-                        { open(NativeSettingsFeature.VOICE) }, contained = true, modifier = Modifier.testTag("native-settings-voice"))
-                }
-            }
-        }
+    onPermissions: () -> Unit, modifier: Modifier, scroll: androidx.compose.foundation.ScrollState,
+    onOpenFeature: ((NativeSettingsFeature) -> Unit)?) {
+    Column(modifier.fillMaxWidth().verticalScroll(scroll).navigationBarsPadding()
+        .testTag("native-settings-home-list").padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        DroySettingsLinkGroup(items = listOf(DroySettingsLink(stringResource(R.string.native_settings_my_profile),
+            R.drawable.native_settings_person, "native-settings-my-profile", onClick = onMyProfile)))
+        DroySettingsLinkGroup(stringResource(R.string.native_settings_group_basic), listOf(
+            DroySettingsLink(stringResource(R.string.native_settings_general), R.drawable.native_settings_tune, "native-settings-general", onClick = onGeneral),
+            DroySettingsLink(stringResource(R.string.native_settings_models), R.drawable.native_settings_neurology, "native-settings-models", state.defaultModel?.name, onModels),
+            DroySettingsLink(stringResource(R.string.native_permissions_title), R.drawable.native_engine_shield, "native-settings-permissions", onClick = onPermissions),
+        ))
         onOpenFeature?.let { open ->
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                Column {
-                    SettingRow(stringResource(R.string.native_settings_plugins), null, R.drawable.native_settings_hub,
-                        { open(NativeSettingsFeature.PLUGINS) }, contained = true, modifier = Modifier.testTag("native-settings-plugins"))
-                    SettingRow(stringResource(R.string.native_settings_notifications), null, R.drawable.native_settings_notifications,
-                        { open(NativeSettingsFeature.NOTIFICATIONS) }, contained = true, modifier = Modifier.testTag("native-settings-notifications"))
-                    SettingRow(stringResource(R.string.native_settings_notification_sorting), null, R.drawable.native_settings_filter_list,
-                        { open(NativeSettingsFeature.NOTIFICATION_SORTING) }, contained = true, modifier = Modifier.testTag("native-settings-notification-sorting"))
-                    SettingRow(stringResource(R.string.native_settings_pet), null, R.drawable.native_settings_pets,
-                        { open(NativeSettingsFeature.PET) }, contained = true, modifier = Modifier.testTag("native-settings-pet"))
-                    SettingRow(stringResource(R.string.native_settings_about), null, R.drawable.native_settings_info,
-                        { open(NativeSettingsFeature.ABOUT) }, contained = true, modifier = Modifier.testTag("native-settings-about"))
-                }
-            }
+            DroySettingsLinkGroup(stringResource(R.string.native_settings_group_capabilities), listOf(
+                DroySettingsLink(stringResource(R.string.native_settings_memory), R.drawable.native_settings_auto_stories, "native-settings-memory") { open(NativeSettingsFeature.MEMORY) },
+                DroySettingsLink(stringResource(R.string.native_settings_voice), R.drawable.native_companion_mic, "native-settings-voice") { open(NativeSettingsFeature.VOICE) },
+                DroySettingsLink(stringResource(R.string.native_settings_plugins), R.drawable.native_settings_hub, "native-settings-plugins") { open(NativeSettingsFeature.PLUGINS) },
+            ))
+            DroySettingsLinkGroup(stringResource(R.string.native_settings_group_notifications), listOf(
+                DroySettingsLink(stringResource(R.string.native_settings_notifications), R.drawable.native_settings_notifications, "native-settings-notifications") { open(NativeSettingsFeature.NOTIFICATIONS) },
+            ))
+            DroySettingsLinkGroup(stringResource(R.string.native_settings_group_personalization), listOf(
+                DroySettingsLink(stringResource(R.string.native_settings_pet), R.drawable.native_settings_pets, "native-settings-pet") { open(NativeSettingsFeature.PET) },
+                DroySettingsLink(stringResource(R.string.native_settings_about), R.drawable.native_settings_info, "native-settings-about") { open(NativeSettingsFeature.ABOUT) },
+            ))
         }
     }
 }
@@ -262,10 +268,6 @@ private fun GeneralSettings(state: NativeSettingsState, model: NativeSettingsVie
 
 @Composable
 fun NativeGeneralPreferences(state: NativeSettingsState, model: NativeSettingsViewModel) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val preferences = remember(context) { context.getSharedPreferences("product", android.content.Context.MODE_PRIVATE) }
-    var appearance by remember { mutableStateOf(preferences.getString("appearanceMode", "system") ?: "system") }
-    var chooseAppearance by remember { mutableStateOf(false) }
     var chooseLanguage by remember { mutableStateOf(false) }
     var pendingLanguage by remember { mutableStateOf<String?>(null) }
     val languageEnabled = state.runtime.ready && state.writable && !state.saving && !state.testing
@@ -290,22 +292,13 @@ fun NativeGeneralPreferences(state: NativeSettingsState, model: NativeSettingsVi
             }
         }
     }
-    if (chooseAppearance) SettingsChoiceSheet(stringResource(R.string.native_settings_appearance), { chooseAppearance = false }, expanded = false) {
-        listOf("system" to R.string.native_settings_system_theme, "light" to R.string.native_settings_light_theme, "dark" to R.string.native_settings_dark_theme).forEach { (value, label) ->
-            ChooserRow(stringResource(label), null, appearance == value, {
-                preferences.edit().putString("appearanceMode", value).apply(); appearance = value; chooseAppearance = false
-            })
-        }
-    }
-    Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
             PreferenceRow(stringResource(R.string.native_settings_language),
                 stringResource(if (state.locale == "zh") R.string.native_settings_chinese else R.string.native_settings_english),
                 { model.dismissError(); chooseLanguage = true }, languageEnabled, Modifier.testTag("native-settings-language"))
-            PreferenceRow(stringResource(R.string.native_settings_appearance),
-                stringResource(when (appearance) { "light" -> R.string.native_settings_light_theme; "dark" -> R.string.native_settings_dark_theme; else -> R.string.native_settings_system_theme }),
-                { chooseAppearance = true }, true, Modifier.testTag("native-settings-appearance"))
         }
+        NativeAppearanceSettings()
     }
 }
 
@@ -321,8 +314,42 @@ private fun PreferenceRow(title: String, value: String, onClick: () -> Unit, ena
 }
 
 @Composable
-private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsViewModel, onAdd: () -> Unit, onDefault: () -> Unit, onSubtask: () -> Unit, showSubtaskModels: Boolean, modifier: Modifier) {
+private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsViewModel, onAdd: () -> Unit, onDefault: () -> Unit, onSubtask: () -> Unit, showSubtaskModels: Boolean, modifier: Modifier, onboarding: Boolean = false) {
     val enabled = state.runtime.ready && state.loaded && state.writable && !state.saving && !state.testing
+    if (onboarding && state.loaded && state.configuredProviders.isEmpty() && state.defaultModel == null) {
+        Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp)
+            .testTag("native-settings-onboarding-empty"), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer) {
+                Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary) {
+                        Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
+                            DroyIcon(R.drawable.native_settings_neurology, null, Modifier.size(36.dp))
+                        }
+                    }
+                    Text(stringResource(R.string.native_settings_setup_add_first), style = MaterialTheme.typography.headlineSmall)
+                    Text(stringResource(R.string.native_settings_setup_model_hint), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            Button(onClick = onAdd, enabled = enabled,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("native-settings-add-provider")) {
+                DroyIcon(R.drawable.native_settings_add, null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.native_settings_add_provider))
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                listOf(R.string.native_settings_add_provider, R.string.native_settings_choose_model,
+                    R.string.native_settings_test_model).forEachIndexed { index, label ->
+                    Text(stringResource(R.string.native_settings_setup_sequence, index + 1, stringResource(label)),
+                        style = if (index == 0) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium,
+                        color = if (index == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        return
+    }
     var testTarget by remember { mutableStateOf<NativeModel?>(null) }
     var removeTarget by remember { mutableStateOf<NativeSettingsProvider?>(null) }
     removeTarget?.let { provider ->
@@ -347,24 +374,25 @@ private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsView
     LazyColumn(modifier.fillMaxWidth().navigationBarsPadding().testTag("native-settings-providers"),
         contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(key = "default") {
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Row(Modifier.fillMaxWidth().clickable(enabled && state.catalog.isNotEmpty(), role = Role.Button, onClick = onDefault)
-                        .heightIn(min = 72.dp).testTag("native-settings-default-model"), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f).padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(stringResource(R.string.native_settings_default_model), style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column {
+                DroySettingsSectionTitle(stringResource(R.string.native_settings_default_model))
+                Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(Modifier.fillMaxWidth().clickable(enabled && state.catalog.isNotEmpty(), role = Role.Button, onClick = onDefault)
+                            .heightIn(min = 48.dp).testTag("native-settings-default-model"), verticalAlignment = Alignment.CenterVertically) {
                             Text(state.defaultModel?.name ?: stringResource(R.string.native_settings_not_selected),
-                                style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
-                            state.defaultModel?.let { Text(it.providerName, style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f).padding(end = 8.dp).testTag("native-settings-model-name"))
+                            DroyIcon(R.drawable.native_settings_chevron_right, stringResource(R.string.native_settings_choose_model))
                         }
-                        DroyIcon(R.drawable.native_settings_chevron_right, stringResource(R.string.native_settings_choose_model))
-                    }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        VerificationContent(state, Modifier.weight(1f))
-                        TextButton(onClick = { testTarget = state.defaultModel }, enabled = enabled && state.defaultModel != null,
-                            modifier = Modifier.heightIn(min = 48.dp).testTag("native-settings-test-model")) {
+                        VerificationContent(state)
+                        FilledTonalButton(onClick = { testTarget = state.defaultModel }, enabled = enabled && state.defaultModel != null,
+                            colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                contentColor = MaterialTheme.colorScheme.onSurface),
+                            modifier = Modifier.widthIn(min = 152.dp).heightIn(min = 48.dp).testTag("native-settings-test-model")) {
+                            DroyIcon(R.drawable.native_companion_play_arrow, null)
+                            Spacer(Modifier.width(8.dp))
                             Text(stringResource(if (state.testing) R.string.native_settings_testing else R.string.native_settings_test_model))
                         }
                     }
@@ -377,7 +405,8 @@ private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsView
         }
         item(key = "providers-title") {
             Row(Modifier.fillMaxWidth().padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.native_settings_providers), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.native_settings_providers), style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                 Button(onClick = onAdd, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp).testTag("native-settings-add-provider")) {
                     DroyIcon(R.drawable.native_settings_add, null)
                     Spacer(Modifier.width(8.dp))
@@ -389,25 +418,43 @@ private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsView
             Text(stringResource(R.string.native_settings_no_providers), style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))
         }
-        items(state.configuredProviders, key = { it.id }) { provider ->
-            val status = if (provider.unavailable) stringResource(R.string.native_settings_unavailable)
-                else provider.modelCount?.let { stringResource(R.string.native_settings_model_count, it) }
-            Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                ListItem(headlineContent = { Text(provider.name) },
-                    supportingContent = { Column {
-                        Text(providerType(provider), style = MaterialTheme.typography.bodyMedium)
-                        status?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                    } },
-                    leadingContent = { DroyIcon(R.drawable.native_settings_hub, null) },
-                    trailingContent = { Row(verticalAlignment = Alignment.CenterVertically) {
-                        DroyIconAction(R.drawable.native_companion_delete, stringResource(R.string.native_settings_remove_provider),
-                            { removeTarget = provider }, enabled = enabled,
-                            modifier = Modifier.testTag("native-settings-remove-provider:${provider.id}"))
-                        DroyIcon(R.drawable.native_settings_chevron_right, null)
-                    } },
-                    colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button) { model.openProvider(provider.id) }
-                        .heightIn(min = 64.dp).testTag("native-settings-provider:${provider.id}"))
+        item(key = "provider-list") {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                state.configuredProviders.forEachIndexed { index, provider ->
+                    key(provider.id) {
+                        var more by remember { mutableStateOf(false) }
+                        val status = if (provider.unavailable) stringResource(R.string.native_settings_unavailable)
+                            else provider.modelCount?.let { stringResource(R.string.native_settings_model_count, it) }
+                        val type = providerType(provider).takeUnless { it.equals(provider.name, ignoreCase = true) }
+                        val supporting = listOfNotNull(type, status).joinToString(" · ")
+                        SegmentedListItem(onClick = { model.openProvider(provider.id) }, enabled = enabled,
+                            shapes = ListItemDefaults.segmentedShapes(index, state.configuredProviders.size),
+                            leadingContent = { DroyIcon(R.drawable.native_settings_hub, null) },
+                            supportingContent = supporting.takeIf { it.isNotBlank() }?.let { { Text(it) } },
+                            trailingContent = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box {
+                                        DroyIconAction(R.drawable.native_companion_more_vert,
+                                            stringResource(R.string.native_settings_provider_more, provider.name),
+                                            { more = true }, enabled = enabled,
+                                            modifier = Modifier.testTag("native-settings-provider-more:${provider.id}"))
+                                        DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.native_settings_remove_provider)) },
+                                                leadingIcon = { DroyIcon(R.drawable.native_companion_delete, null) },
+                                                enabled = enabled, onClick = { more = false; removeTarget = provider },
+                                                modifier = Modifier.testTag("native-settings-remove-provider:${provider.id}"))
+                                        }
+                                    }
+                                    DroyIcon(R.drawable.native_settings_chevron_right, null)
+                                }
+                            },
+                            colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("native-settings-provider:${provider.id}")) {
+                            Text(provider.name)
+                        }
+                    }
+                }
             }
         }
     }
@@ -416,12 +463,30 @@ private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsView
 @Composable
 private fun VerificationContent(state: NativeSettingsState, modifier: Modifier = Modifier) {
     val receipt = state.verification?.takeIf { it.provider == state.defaultModel?.provider && it.model == state.defaultModel?.id }
-    val status = stringResource(if (receipt?.passed == true) R.string.native_settings_chat_verified
-        else if (state.verificationUnavailable) R.string.native_settings_verification_unavailable else R.string.native_settings_not_verified)
-    val detail = if (receipt?.passed == true) stringResource(if (receipt.toolsPassed) R.string.native_settings_tools_verified else R.string.native_settings_tools_unverified) else null
-    Text(if (detail == null) status else "$status · $detail", style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("native-settings-verification"))
+    val chat = when {
+        state.testing -> R.string.native_model_chat_testing
+        state.verificationUnavailable -> R.string.native_model_chat_unavailable
+        receipt == null -> R.string.native_model_chat_untested
+        receipt.passed -> R.string.native_model_chat_passed
+        else -> R.string.native_model_chat_failed
+    }
+    val tools = when {
+        state.testing -> R.string.native_model_tools_testing
+        state.verificationUnavailable -> R.string.native_model_tools_unavailable
+        receipt == null || !receipt.passed -> R.string.native_model_tools_untested
+        receipt.toolsPassed -> R.string.native_model_tools_passed
+        else -> R.string.native_model_tools_failed
+    }
+    FlowRow(modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag("native-settings-verification"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(chat, tools).forEach { label ->
+            Surface(color = MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor = MaterialTheme.colorScheme.onSurface, shape = MaterialTheme.shapes.small) {
+                Text(stringResource(label), style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -597,14 +662,34 @@ internal fun SettingsChoiceSheet(title: String, onDismiss: () -> Unit, expanded:
 @Composable
 private fun ProviderChooser(providers: List<NativeSettingsProvider>, onSelect: (NativeSettingsProvider) -> Unit, onCustom: () -> Unit, onDismiss: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
+    val filtered = providers.filter { it.name.contains(query, true) || it.id.contains(query, true) }
     SettingsChoiceSheet(stringResource(R.string.native_settings_choose_provider), onDismiss) {
-        OutlinedTextField(query, { query = it }, label = { Text(stringResource(R.string.native_settings_search_providers)) },
-            singleLine = true, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large)
-        LazyColumn(Modifier.weight(1f)) {
-            item(key = "custom") { ChooserRow(stringResource(R.string.native_settings_third_party), null, false, onCustom,
-                Modifier.testTag("native-settings-custom-provider")) }
-            items(providers.filter { it.name.contains(query, true) || it.id.contains(query, true) }, key = { it.id }) { provider ->
-                ChooserRow(provider.name, if (provider.oauthOnly) stringResource(R.string.native_settings_existing_auth_required) else provider.id.takeIf { it != provider.name }, false, { onSelect(provider) }, Modifier.testTag("native-settings-preset:${provider.id}"))
+        CompanionFilledField(query, { query = it }, label = { Text(stringResource(R.string.native_settings_search_providers)) },
+            leadingIcon = { DroyIcon(R.drawable.native_settings_search, null) }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("native-settings-provider-search"))
+        Spacer(Modifier.height(16.dp))
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            item(key = "custom") {
+                SegmentedListItem(onClick = onCustom,
+                    shapes = ListItemDefaults.segmentedShapes(0, filtered.size + 1),
+                    colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    trailingContent = { DroyIcon(R.drawable.native_settings_chevron_right, null) },
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("native-settings-custom-provider")) {
+                    Text(stringResource(R.string.native_settings_third_party))
+                }
+            }
+            itemsIndexed(filtered, key = { _, provider -> provider.id }) { index, provider ->
+                val supporting = if (provider.oauthOnly) stringResource(R.string.native_settings_existing_auth_required)
+                    else provider.id.takeIf { it != provider.name }
+                SegmentedListItem(onClick = { onSelect(provider) },
+                    shapes = ListItemDefaults.segmentedShapes(index + 1, filtered.size + 1),
+                    colors = ListItemDefaults.segmentedColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    supportingContent = supporting?.let { { Text(it) } },
+                    trailingContent = { DroyIcon(R.drawable.native_settings_chevron_right, null) },
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = if (supporting == null) 56.dp else 72.dp)
+                        .testTag("native-settings-preset:${provider.id}")) { Text(provider.name) }
             }
         }
     }

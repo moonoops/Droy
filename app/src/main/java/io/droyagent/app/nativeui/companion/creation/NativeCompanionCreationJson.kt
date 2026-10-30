@@ -46,7 +46,8 @@ internal object NativeCreationJson {
     private fun settingsValue(value: NativeCompanionSettings): JSONObject = NativeCompanionJson.patch(NativeCompanionProfilePatch(settings = value)).getJSONObject("settings")
         .apply { if (!has("quietHours")) put("quietHours", JSONObject.NULL) }
     private fun template(value: JSONObject): NativeCreationTemplate = NativeCreationTemplate(identifier(value.string("templateId")), value.string("name"), value.string("suggestedName"),
-        value.string("avatarUrl"), value.string("personality"), value.string("behaviorStyle"), value.string("replyStyle"), settings(value.getJSONObject("settings")), background(value.getJSONObject("chatBackground")))
+        value.string("avatarUrl"), value.string("personality"), value.string("behaviorStyle"), value.string("replyStyle"), settings(value.getJSONObject("settings")), background(value.getJSONObject("chatBackground")),
+        value.optJSONObject("customPersonaDefaults")?.optString("behaviorStyle") ?: "", value.optJSONObject("customPersonaDefaults")?.optString("replyStyle") ?: "")
     fun templates(value: JSONObject): List<NativeCreationTemplate> = decode {
         val rows = value.getJSONArray("templates")
         (0 until rows.length()).map { template(rows.getJSONObject(it)) }.also { if (it.map { item -> item.id }.distinct().size != it.size) invalid() }
@@ -88,7 +89,11 @@ internal object NativeCreationJson {
         val editor = value.editor
         if (!editor.valid) throw NativeApiException("COMPANION_INVALID_INPUT")
         return JSONObject().put("requestId", value.requestId).put("draftId", draftId).put("templateId", editor.template.id).put("name", editor.name)
-            .put("personalityOverride", editor.personalityOverride).put("model", editor.model?.let(::selectionValue) ?: JSONObject.NULL)
+            .put("personalityOverride", editor.personalityOverride)
+            .apply {
+                if (editor.behaviorStyleOverride.isNotEmpty()) put("behaviorStyleOverride", editor.behaviorStyleOverride)
+                if (editor.replyStyleOverride.isNotEmpty()) put("replyStyleOverride", editor.replyStyleOverride)
+            }.put("model", editor.model?.let(::selectionValue) ?: JSONObject.NULL)
             .put("settings", settingsValue(editor.settings)).put("chatBackground", JSONObject(editor.backgroundJson))
             .apply { editor.avatarUpload?.let { put("avatarUploadId", it.id) } }.toString()
     }
@@ -99,10 +104,12 @@ internal object NativeCreationJson {
     private fun templateValue(value: NativeCreationTemplate) = JSONObject().put("templateId", value.id).put("name", value.name).put("suggestedName", value.suggestedName)
         .put("avatarUrl", value.avatarUrl).put("personality", value.personality).put("behaviorStyle", value.behaviorStyle).put("replyStyle", value.replyStyle)
         .put("settings", settingsValue(value.settings)).put("chatBackground", JSONObject(value.backgroundJson))
+        .put("customPersonaDefaults", JSONObject().put("behaviorStyle", value.customBehavior).put("replyStyle", value.customReply))
     fun journal(value: NativeCreationJournal): String = JSONObject().put("version", 1).put("requestId", value.requestId)
         .put("draftId", value.draftId ?: JSONObject.NULL).put("frozenPayload", value.frozenPayload ?: JSONObject.NULL).put("pendingCancel", value.pendingCancel)
         .put("editor", JSONObject().put("template", templateValue(value.editor.template)).put("name", value.editor.name)
-            .put("personalityOverride", value.editor.personalityOverride).put("model", value.editor.model?.let(::modelValue) ?: JSONObject.NULL)
+            .put("personalityOverride", value.editor.personalityOverride)
+            .put("behaviorStyleOverride", value.editor.behaviorStyleOverride).put("replyStyleOverride", value.editor.replyStyleOverride).put("model", value.editor.model?.let(::modelValue) ?: JSONObject.NULL)
             .put("settings", settingsValue(value.editor.settings)).put("chatBackground", JSONObject(value.editor.backgroundJson))
             .put("avatarUpload", value.editor.avatarUpload?.let(NativeCompanionJson::attachment) ?: JSONObject.NULL))
         .put("image", value.image?.let { image -> JSONObject().put("id", image.id).put("ownerRequestId", image.ownerRequestId).put("draftId", image.draftId)
@@ -118,7 +125,7 @@ internal object NativeCreationJson {
         val template = template(row.getJSONObject("template"))
         val model = if (row.isNull("model")) null else row.getJSONObject("model").let { model -> NativeModel(model.string("provider"), model.string("model"), model.string("name"), model.string("providerName"), model.optionalString("reasoningEffort")) }
         val avatar = if (row.isNull("avatarUpload")) null else upload(row.getJSONObject("avatarUpload"), draftId ?: invalid())
-        val editor = NativeCreationEditor(template, row.string("name"), row.string("personalityOverride"), model, settings(row.getJSONObject("settings")), background(row.getJSONObject("chatBackground")), avatar)
+        val editor = NativeCreationEditor(template, row.string("name"), row.string("personalityOverride"), model, settings(row.getJSONObject("settings")), background(row.getJSONObject("chatBackground")), avatar, row.optionalString("behaviorStyleOverride") ?: "", row.optionalString("replyStyleOverride") ?: "")
         val image = if (value.isNull("image")) null else value.getJSONObject("image").let { input ->
             val owner = identifier(input.string("ownerRequestId")); val imageDraft = identifier(input.string("draftId"))
             if (owner != requestId || imageDraft != draftId) invalid()

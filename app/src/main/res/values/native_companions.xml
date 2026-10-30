@@ -125,4 +125,13 @@
     <string name="native_companion_configure_model">Set up a model in Settings to start chatting</string>
     <string name="native_companion_user_bio">About me</string>
     <string name="native_companion_user_bio_too_long">Use 2,000 characters or fewer</string>
+    <string name="native_companion_persona_help">When identity changes, uncustomized behavior and speech follow it. Shared history is kept.</string>
+    <string name="native_companion_persona_identity">Identity and personality</string>
+    <string name="native_companion_persona_behavior">Behavior</string>
+    <string name="native_companion_persona_reply">Speech style</string>
+    <string name="native_companion_proactive_dynamic">Decides when to reach out from shared experiences and your chat rhythm, respecting quiet hours.</string>
+    <string name="native_companion_choose_model">Choose model</string>
+    <string name="native_companion_communication">Communication</string>
+    <string name="native_companion_settings">Companion settings</string>
+    <string name="native_companion_background_options">Background</string>
 </resources>

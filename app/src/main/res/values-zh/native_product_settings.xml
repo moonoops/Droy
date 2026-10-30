@@ -133,4 +133,11 @@
     <string name="nps_discard">放弃修改</string>
     <string name="nps_continue_editing">继续编辑</string>
     <string name="nps_restore_default_confirm">恢复默认整理规则？</string>
+    <string name="nps_delivery_section">发送通知</string>
+    <string name="nps_organization_section">整理通知</string>
+    <string name="nps_delivery_error">无法读取发送通知设置。</string>
+    <string name="nps_organization_error">无法读取整理通知设置。</string>
+    <string name="nps_no_matching_apps">没有匹配的应用</string>
+    <string name="nps_no_notification_history">暂无通知记录</string>
+    <string name="nps_pet_display">显示方式</string>
 </resources>

@@ -57,6 +57,11 @@ data class NativeCompanion(
     val settings: NativeCompanionSettings = NativeCompanionSettings(),
     val chatBackgroundJson: String? = null,
     val templateId: String? = null,
+    val behaviorStyle: String = "", val replyStyle: String = "",
+    val behaviorStyleOverride: String = "", val replyStyleOverride: String = "",
+    val presetPersonality: String = "", val presetBehavior: String = "", val presetReply: String = "",
+    val customBehavior: String = "", val customReply: String = "",
+
 )
 
 data class NativeCompanionSticker(val id: String, val url: String, val label: String = "")
@@ -75,6 +80,7 @@ data class NativeCompanionProfilePatch(
     val personalityOverride: String? = null, val model: NativeModel? = null,
     val settings: NativeCompanionSettings? = null, val chatBackgroundJson: String? = null,
     val clearModel: Boolean = false,
+    val behaviorStyleOverride: String? = null, val replyStyleOverride: String? = null,
 )
 
 data class NativeCompanionReadingAnchor(val messageId: String, val offset: Int)

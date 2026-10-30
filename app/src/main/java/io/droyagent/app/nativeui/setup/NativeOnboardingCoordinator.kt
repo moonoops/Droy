@@ -62,6 +62,7 @@ internal class NativeOnboardingCoordinator(
     }
 
     fun name(value: String) { edit(state.value.draft.copy(name = value, edited = true)) }
+    fun bio(value: String) { edit(state.value.draft.copy(bio = value, edited = true)) }
     fun avatar(value: String) {
         if (!NativeSetupJson.validAvatar(value)) { report("setup_identity_invalid"); return }
         edit(state.value.draft.copy(avatarUrl = value, edited = true))
@@ -87,8 +88,8 @@ internal class NativeOnboardingCoordinator(
         }
     }
 
-    fun next(expectedStep: Int, saveProfile: suspend (String, String?) -> NativeUserProfile): Job {
-        if (state.value.route?.step != expectedStep || expectedStep !in 1..5 || !begin()) return scope.launch { }
+    fun next(expectedStep: Int, saveProfile: suspend (String, String?, String?) -> NativeUserProfile): Job {
+        if (state.value.route?.step != expectedStep || expectedStep !in 1..4 || !begin()) return scope.launch { }
         return scope.launch {
             try {
                 val current = repository.route()
@@ -103,17 +104,22 @@ internal class NativeOnboardingCoordinator(
                         if (!live.passed("model") || !live.passed("modelTools")) throw NativeApiException("setup_model_required")
                     }
                     4 -> {
+                        // Old saved drafts have no biography. Read it before saving so name-only
+                        // edits cannot clear the existing user profile biography.
+                        if (state.value.draft.bio == null) {
+                            val live = repository.status(); applyLive(live)
+                            if (live.route.completed) return@launch
+                        }
                         val desired = NativeSetupJson.validateIdentity(state.value.draft)
-                        val saved = saveProfile(desired.name, desired.avatarUrl)
+                        val saved = saveProfile(desired.name, desired.avatarUrl, desired.bio)
                         if (saved != desired) throw NativeApiException("NATIVE_SETUP_IDENTITY_CHANGED")
                         val confirmed = repository.confirmIdentity(saved); applyLive(confirmed)
                         if (confirmed.route.completed) return@launch
                         if (!confirmed.identitySaved || !confirmed.identityConfirmed || confirmed.profile != saved)
                             throw NativeApiException("NATIVE_SETUP_IDENTITY_CHANGED")
-                        val clean = NativeSetupIdentityDraft(saved.name, saved.avatarUrl, edited = false)
+                        val clean = NativeSetupIdentityDraft(saved.name, saved.avatarUrl, edited = false, bio = saved.bio)
                         mutable.update { it.copy(draft = clean) }; persist(clean)
                     }
-                    5 -> if (current.permissionPolicy == null) throw NativeApiException("setup_policy_required")
                 }
                 if (state.value.route?.required == true) applyRoute(repository.setStep(expectedStep + 1))
             } catch (error: Exception) { handle(error) }
@@ -122,12 +128,12 @@ internal class NativeOnboardingCoordinator(
     }
 
     fun complete(): Job {
-        if (state.value.route?.step != 6 || !begin()) return scope.launch { }
+        if (state.value.route?.step != 5 || !begin()) return scope.launch { }
         return scope.launch {
             try {
                 val live = repository.status(); applyLive(live)
                 if (live.route.completed) { clearDraft(); return@launch }
-                if (!live.canComplete) throw NativeApiException("NATIVE_SETUP_NOT_READY")
+                if (!live.canComplete) { returnToIncompleteStep(live); return@launch }
                 val result = repository.complete(); applyLive(result)
                 if (!result.route.completed || result.route.required) throw NativeApiException("setup_result_unconfirmed")
                 clearDraft()
@@ -138,12 +144,25 @@ internal class NativeOnboardingCoordinator(
                 try {
                     val actual = repository.status(); applyLive(actual)
                     if (actual.route.completed) { clearDraft(); mutable.update { it.copy(error = null) } }
+                    else if (!actual.canComplete) returnToIncompleteStep(actual)
                 } catch (read: Exception) {
                     if (read is CancellationException) throw read
                     mutable.update { it.copy(liveFresh = false, statusError = code(read), error = "setup_result_unconfirmed") }
                 }
             } finally { mutable.update { it.copy(busy = false) } }
         }
+    }
+
+    private suspend fun returnToIncompleteStep(live: NativeSetupLive) {
+        val (step, error) = when {
+            !live.passed("runtime") -> 2 to "setup_environment_required"
+            !live.passed("model") || !live.passed("modelTools") -> 3 to "setup_model_required"
+            !live.passed("identity") -> 4 to "NATIVE_SETUP_IDENTITY_CHANGED"
+            !live.passed("permissionPolicy") -> 5 to "setup_policy_required"
+            else -> 5 to "NATIVE_SETUP_NOT_READY"
+        }
+        if (live.route.step != step) applyRoute(repository.setStep(step))
+        report(error)
     }
 
     fun report(value: String) { mutable.update { it.copy(error = value) } }
@@ -162,7 +181,8 @@ internal class NativeOnboardingCoordinator(
     }
     private fun applyLive(value: NativeSetupLive) {
         val current = state.value
-        val draft = if (!current.draft.edited) NativeSetupIdentityDraft(value.profile.name, value.profile.avatarUrl) else current.draft
+        val draft = if (!current.draft.edited) NativeSetupIdentityDraft(value.profile.name, value.profile.avatarUrl, bio = value.profile.bio)
+            else if (current.draft.bio == null) current.draft.copy(bio = value.profile.bio) else current.draft
         mutable.update { it.copy(route = value.route, localLoading = false, localError = null, live = value, liveFresh = true,
             checking = false, statusError = null, draft = draft, draftLoaded = true) }
         if (draft != current.draft) persist(draft)

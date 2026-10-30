@@ -35,9 +35,10 @@ internal fun NotificationTextRuleEditor(initial: String, save: suspend (String) 
     }
     ModalBottomSheet(onDismissRequest = leave, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         BackHandler { leave() }
-        Column(Modifier.fillMaxWidth().imePadding().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 600.dp).imePadding().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(stringResource(R.string.nps_rules), style = MaterialTheme.typography.headlineSmall)
-            OutlinedTextField(draft, { draft = it }, modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 420.dp), enabled = !busy)
+            ProductFilledField(draft, { draft = it }, modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(min = 120.dp, max = 420.dp),
+                enabled = !busy, isError = failed)
             if (failed) Text(stringResource(R.string.nps_error), color = MaterialTheme.colorScheme.error)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton({ confirmReset = true }, enabled = !busy) { Text(stringResource(R.string.nps_restore_default)) }

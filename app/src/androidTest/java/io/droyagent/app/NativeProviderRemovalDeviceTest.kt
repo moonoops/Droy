@@ -37,6 +37,8 @@ class NativeProviderRemovalDeviceTest {
         openModels()
         compose.onNodeWithTag("native-settings-provider:$providerId").performScrollTo().assertIsDisplayed()
         compose.waitForIdle(); compose.mainClock.advanceTimeBy(1_000); compose.waitForIdle(); fixture.capture("native-provider-added-en")
+        compose.onNodeWithTag("native-settings-remove-provider:$providerId").assertDoesNotExist()
+        compose.onNodeWithTag("native-settings-provider-more:$providerId").performClick()
         compose.onNodeWithTag("native-settings-remove-provider:$providerId").performClick()
         compose.onNodeWithText(text(R.string.native_settings_remove_default_provider, "en")).assertIsDisplayed()
         compose.onNodeWithTag("native-settings-confirm-remove-provider").assertIsEnabled().performClick()

@@ -1,6 +1,7 @@
 package io.droyagent.app.nativeui.ui
 
 import android.view.Window
+import android.os.Build
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -16,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -117,23 +119,45 @@ private val DroyShapes = Shapes(
     extraLarge = RoundedCornerShape(28.dp),
 )
 
+/** Unknown saved values retain the original brand palette. */
+fun droyPresetColorScheme(palette: String, dark: Boolean): ColorScheme = when (palette) {
+    "teal" -> if (dark) TealDarkColors else TealLightColors
+    "amber" -> if (dark) AmberDarkColors else AmberLightColors
+    "rose" -> if (dark) RoseDarkColors else RoseLightColors
+    else -> if (dark) DarkColors else LightColors
+}
+
 /** One theme supplies standard components and Droy's custom chat surfaces. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun DroyTheme(window: Window? = null, dark: Boolean? = null, content: @Composable () -> Unit) {
     val view = LocalView.current
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
     val preferences = remember(context.applicationContext) { context.getSharedPreferences("product", Context.MODE_PRIVATE) }
     var mode by remember(preferences) { mutableStateOf(preferences.getString("appearanceMode", "system")) }
+    var palette by remember(preferences) { mutableStateOf(preferences.getString("themePalette", "purple") ?: "purple") }
+    var colorSource by remember(preferences) { mutableStateOf(preferences.getString("colorSource", "preset")) }
     DisposableEffect(preferences) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
-            if (key == "appearanceMode") mode = prefs.getString(key, "system")
+            when (key) {
+                "appearanceMode" -> mode = prefs.getString("appearanceMode", "system")
+                "themePalette" -> palette = prefs.getString("themePalette", "purple") ?: "purple"
+                "colorSource" -> colorSource = prefs.getString("colorSource", "preset")
+            }
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
     }
     val systemDark = isSystemInDarkTheme()
     val useDark = dark ?: when (mode) { "light" -> false; "dark" -> true; else -> systemDark }
+    val colors = remember(context, configuration, useDark, palette, colorSource) {
+        if (colorSource == "dynamic" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (useDark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        } else {
+            droyPresetColorScheme(palette, useDark)
+        }
+    }
     SideEffect {
         window?.let {
             WindowCompat.getInsetsController(it, view).apply {
@@ -143,7 +167,7 @@ fun DroyTheme(window: Window? = null, dark: Boolean? = null, content: @Composabl
         }
     }
     MaterialTheme(
-        colorScheme = if (useDark) DarkColors else LightColors,
+        colorScheme = colors,
         motionScheme = MotionScheme.expressive(),
         shapes = DroyShapes,
         typography = DroyTypography,
