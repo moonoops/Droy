@@ -257,6 +257,8 @@ internal fun CompanionError(code: String?, onDismiss: () -> Unit, onRetry: (() -
         code == "malformed_response" -> R.string.native_companion_error_response
         code == "pending_send_conflict" || code == "COMPANION_MESSAGE_CONFLICT" -> R.string.native_companion_error_conflict
         code == "companion_stop_pending" -> R.string.native_companion_stop_pending
+        code == "COMPANION_NOTIFICATION_REMOVE_FAILED" -> R.string.native_companion_notification_remove_failed
+        code == "COMPANION_NOTIFICATION_REMOVALS_PENDING" -> R.string.native_companion_notification_removals_pending
         code == "COMPANION_STICKER_PACK_TOO_LARGE" -> R.string.native_companion_sticker_pack_too_large
         code == "COMPANION_STICKER_PACK_UNSUPPORTED" -> R.string.native_companion_sticker_pack_unsupported
         code == "COMPANION_STICKER_PACK_INVALID" -> R.string.native_companion_sticker_pack_invalid

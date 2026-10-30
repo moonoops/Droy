@@ -16,6 +16,10 @@ import { createCompanionEmbedder } from './embedding.mjs';
 
 const base='/droy/companions';
 export const stickerIds=stickerCatalog().map(sticker=>sticker.id);
+export function companionNotificationRequest(value,profile,clock) {
+  if(value.operation==='companionRead'||value.operation==='companionRemove')return value;
+  return {...value,operation:'companion',quiet:isQuietTime(profile.settings.quietHours,new Date(clock.currentTime),clock.timeZone)};
+}
 const assetNames=new Set(['kaka.png','maimai.png','user-default.png',...companionTemplates().map(template=>template.avatar.split('/').at(-1)),...['01','02','03','04','05','06','07','08'].flatMap(id=>['wallpaper-'+id+'.webp','wallpaper-'+id+'-thumb.webp']),...stickerIds.map(id=>id+'.png')]);
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 async function body(req,limit=262144) {
@@ -183,7 +187,8 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         finally {req.off('aborted',cancel);res.off('close',cancel);}
       }
       if(path[1]==='conversation' && path.length===2 && req.method==='POST') {
-        const conversation=await store.updateConversation(id,await body(req));
+        const input=await body(req),conversation=await store.updateConversation(id,input);
+        if(['read','hide'].includes(input.action))await runtime.syncReadNotifications(id);
         runtime.emit(id,'profile');return send(res,200,conversation);
       }
       if(path.length===1 && req.method==='PATCH') {
@@ -237,7 +242,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         return send(res,200,await runtime.removeMessage(id,path[2]));
       }
       if(path[1]==='read' && req.method==='POST') {
-        const input=await body(req);await store.markRead(id,input.messageId);runtime.emit(id,'read');return send(res,200,{ok:true});
+        const input=await body(req);await runtime.markRead(id,input.messageId);return send(res,200,{ok:true});
       }
       if(path[1]==='cancel' && req.method==='POST') return send(res,200,await runtime.cancel(id,await body(req)));
       if(path[1]==='retry' && req.method==='POST') {await runtime.retry(id);return send(res,202,{accepted:true});}
@@ -284,6 +289,8 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         :code==='COMPANION_STICKER_ONLINE_INVALID'?copy.stickerOnlineInvalid
         :code==='COMPANION_STICKER_ONLINE_NOT_FOUND'?copy.stickerOnlineNotFound
         :code==='COMPANION_STICKER_ONLINE_CHECKSUM'?copy.stickerOnlineChecksum
+        :code==='COMPANION_NOTIFICATION_REMOVE_FAILED'?copy.notificationRemovalFailed
+        :code==='COMPANION_NOTIFICATION_REMOVALS_PENDING'?copy.notificationRemovalsPending
         :generation?copy.generationFailed:copy.operationFailed;
       ctx.logger.warn('COMPANION_HTTP_FAILED: '+code);
       return send(res,code==='COMPANION_OPERATION_FAILED'?500:code==='COMPANION_STICKER_ONLINE_NETWORK'?503:/NOT_FOUND/.test(code)?404:/CONFLICT|MANAGED|DRAFT_CLOSED/.test(code)?409:400,{
@@ -304,12 +311,12 @@ export function installCompanions(ctx,bridge) {
       store=await CompanionStore.open({directory});
       const stickerLibrary=new StickerPackLibrary(join(directory,'sticker-packs'),{builtinCatalog:stickerCatalog});await stickerLibrary.open();
       runtime=new CompanionRuntime({ctx:scope,store,directory,stickerLibrary,options:{getClock:signal=>bridge.clock(signal),embed:createCompanionEmbedder(bridge),
-        requestMemoryPurge:input=>bridge.companionMemory(input)},notify:async value=>{
+        requestMemoryPurge:input=>bridge.companionMemory(input)},notify:async(value,signal)=>{
+        const noticeSignal=signal?AbortSignal.any([signal,AbortSignal.timeout(5000)]):undefined;
+        if(value.operation==='companionRead'||value.operation==='companionRemove')return bridge.notify(value,noticeSignal);
         const profile=await store.getProfile(value.companionId);
         const clock=await runtime.clock();
-        if(isQuietTime(profile.settings.quietHours,new Date(clock.currentTime),clock.timeZone))return {status:'suppressed'};
-        return bridge.notify({operation:'companion',companionId:value.companionId,name:value.name,
-          messageId:value.messageId,text:[...value.text].slice(0,180).join('')});
+        return bridge.notify(companionNotificationRequest(value,profile,clock),noticeSignal);
       }});
       startup.phase='initializing';await runtime.initialize();
       const handler=createCompanionHandler({ctx:scope,runtime,store});

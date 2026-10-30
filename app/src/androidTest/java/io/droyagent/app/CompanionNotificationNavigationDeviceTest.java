@@ -37,7 +37,7 @@ public class CompanionNotificationNavigationDeviceTest {
         InstrumentationRegistry.getInstrumentation().getUiAutomation().performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         for (StatusBarNotification item : manager.getActiveNotifications())
-            if (ProactiveNotifications.COMPANION_TAG.equals(item.getTag())) manager.cancel(item.getTag(), item.getId());
+            if (ProactiveNotifications.isCompanionTag(item.getTag())) manager.cancel(item.getTag(), item.getId());
         if (notices != null) notices.request(new JSONObject().put("operation", "activate").put("enabled", pluginActive));
         SharedPreferences.Editor editor = product.edit();
         for (String key : KEYS) {
@@ -80,7 +80,7 @@ public class CompanionNotificationNavigationDeviceTest {
         ui.tap(".droy-im-mode-trigger");
         DeviceUi.await("Workbench did not open", 5000, () -> ui.truth("!document.querySelector('[data-droy-im]')"));
         JSONObject foreground = notices.request(message("foreground"));
-        assertEquals("suppressed", foreground.getString("status")); assertFalse(foreground.getBoolean("published"));
+        assertEquals("published", foreground.getString("status")); assertTrue(foreground.getBoolean("published"));
         assertTrue("Incoming message changed the foreground page", ui.truth("!document.querySelector('[data-droy-im]')"));
 
         instrumentation.runOnMainSync(() -> activity.moveTaskToBack(true));

@@ -73,13 +73,15 @@ async function publish(input) {
     const message=stored.parts[index];
     await checkedDraft(input);
     let saved=await store.getMessage(companionId,message.id);
+    // A validated older draft may predate durable notification identities.
+    if(saved)await store.queueNotifications(companionId,[saved.id]);
     if(!saved) {
       // A product policy may explicitly omit an obsolete, unpublished part.
       // Other callback failures still stop delivery and preserve recovery.
       const allowed=await beforeSend?.({message:structuredClone(message),index,draft:structuredClone(stored)});
       if(allowed===false)continue;
       await checkedDraft(input);
-      saved=await store.appendMessage(companionId,{...message,createdAt:new Date().toISOString()});
+      saved=await store.appendMessage(companionId,{...message,createdAt:new Date().toISOString()},{notification:true});
       newMessageIds.push(saved.id);
       checkSignal(signal);
       await onSent?.(saved,{index,draft:structuredClone(stored)});

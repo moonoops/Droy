@@ -140,6 +140,14 @@
     <string name="nps_no_matching_apps">No matching apps</string>
     <string name="nps_no_notification_history">No notification history</string>
     <string name="nps_pet_display">Display</string>
+    <string name="nps_message_delivery_ready">Message notifications are on</string>
+    <string name="nps_message_delivery_off">Message notifications are off</string>
+    <string name="nps_message_delivery_system_blocked">System notifications are off. Enable them to receive messages.</string>
+    <string name="nps_message_delivery_channel_blocked">The companion message channel is off.</string>
+    <string name="nps_message_system_settings">Message notification settings</string>
+    <string name="nps_message_quiet_settings">Silent message settings</string>
+    <string name="nps_message_quiet_hint">Received messages stay in the notification shade during quiet hours.</string>
+    <string name="nps_message_quiet_blocked">The silent message channel is off. Messages during quiet hours will not appear in the shade.</string>
     <string name="nps_organization_off">Notification organization is off</string>
     <string name="nps_organization_setup">Setup required</string>
     <string name="nps_organization_ready">Ready to organize notifications</string>

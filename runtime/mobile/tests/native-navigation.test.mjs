@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire, registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { mkdtemp, mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CompanionStore } from '../companions/store.mjs';
@@ -47,6 +47,7 @@ function fixture() {
       create: forbidden('workspace-create'), initializeDefault: forbidden('initialize-default'),
     },
     droyCompanions: {
+      directory: '/fixture/companions',
       ownsSession: id => owners.has(id),
       store: {
         async profiles() { calls.push(['profiles']); return structuredClone([...profiles.values()]); },
@@ -69,7 +70,8 @@ function fixture() {
     space?.sessionIds.push(id); return header;
   }
   function bind(id, kind, taskId = null, companionId = 'companion-one') {
-    add(id, {}, 'space-companion');
+    add(id, kind === 'chat' ? { cwd: '/fixture/companions/' + companionId + '/chat' } : {},
+      kind === 'chat' ? null : 'space-companion');
     const saved = profiles.get(companionId) ?? { id: companionId, workspaceId: 'space-companion', chatSessionId: null };
     if (kind === 'chat') saved.chatSessionId = id;
     profiles.set(companionId, saved);
@@ -133,6 +135,25 @@ test('companion chat can remain truly empty, and resolving an existing chat neve
     { kind: 'companion-chat', companionId: 'companion-one', chatSessionId: 'chat' });
   assert.equal(f.workspaceCloses, 1);
   await assert.rejects(f.service.resolve({ kind: 'companion-chat', companionId: 'missing' }), code('NOT_FOUND'));
+});
+
+test('private companion chat opens without work workspace membership and retains ownership proof', async () => {
+  const f = fixture();
+  assert.ok(f.spaces.every(space => !space.sessionIds.includes('chat')));
+  assert.deepEqual(await f.service.resolve(engine('chat')),
+    { kind: 'companion-chat', companionId: 'companion-one', chatSessionId: 'chat' });
+  for (const mutate of [
+    f => { f.headers.get('chat').cwd = '/fixture/companions/another/chat'; f.summaries.get('chat').cwd = f.headers.get('chat').cwd; },
+    f => { f.headers.get('chat').cwd = '/fixture/companions/companion-one/work'; f.summaries.get('chat').cwd = f.headers.get('chat').cwd; },
+    f => { f.spaces[0].sessionIds.push('chat'); },
+    f => { f.profiles.get('companion-one').workspaceId = 'space-work'; },
+    f => { f.owners.get('chat').taskId = 'unexpected-task'; },
+  ]) {
+    const invalid = fixture(); mutate(invalid);
+    await assert.rejects(invalid.service.resolve({ kind: 'companion-chat', companionId: 'companion-one' }), code('TARGET_MISMATCH'));
+  }
+  delete f.ctx.droyCompanions.directory;
+  await assert.rejects(f.service.resolve(engine('chat')), code('NOT_READY'));
 });
 
 test('actual companion tasks are resolved from ownership and the task message, including engine-only inputs', async () => {
@@ -296,7 +317,7 @@ async function realFixture(t) {
   ctx.provide('typert', { resources: { register() {} }, lookups: { configure() {} }, contexts: { configureHost() {} } });
   ctx.provide('fileUploads', { registerAgentResolver: () => () => {} });
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'fictional', model: 'fixture' }) });
-  ctx.provide('droyCompanions', { store, ownsSession: () => false });
+  ctx.provide('droyCompanions', { store, directory: join(home, 'companions'), ownsSession: () => false });
   ctx.provide('workingDirectory', {});
   await ctx.plugin(Sessions); await ctx.plugin(Projections); await ctx.plugin(Jsonl, { root: join(home, 'sessions'), compression: 'none' });
   await ctx.plugin(SessionQueryEngine); await ctx.plugin(Titles, { fallbackMaxWords: 8, fallbackMaxBytes: 120, maxTitleBytes: 256 });
@@ -308,13 +329,14 @@ async function realFixture(t) {
   ctx.provide('agents', { get: () => undefined, list: () => [], create: unexpected, resume: unexpected });
   new SessionController(ctx, { nativeOpen: false });
   await mkdir(join(home, 'work')); const { workspace } = await ctx.workspaceController.create({ path: join(home, 'work') });
-  async function save(id, { meta = {}, seed, inheritedEventCount, descriptor } = {}) {
+  async function save(id, { meta = {}, seed, inheritedEventCount, descriptor, attach = true } = {}) {
     const session = ctx.sessions.prepare(id, { meta: { cwd: workspace.path, ...(inheritedEventCount ? { isSeeded: true } : {}), ...meta }, ...(seed === undefined ? {} : { seed }),
       ...(inheritedEventCount === undefined ? {} : { inheritedEventCount }) });
     if (descriptor) session.append('subagent/descriptor', descriptor);
     const handle = await ctx.sessionPersistence.create(session.header, { inheritedEventCount: session.inheritedEventCount });
     try { await handle.append(session.snapshotEvents()); await handle.flush(); } finally { await handle.close(); }
-    await ctx.workspaceRegistry.get(workspace.workspaceId).attachSession(id); return session;
+    if (attach) await ctx.workspaceRegistry.get(workspace.workspaceId).attachSession(id);
+    return session;
   }
   const adapter = createNativeNavigationService(ctx);
   return { home, ctx, store, workspace, save, adapter };
@@ -340,9 +362,56 @@ test('real SDK cold child proof rejects absent/inherited descriptors, preserves 
   assert.deepEqual(await tree(f.home), directoryBefore);
 });
 
+test('default zero depth is compatible in either source while a different depth is rejected', async () => {
+  for (const [liveDepth, storedDepth] of [[undefined, 0], [0, undefined], [1, 0], [0, 1]]) {
+    const f = fixture(), original = f.ctx.sessionPersistence.stat;
+    f.ctx.sessions.get = id => ({ header: { ...f.headers.get(id), delegationDepth: liveDepth } });
+    f.ctx.sessionPersistence.stat = async (...args) => {
+      const value = await original(...args); value.header.delegationDepth = storedDepth; return value;
+    };
+    if ((liveDepth ?? 0) === (storedDepth ?? 0)) assert.equal((await f.service.resolve(engine())).session.id, 'ordinary');
+    else await assert.rejects(f.service.resolve(engine()), code('TARGET_MISMATCH'));
+  }
+});
+
+test('real private chat accepts a canonical base alias and rejects a symlink escaping its companion directory', async t => {
+  const f = await realFixture(t), profile = (await f.store.profiles())[0];
+  const directory = join(f.home, 'companions'), chat = join(directory, profile.id, 'chat'), alias = join(f.home, 'companion-alias');
+  await mkdir(chat, { recursive: true });
+  await symlink(directory, alias, 'dir');
+  f.ctx.droyCompanions.directory = alias;
+  await f.save('private-chat-alias', { meta: { cwd: await realpath(chat) }, attach: false });
+  await f.store.bindSession(profile.id, { sessionId: 'private-chat-alias', kind: 'chat', workspaceId: f.workspace.workspaceId });
+  assert.deepEqual(await f.adapter.resolve({ kind: 'companion-chat', companionId: profile.id }),
+    { kind: 'companion-chat', companionId: profile.id, chatSessionId: 'private-chat-alias' });
+  const outside = join(f.home, 'another-chat');
+  await mkdir(outside); await rm(chat, { recursive: true }); await symlink(outside, chat, 'dir');
+  await assert.rejects(f.adapter.resolve({ kind: 'companion-chat', companionId: profile.id }), code('TARGET_MISMATCH'));
+});
+
+test('a real live chat and its normalized JSONL header identify the same ordinary session', async t => {
+  const f = await realFixture(t), profile = (await f.store.profiles())[0];
+  const directory = join(f.home, 'companions', profile.id, 'chat');
+  await mkdir(directory, { recursive: true });
+  const live = await f.save('live-companion-chat', { meta: { cwd: directory }, attach: false });
+  await f.store.bindSession(profile.id, { sessionId: live.id, kind: 'chat', workspaceId: f.workspace.workspaceId });
+  assert.equal(live.header.delegationDepth, undefined);
+  assert.equal((await f.ctx.sessionPersistence.stat(live.id)).header.delegationDepth, 0);
+  const detach = f.ctx.sessions.enter(live);
+  try {
+    assert.deepEqual(await f.adapter.resolve({ kind: 'companion-chat', companionId: profile.id }),
+      { kind: 'companion-chat', companionId: profile.id, chatSessionId: live.id });
+    assert.deepEqual(await f.adapter.resolve(engine(live.id)),
+      { kind: 'companion-chat', companionId: profile.id, chatSessionId: live.id });
+    assert.equal(f.ctx.sessions.get(live.id), live);
+  } finally { detach(); }
+});
+
 test('real SQLite companion bindings and task messages resolve without changing profiles, messages or session persistence', async t => {
   const f = await realFixture(t), profile = (await f.store.profiles())[0];
-  await f.save('companion-chat'); await f.save('companion-work');
+  const chatDirectory = join(f.home, 'companions', profile.id, 'chat');
+  await mkdir(chatDirectory, { recursive: true });
+  await f.save('companion-chat', { meta: { cwd: chatDirectory }, attach: false }); await f.save('companion-work');
   await f.store.bindSession(profile.id, { sessionId: 'companion-chat', kind: 'chat', workspaceId: f.workspace.workspaceId });
   await f.store.bindSession(profile.id, { sessionId: 'companion-work', kind: 'work', workspaceId: f.workspace.workspaceId, taskId: 'real-task' });
   await f.store.appendMessage(profile.id, { id: 'real-task', role: 'assistant', type: 'task', text: 'Synthetic task',

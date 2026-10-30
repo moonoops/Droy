@@ -36,7 +36,7 @@ final class CompanionNotificationChecks {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         int notificationId = TARGET.hashCode() & 0x7fffffff;
         for (StatusBarNotification item : manager.getActiveNotifications())
-            assertFalse("Do not replace an existing companion notification", ProactiveNotifications.COMPANION_TAG.equals(item.getTag())
+            assertFalse("Do not replace an existing companion notification", ProactiveNotifications.companionTag(TARGET).equals(item.getTag())
                 && item.getId() == notificationId);
         SharedPreferences preferences = ProductPermissions.preferences(context);
         Boolean localEnabled = preferences.contains("notifyLocalEnabled") ? preferences.getBoolean("notifyLocalEnabled", true) : null;
@@ -47,10 +47,10 @@ final class CompanionNotificationChecks {
             notices.request(new JSONObject().put("operation", "activate").put("enabled", true));
             DeviceUi.await("Droy did not become visible", 5000, BackgroundRuntime::visible);
             JSONObject foreground = notices.request(message("phone-foreground"));
-            assertEquals("suppressed", foreground.getString("status"));
-            assertFalse(foreground.getBoolean("published"));
+            assertEquals("published", foreground.getString("status"));
+            assertTrue(foreground.getBoolean("published"));
             assertTrue("A foreground notification changed the page", ui.truth("!!document.querySelector('[data-droy-im-screen=list]')"));
-            System.out.println("COMPANION_NOTICE foreground_suppressed");
+            System.out.println("COMPANION_NOTICE other_page_published");
 
             instrumentation.runOnMainSync(() -> activity.moveTaskToBack(true));
             DeviceUi.await("Droy did not enter the background", 5000, () -> !BackgroundRuntime.visible());
@@ -64,7 +64,7 @@ final class CompanionNotificationChecks {
             Notification notification = ownNotification(manager, notificationId);
             assertNotNull("Droy's test notification disappeared before opening the shade", notification);
             assertEquals(TITLE, notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString());
-            assertEquals("task_attention", notification.getChannelId());
+            assertEquals(ProactiveNotifications.MESSAGE_CHANNEL, notification.getChannelId());
             NotificationChannel channel = manager.getNotificationChannel(notification.getChannelId());
             assertNotNull("The notification channel is missing", channel);
             assertTrue("The notification channel is blocked", channel.getImportance() > NotificationManager.IMPORTANCE_NONE);
@@ -95,7 +95,7 @@ final class CompanionNotificationChecks {
             }
             System.out.println("COMPANION_NOTICE back_returned_to_messages");
         } finally {
-            manager.cancel(ProactiveNotifications.COMPANION_TAG, notificationId);
+            manager.cancel(ProactiveNotifications.companionTag(TARGET), notificationId);
             notices.request(new JSONObject().put("operation", "activate").put("enabled", pluginActive));
             SharedPreferences.Editor editor = preferences.edit();
             if (localEnabled == null) editor.remove("notifyLocalEnabled"); else editor.putBoolean("notifyLocalEnabled", localEnabled);
@@ -111,7 +111,7 @@ final class CompanionNotificationChecks {
     private static Notification ownNotification(NotificationManager manager, int id) {
         // NotificationManager exposes only notifications posted by this app.
         for (StatusBarNotification item : manager.getActiveNotifications())
-            if (ProactiveNotifications.COMPANION_TAG.equals(item.getTag()) && item.getId() == id)
+            if (ProactiveNotifications.companionTag(TARGET).equals(item.getTag()) && item.getId() == id)
                 return item.getNotification();
         return null;
     }

@@ -538,7 +538,8 @@ public final class NotificationManagementDeviceTest {
 final class NotificationTestState {
     private static final String[] KEYS = {"notificationManagementData", "notificationManagementEnabled", "backgroundRuntimeEnabled",
         "backgroundRuntimeStopped", "toolsStopped", "allowNotifications", "petEnabled", "petInternalDisplay", "petExternalDisplay",
-        "themePreference", "themeColorScheme", "themeBackgroundColor", "resetTheme", "darkTheme"};
+        "themePreference", "themeColorScheme", "themeBackgroundColor", "resetTheme", "darkTheme",
+        "proactiveNotificationRecords", "companionNotificationPositions", "notifyMessagesEnabled", "notifyTasksEnabled", "notifyLocalEnabled"};
     private final Context context;
     private final SharedPreferences preferences;
     private final Map<String, Object> original = new HashMap<>();

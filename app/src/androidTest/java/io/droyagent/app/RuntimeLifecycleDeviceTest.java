@@ -652,7 +652,7 @@ public class RuntimeLifecycleDeviceTest {
     }
 
     private static boolean isStandbyTitle(CharSequence title) {
-        return title != null && java.util.Set.of("Droy · 待命", "Droy · 正在无所事事", "Droy · 随时听你安排")
+        return title != null && java.util.Set.of("后台运行中", "Running in background")
             .contains(title.toString());
     }
 

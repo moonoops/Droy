@@ -16,7 +16,7 @@ public final class NotificationCopyTest {
         }
     }
 
-    @Test public void eachEventHasSeveralStableChoices() {
+    @Test public void statusTitlesStayStableWhileMessageSummariesKeepTheirEventChoices() {
         Set<String> titles = new HashSet<>(), important = new HashSet<>(), reminders = new HashSet<>(), ads = new HashSet<>();
         for (int seed = 0; seed < 3; seed++) {
             titles.add(NotificationCopy.title(true, true, "executing", seed));
@@ -25,7 +25,7 @@ public final class NotificationCopyTest {
             ads.add(NotificationCopy.ads(7, seed));
             assertEquals(NotificationCopy.reminder("测试应用", seed), NotificationCopy.reminder("测试应用", seed));
         }
-        assertEquals(3, titles.size());
+        assertEquals(1, titles.size());
         assertEquals(3, important.size());
         assertEquals(3, reminders.size());
         assertEquals(3, ads.size());
@@ -44,7 +44,7 @@ public final class NotificationCopyTest {
                     if (language.equals("en")) {
                         assertFalse(NotificationCopy.collecting(seed).matches(".*[\\p{IsHan}].*"));
                         assertFalse(NotificationCopy.idle(seed).matches(".*[\\p{IsHan}].*"));
-                        assertTrue(NotificationCopy.title(true, true, "waiting_input", seed).startsWith("Droy · "));
+                        assertEquals("Your confirmation is needed", NotificationCopy.title(true, true, "waiting_input", seed));
                     }
                 }
             }

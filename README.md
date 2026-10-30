@@ -99,6 +99,8 @@ After setup, try:
 | Extensions | Skills, plugins, MCP and automations through DSH. |
 | Languages | Chinese and English. |
 
+Background running uses one silent status notification with current task and stop controls. Companion messages appear separately by conversation, with unread history and a mark-as-read action. During quiet hours, received messages remain silently in the notification shade; proactive contact still follows the companion's quiet-hours setting. Enable message notifications and Android notification permission in settings.
+
 Notification organization applies only to apps you select. By default it keeps their existing notification settings, removes advertising, and reminds once after an important notification remains uncleared for 5 or 10 minutes. Optional silent takeover requires explicit confirmation and Root access. If classification fails, Droy keeps the original notification and restores settings it owns; settings show failures and any restoration still required. Android force-stop or loss of Root can prevent immediate restoration.
 
 ### A companion on your screen

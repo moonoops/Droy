@@ -96,6 +96,18 @@ function metadata(value, max = 65536) {
   if (Buffer.byteLength(serialized) > max) fail('COMPANION_MESSAGE_TOO_LARGE');
   return JSON.parse(serialized);
 }
+function stateMetadata(value,{keepEmpty=false}={}) {
+  if(!object(value))fail('COMPANION_INVALID_INPUT');
+  const {pendingNotificationIds,pendingNotificationRemovals,...context}=value;
+  const state=metadata(context,262144);
+  // Notification identities have their own small budget, so adding a notice
+  // cannot reject an otherwise valid chat context at its existing size limit.
+  for(const [key,ids] of Object.entries({pendingNotificationIds,pendingNotificationRemovals}))if(ids!==undefined) {
+    if(!Array.isArray(ids)||ids.length>200)fail('COMPANION_INVALID_INPUT');
+    if(ids.length||keepEmpty)state[key]=[...new Set(ids.map(id))];
+  }
+  return state;
+}
 function uploadData(value) {
   const upload=metadata(value);
   id(upload.id);text(upload.name,4096,false);text(upload.mediaType,256,false);
@@ -479,7 +491,7 @@ export class CompanionStore {
   }
   async updateState(companionId, patch) {
     this.#profile(companionId);
-    const validated = typeof patch === 'function' ? null : metadata(patch, 262144);
+    const validated = typeof patch === 'function' ? null : stateMetadata(patch,{keepEmpty:true});
     return this.#transaction(() => {
       const current = this.#db.prepare('SELECT data FROM companion_state WHERE companion_id=?').get(companionId);
       const state = current ? JSON.parse(current.data) : {};
@@ -489,7 +501,7 @@ export class CompanionStore {
         fail('COMPANION_INVALID_INPUT');
       }
       if(object(update)&&Object.hasOwn(update,'uploads'))fail('COMPANION_UPLOAD_API_REQUIRED');
-      const next = metadata({ ...state, ...metadata(update, 262144) }, 262144);
+      const next = stateMetadata({ ...state, ...stateMetadata(update,{keepEmpty:true}) });
       this.#db.prepare('INSERT INTO companion_state VALUES(?,?) ON CONFLICT(companion_id) DO UPDATE SET data=excluded.data').run(companionId, JSON.stringify(next));
       return next;
     });
@@ -560,6 +572,7 @@ export class CompanionStore {
         // Snapshot the read boundary in the same write transaction as hiding.
         // Messages committed later retain their own unread state.
         this.#db.prepare('UPDATE read_positions SET seq=MAX(seq,COALESCE((SELECT MAX(seq) FROM messages WHERE companion_id=?),0)) WHERE companion_id=?').run(companionId, companionId);
+        this.#updatePendingNotificationIds(companionId,()=>[]);
       }
       this.#db.prepare('INSERT INTO conversation_state VALUES(?,?,?) ON CONFLICT(companion_id) DO UPDATE SET pinned=excluded.pinned,hidden=excluded.hidden')
         .run(companionId, Number(next.pinned), Number(next.hidden));
@@ -828,8 +841,10 @@ export class CompanionStore {
     return { messages, hasMore, nextBefore: hasMore ? `seq:${rows[Math.min(limit, rows.length) - 1].seq}` : null,
       nextAfter: `seq:${rows[0]?.seq ?? 0}` };
   }
-  async appendMessage(companionId, input) {
+  async appendMessage(companionId, input, options = {}) {
     this.#profile(companionId);
+    fields(options,['notification']);
+    if(options.notification!==undefined&&typeof options.notification!=='boolean')fail('COMPANION_INVALID_INPUT');
     const messageId = id(input?.id ?? input?.clientId ?? randomUUID());
     const value = messageData(input, messageId);
     // Server-assigned time is excluded so a retried client message can reuse its
@@ -852,6 +867,10 @@ export class CompanionStore {
       this.#db.prepare('INSERT INTO messages(companion_id,message_id,client_id,fingerprint,data) VALUES(?,?,?,?,?)').run(companionId, messageId, value.clientId ?? null, fingerprint, JSON.stringify(value));
       if (value.role === 'user' || value.role === 'assistant')
         this.#db.prepare('UPDATE conversation_state SET hidden=0 WHERE companion_id=?').run(companionId);
+      // The message and its notification identity commit together, including
+      // when a process stops before the publisher can observe the append.
+      if(options.notification&&value.role==='assistant'&&value.type!=='task'&&value.status==='sent')
+        this.#updatePendingNotificationIds(companionId,ids=>[...new Set([...ids,messageId])]);
     });
     return value;
   }
@@ -919,6 +938,8 @@ export class CompanionStore {
     this.#transaction(() => {
       this.#db.prepare('INSERT INTO message_tombstones VALUES(?,?,?)').run(companionId, messageId, current.clientId ?? null);
       this.#db.prepare('DELETE FROM messages WHERE companion_id=? AND message_id=?').run(companionId, messageId);
+      this.#updatePendingNotificationIds(companionId,ids=>ids.filter(value=>value!==messageId));
+      if(current.role==='assistant'&&current.type!=='task')this.#updatePendingNotificationRemovals(companionId,ids=>[...new Set([...ids,messageId])]);
     });
     this.#db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     return { removed: true, message: current };
@@ -926,6 +947,9 @@ export class CompanionStore {
   async clearMessages(companionId) {
     this.#profile(companionId);
     const removed = this.#transaction(() => {
+      this.#db.prepare('UPDATE read_positions SET seq=MAX(seq,COALESCE((SELECT MAX(seq) FROM messages WHERE companion_id=?),0)) WHERE companion_id=?').run(companionId,companionId);
+      this.#updatePendingNotificationIds(companionId,()=>[]);
+      this.#updatePendingNotificationRemovals(companionId,()=>[]);
       this.#db.prepare('INSERT OR IGNORE INTO message_tombstones SELECT companion_id,message_id,client_id FROM messages WHERE companion_id=?').run(companionId);
       return this.#db.prepare('DELETE FROM messages WHERE companion_id=?').run(companionId).changes;
     });
@@ -937,8 +961,81 @@ export class CompanionStore {
     const row = messageId === undefined ? this.#db.prepare('SELECT MAX(seq) seq FROM messages WHERE companion_id=?').get(companionId)
       : this.#db.prepare('SELECT seq FROM messages WHERE companion_id=? AND message_id=?').get(companionId, id(messageId));
     if (!row) fail('COMPANION_MESSAGE_NOT_FOUND');
-    this.#db.prepare('UPDATE read_positions SET seq=MAX(seq,?) WHERE companion_id=?').run(row.seq ?? 0, companionId);
-    return { read: true };
+    return this.#transaction(()=>{
+      this.#db.prepare('UPDATE read_positions SET seq=MAX(seq,?) WHERE companion_id=?').run(row.seq ?? 0, companionId);
+      const read=this.#notificationReadState(companionId);
+      const unread=new Set(this.#db.prepare('SELECT message_id FROM messages WHERE companion_id=? AND seq>?').all(companionId,read.throughSequence).map(item=>item.message_id));
+      this.#updatePendingNotificationIds(companionId,ids=>ids.filter(value=>unread.has(value)));
+      return {read:true,...read};
+    });
+  }
+  #notificationReadState(companionId) {
+    const throughSequence=this.#db.prepare('SELECT seq FROM read_positions WHERE companion_id=?').get(companionId)?.seq??0;
+    const unreadCount=this.#db.prepare("SELECT COUNT(*) count FROM messages WHERE companion_id=? AND seq>? AND json_extract(data,'$.role')='assistant'").get(companionId,throughSequence).count;
+    return {throughSequence,unreadCount};
+  }
+  async notificationReadState(companionId) {
+    this.#profile(companionId);
+    return this.#notificationReadState(companionId);
+  }
+  #updatePendingNotificationIds(companionId,update) {
+    return this.#updateNotificationIds(companionId,'pendingNotificationIds',ids=>update(ids).slice(-200));
+  }
+  #updatePendingNotificationRemovals(companionId,update) {
+    return this.#updateNotificationIds(companionId,'pendingNotificationRemovals',ids=>{
+      const next=update(ids);
+      if(next.length>200)fail('COMPANION_NOTIFICATION_REMOVALS_PENDING');
+      return next;
+    });
+  }
+  #updateNotificationIds(companionId,key,update) {
+    const row=this.#db.prepare('SELECT data FROM companion_state WHERE companion_id=?').get(companionId);
+    // Notification history is bounded; the chat rows and authoritative unread
+    // count remain intact if a bridge is unavailable for many replies.
+    const state=row?JSON.parse(row.data):{},ids=update(state[key]??[]);
+    if(!ids.length&&!Object.hasOwn(state,key))return;
+    if(ids.length)state[key]=ids;else delete state[key];
+    this.#db.prepare('INSERT INTO companion_state VALUES(?,?) ON CONFLICT(companion_id) DO UPDATE SET data=excluded.data')
+      .run(companionId,JSON.stringify(stateMetadata(state)));
+  }
+  async pendingNotifications(companionId) {
+    this.#profile(companionId);
+    return this.#transaction(()=>{
+      const row=this.#db.prepare('SELECT data FROM companion_state WHERE companion_id=?').get(companionId);
+      const pending=row?JSON.parse(row.data).pendingNotificationIds??[]:[];
+      if(!pending.length)return [];
+      const {throughSequence}=this.#notificationReadState(companionId);
+      const rows=this.#db.prepare('SELECT seq,data FROM messages WHERE companion_id=? AND seq>? AND message_id IN ('+pending.map(()=>'?').join(',')+') ORDER BY seq')
+        .all(companionId,throughSequence,...pending).map(row=>({sequence:row.seq,message:JSON.parse(row.data)}))
+        .filter(({message})=>message.role==='assistant'&&message.type!=='task'&&message.status==='sent'&&!message.contextExcluded);
+      const retained=new Set(rows.map(({message})=>message.id));
+      this.#updatePendingNotificationIds(companionId,ids=>ids.filter(value=>retained.has(value)));
+      return rows;
+    });
+  }
+  async acknowledgeNotifications(companionId,messageIds) {
+    this.#profile(companionId);
+    if(!Array.isArray(messageIds))fail('COMPANION_INVALID_INPUT');
+    const completed=new Set(messageIds.map(id));
+    this.#updatePendingNotificationIds(companionId,ids=>ids.filter(value=>!completed.has(value)));
+  }
+  async queueNotifications(companionId,messageIds) {
+    this.#profile(companionId);
+    if(!Array.isArray(messageIds))fail('COMPANION_INVALID_INPUT');
+    const selected=messageIds.map(id).filter(messageId=>{
+      const message=this.#message(companionId,messageId);
+      return message?.role==='assistant'&&message.type!=='task'&&message.status==='sent'&&!message.contextExcluded;
+    });
+    if(selected.length)this.#updatePendingNotificationIds(companionId,ids=>[...new Set([...ids,...selected])]);
+  }
+  async pendingNotificationRemovals(companionId) {
+    return (await this.getState(companionId)).pendingNotificationRemovals??[];
+  }
+  async acknowledgeNotificationRemovals(companionId,messageIds) {
+    this.#profile(companionId);
+    if(!Array.isArray(messageIds))fail('COMPANION_INVALID_INPUT');
+    const completed=new Set(messageIds.map(id));
+    this.#updatePendingNotificationRemovals(companionId,ids=>ids.filter(value=>!completed.has(value)));
   }
   async close() {
     if (this.#closed) return;

@@ -9,7 +9,7 @@ internal fun externalImportIdentity(value: String) {
     require(UUID.fromString(value).toString() == value) { "invalid_external_import_identity" }
 }
 
-enum class NativeExternalRoot(val wire: String) { MESSAGES("messages"), WORKBENCH("workbench"), SETTINGS("settings") }
+enum class NativeExternalRoot(val wire: String) { MESSAGES("messages"), WORKBENCH("workbench"), SETTINGS("settings"), PERMISSIONS("permissions") }
 
 sealed interface NativeExternalNavigationTarget {
     data class EngineSession(val sessionId: String, val petRequestId: String? = null) : NativeExternalNavigationTarget {

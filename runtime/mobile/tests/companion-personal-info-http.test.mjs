@@ -32,10 +32,11 @@ async function fixture(t) {
   const store = await openLegacyCompanionStore({ directory: join(directory, 'companions') }), context = new Context();
   await context.plugin(MobileAttachments, { dshHome: join(directory, 'host') });
   let locale = 'en';
-  const events = [], ctx = { droyInitialization:{defaultWorkspaceId:'fictional-default-workspace-id'}, attachments: context.attachments, logger: { warn() {} },
+  const events = [], notificationReads=[], ctx = { droyInitialization:{defaultWorkspaceId:'fictional-default-workspace-id'}, attachments: context.attachments, logger: { warn() {} },
     sessionController: { modelCatalog: async () => ({ groups: [] }) }, workspaceRegistry: { get() {} },
     settings: { describe: () => [{ ns: 'locale', value: { preference: locale } }] } };
   const runtime = { emit: (...args) => events.push(args), state: () => ({ phase: 'idle' }),
+    syncReadNotifications:async companionId=>{notificationReads.push({companionId,...await store.notificationReadState(companionId)});},
     status: () => ({ phase: 'idle', chatExecution: { quiescent: true, cancelRequested: false } }), copy: () => ({ generationFailed: 'Fictional failure' }) };
   const previousToken = process.env.DROY_WEB_TOKEN; process.env.DROY_WEB_TOKEN = token;
   const handler = createCompanionHandler({ ctx, runtime, store });
@@ -51,7 +52,7 @@ async function fixture(t) {
     headers: { cookie: 'droy_session=' + token, 'content-type': 'application/json' },
     ...(value === undefined ? {} : { body: JSON.stringify(value) }) });
   const api = async (...args) => { const response = await request(...args); return { status: response.status, value: await response.json() }; };
-  return { store, request, api, events, url, runtime, ctx, setLocale: value => { locale = value; } };
+  return { store, request, api, events, notificationReads, url, runtime, ctx, setLocale: value => { locale = value; } };
 }
 
 test('effective companion models preserve whether they follow the global default', async t => {
@@ -196,6 +197,7 @@ test('conversation actions require authentication, validate exact input and keep
   assert.equal(returned.hidden, false); assert.equal(returned.pinned, false); assert.equal(returned.unread, 1);
   assert.deepEqual((await f.api('/kaka/conversation', 'POST', { action: 'read' })).value, { pinned: false, hidden: false, unreadCount: 0 });
   assert.deepEqual(f.events, [['kaka', 'profile'], ['kaka', 'profile'], ['kaka', 'profile']]);
+  assert.deepEqual(f.notificationReads,[{companionId:'kaka',throughSequence:1,unreadCount:0},{companionId:'kaka',throughSequence:2,unreadCount:0}]);
 });
 
 test('root HTTP exposes the initialized default identity independently of locale and displayed names', async t => {

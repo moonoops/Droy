@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -106,17 +107,15 @@ fun CompanionChatScreen(
     val copyFailed = stringResource(R.string.native_companion_copy_failed)
     val currentMessages by rememberUpdatedState(state.messages)
     val currentReady by rememberUpdatedState(state.runtime.ready)
+    val currentLoading by rememberUpdatedState(state.loading)
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState = lifecycleOwner.lifecycle.currentStateAsState()
+    val windowInfo = LocalWindowInfo.current
     val entrances = remember(companion.id) { MessageEntranceTracker() }
     val entering = entrances.update(state.messages.map { it.itemIdentity() } + listOfNotNull(pendingVoiceKey),
         state.messages.filter { state.sending && it.role == "user" && it.status == "pending" }.map { it.itemIdentity() }.toSet(),
         state.runtime.ready && !state.loading && lifecycleState.value.isAtLeast(Lifecycle.State.RESUMED))
     val notificationOwner = remember { Any() }
-    DisposableEffect(notificationOwner, companion.id, lifecycleState.value) {
-        NativeRuntimeHost.presentCompanion(notificationOwner, companion.id, lifecycleState.value.isAtLeast(Lifecycle.State.RESUMED))
-        onDispose { NativeRuntimeHost.presentCompanion(notificationOwner, companion.id, false) }
-    }
     val originals = remember(state.messages) { state.messages.associateBy { it.id } }
     val stickers = remember(state.stickers) { state.stickers.associateBy { it.id } }
     val enabledStickers = remember(companion.settings.stickerPackIds, state.stickers) {
@@ -124,6 +123,13 @@ fun CompanionChatScreen(
     }
     val readingCovered by rememberUpdatedState(transcriptText != null || imageUrl != null || sheet != null || deleteId != null ||
         menuId?.let(originals::containsKey) == true || taskId?.let(originals::get)?.task != null)
+    // The notification shade can take window focus without pausing the Activity.
+    val readingLatest = positioned && state.runtime.ready && !state.loading && windowInfo.isWindowFocused &&
+        lifecycleState.value.isAtLeast(Lifecycle.State.RESUMED) && !readingCovered && followingTail
+    DisposableEffect(notificationOwner, companion.id, readingLatest) {
+        NativeRuntimeHost.presentCompanion(notificationOwner, companion.id, readingLatest)
+        onDispose { NativeRuntimeHost.presentCompanion(notificationOwner, companion.id, false) }
+    }
     val active = state.status.chatExecution?.let { !it.quiescent }
         ?: (state.status.phase in setOf("thinking", "typing", "waiting"))
     val status = companionStatusLabel(state.status, state.stopRequested)
@@ -148,9 +154,9 @@ fun CompanionChatScreen(
     LaunchedEffect(newest?.id, newest?.text, newest?.status, followingTail) {
         if (positioned && followingTail && state.messages.isNotEmpty()) list.scrollToItem(0)
     }
-    LaunchedEffect(list, companion.id, lifecycleOwner) {
+    LaunchedEffect(list, companion.id, lifecycleOwner, windowInfo) {
         snapshotFlow {
-            if (!positioned || !currentReady || readingCovered || !lifecycleState.value.isAtLeast(Lifecycle.State.RESUMED)) null else {
+            if (!positioned || !currentReady || currentLoading || readingCovered || !windowInfo.isWindowFocused || !lifecycleState.value.isAtLeast(Lifecycle.State.RESUMED)) null else {
                 val layout = list.layoutInfo
                 val viewportHeight = layout.viewportEndOffset - layout.viewportStartOffset
                 val visibleIds = layout.visibleItemsInfo.filter {

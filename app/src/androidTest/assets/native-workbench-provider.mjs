@@ -1,11 +1,12 @@
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { appendFile, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { existsSync, realpath as callbackRealpath } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { promisify } from 'node:util';
 export const name = 'droy-native-workbench-fixture';
 export const inject = ['llm', 'tools', 'approval', 'userQuestions', 'credentialsController'];
 export async function apply(ctx) {
@@ -282,6 +283,64 @@ export async function apply(ctx) {
     }
   }
   ctx.llm.registerAdapter(['droy-native-fixture'], new NativeFixture());
+  ctx.inject(['droyCompanions', 'sessions', 'sessionPersistence', 'sessionController', 'workspaceController', 'webServer'], async scope => {
+    const home = process.env.DSH_HOME, directory = scope.droyCompanions.directory;
+    const nativeRealpath = promisify(callbackRealpath.native);
+    await writeFile(join(home, 'native-fixture-runtime-paths.json'), JSON.stringify({
+      dshHome: home, companionDirectory: directory,
+      homeRealpath: await realpath(home), companionRealpath: await realpath(directory),
+      homeNativeRealpath: await nativeRealpath(home), companionNativeRealpath: await nativeRealpath(directory),
+    }));
+    const { requireMobileSession } = await import(pathToFileURL(join(process.env.DROY_RUNTIME_DIR,
+      'node_modules/@droyagent/mobile/auth.mjs')).href);
+    const pick = (value, keys) => value == null ? null
+      : Object.fromEntries(keys.filter(key => Object.hasOwn(value, key)).map(key => [key, value[key]]));
+    const headerFields = ['id', 'version', 'createdAt', 'isSeeded', 'cwd', 'origin', 'parentSession', 'delegationDepth'];
+    const canonical = async path => typeof path !== 'string' ? null : nativeRealpath(path);
+    scope.webServer.register({ kind: 'exact', path: '/droy/native/fixture-notifications/navigation', async handler(req, res) {
+      if (!requireMobileSession(req, res)) return;
+      if (req.method !== 'GET' || req.url !== '/droy/native/fixture-notifications/navigation') { res.writeHead(405); res.end(); return; }
+      try {
+        const ownership = JSON.parse(await readFile(join(dirname(home), 'native-workbench-fixture.json'), 'utf8'));
+        if (ownership.fixture !== 'native-isolated-runtime-v1' || ownership.phase !== 'running'
+          || !/^native-workbench-home-[0-9]+$/u.test(ownership.backup)
+          || ownership.preferences !== ownership.backup + '-preferences') throw new Error('Invalid isolated notification fixture ownership');
+        const signal = new AbortController().signal;
+        const [profiles, listed] = await Promise.all([scope.droyCompanions.store.profiles(), scope.sessionController.list({}, signal)]);
+        const iterator = scope.workspaceController.follow(signal)[Symbol.asyncIterator]();
+        let workspaces;
+        try {
+          const frame = await iterator.next();
+          if (frame.done || frame.value.type !== 'baseline') throw new Error('Missing workspace baseline');
+          workspaces = frame.value.value;
+        } finally { await iterator.return?.(); }
+        const chats = [];
+        for (const profile of profiles) {
+          if (!profile.chatSessionId) continue;
+          const id = profile.chatSessionId;
+          const attached = scope.sessions.get(id)?.header;
+          const persisted = await scope.sessionPersistence.stat(id, { signal });
+          chats.push({ profile: pick(profile, ['id', 'workspaceId', 'chatSessionId']),
+            owner: pick(await scope.droyCompanions.store.sessionOwner(id), ['sessionId', 'companionId', 'workspaceId', 'kind', 'taskId']),
+            attached: pick(attached, headerFields), persisted: pick(persisted?.header, headerFields),
+            persistedFormatStatus: persisted?.formatStatus ?? null,
+            row: pick(listed.items.find(row => row.sessionId === id),
+              ['sessionId', 'cwd', 'origin', 'parentSessionId', 'formatStatus', 'agentAvailable']),
+            attachedNativeRealpath: await canonical(attached?.cwd), persistedNativeRealpath: await canonical(persisted?.header?.cwd),
+          });
+        }
+        const result = { dshHome: home, companionDirectory: scope.droyCompanions.directory,
+          companionNativeRealpath: await canonical(scope.droyCompanions.directory), chats,
+          workspaces: { items: workspaces.items.map(row => pick(row, ['workspaceId', 'path', 'sessionIds'])),
+            archivedSessionIds: workspaces.archivedSessionIds, pinnedSessionIds: workspaces.pinnedSessionIds } };
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: true, result }));
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: false, error: { code: 'FIXTURE_NAVIGATION_SNAPSHOT_FAILED', message: error.name } }));
+      }
+    } });
+  });
   await writeFile(join(process.env.DSH_HOME, 'native-fixture-ready.json'), '{"ready":true}');
 }
 

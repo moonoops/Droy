@@ -11,8 +11,9 @@ import android.content.pm.ServiceInfo;
 import android.os.Handler;
 import android.os.Looper;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Objects;
 import org.json.JSONObject;
 
 /** All product foreground lifetimes share one notification, while retaining their Android service types. */
@@ -21,10 +22,11 @@ public final class ForegroundStatusNotifications {
     public static final String CHANNEL = "runtime";
     private record Owner(boolean runtime, StatusNotificationPolicy.Audio audio, String captureId,
                          boolean camera, boolean location, boolean hardware, PendingIntent stop) { }
+    private record Rendered(Notification notification, String destination, String locale, List<Owner> owners) { }
     private static final Map<Service, Owner> owners = new LinkedHashMap<>();
     private static final Handler main = new Handler(Looper.getMainLooper());
-    private static String event = "";
-    private static int seed;
+    private static boolean refreshQueued;
+    private static Rendered lastPosted;
     private ForegroundStatusNotifications() { }
 
     public static void startRuntime(Service service) {
@@ -55,7 +57,9 @@ public final class ForegroundStatusNotifications {
     private static synchronized void attach(Service service, Owner owner, int types) {
         Owner previous = owners.put(service, owner);
         try {
-            service.startForeground(ID, build(service), types);
+            Rendered rendered = build(service);
+            service.startForeground(ID, rendered.notification(), types);
+            lastPosted = rendered;
             // Previous builds used separate IDs for audio and location. Retire them only after promotion succeeds.
             NotificationManager manager = service.getSystemService(NotificationManager.class);
             manager.cancel(41); manager.cancel(8405);
@@ -70,18 +74,56 @@ public final class ForegroundStatusNotifications {
         // Detaching one owner must not remove the notification still used by another foreground service.
         service.stopForeground(owners.isEmpty() ? Service.STOP_FOREGROUND_REMOVE : Service.STOP_FOREGROUND_DETACH);
         NotificationManager manager = service.getSystemService(NotificationManager.class);
-        if (owners.isEmpty()) manager.cancel(ID);
-        else manager.notify(ID, build(service));
+        if (owners.isEmpty()) { manager.cancel(ID); lastPosted = null; }
+        else publish(manager, build(service));
     }
 
     public static void refresh(Context context) {
         Context app = context.getApplicationContext();
+        synchronized (ForegroundStatusNotifications.class) {
+            if (refreshQueued) return;
+            // Runtime, audio and location can request the same refresh in one main-thread turn.
+            refreshQueued = true;
+        }
         main.post(() -> { synchronized (ForegroundStatusNotifications.class) {
-            if (!owners.isEmpty()) app.getSystemService(NotificationManager.class).notify(ID, build(app));
+            refreshQueued = false;
+            if (!owners.isEmpty()) publish(app.getSystemService(NotificationManager.class), build(app));
         } });
     }
 
-    private static Notification build(Context context) {
+    private static void publish(NotificationManager manager, Rendered rendered) {
+        if (samePresentation(lastPosted, rendered) && isPosted(manager, rendered.notification())) return;
+        manager.notify(ID, rendered.notification());
+        lastPosted = rendered;
+    }
+
+    private static boolean isPosted(NotificationManager manager, Notification expected) {
+        // notify() can return normally when Android sheds an update for exceeding its rate limit.
+        for (android.service.notification.StatusBarNotification posted : manager.getActiveNotifications())
+            if (posted.getTag() == null && posted.getId() == ID) return sameContent(posted.getNotification(), expected);
+        return false;
+    }
+
+    private static boolean samePresentation(Rendered previous, Rendered next) {
+        if (previous == null || !previous.destination().equals(next.destination())
+                || !previous.locale().equals(next.locale()) || !previous.owners().equals(next.owners())) return false;
+        return sameContent(previous.notification(), next.notification());
+    }
+
+    private static boolean sameContent(Notification before, Notification after) {
+        if (!Objects.equals(before.extras.getString(Notification.EXTRA_TITLE), after.extras.getString(Notification.EXTRA_TITLE))
+                || !Objects.equals(before.extras.getString(Notification.EXTRA_TEXT), after.extras.getString(Notification.EXTRA_TEXT))) return false;
+        Notification.Action[] oldActions = before.actions, newActions = after.actions;
+        int oldCount = oldActions == null ? 0 : oldActions.length, newCount = newActions == null ? 0 : newActions.length;
+        if (oldCount != newCount) return false;
+        for (int i = 0; i < oldCount; i++) {
+            if (!Objects.equals(oldActions[i].title.toString(), newActions[i].title.toString())
+                    || !Objects.equals(oldActions[i].actionIntent, newActions[i].actionIntent)) return false;
+        }
+        return true;
+    }
+
+    private static Rendered build(Context context) {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         NotificationChannel channel = manager.getNotificationChannel(CHANNEL);
         if (channel == null) {
@@ -102,15 +144,14 @@ public final class ForegroundStatusNotifications {
         boolean active = runtime && progress.optBoolean("active");
         String phase = progress.optString("phase"), task = progress.optString("taskId");
         StatusNotificationPolicy.Audio audioKind = audio == null ? StatusNotificationPolicy.Audio.NONE : audio.audio();
-        String titlePhase = java.util.Set.of("waiting_input", "waiting", "blocked").contains(phase) ? phase : "working";
-        String next = ready + ":" + active + ":" + (active ? titlePhase + ":" + task : audioKind + ":" + location);
-        if (!event.equals(next)) { event = next; seed = ThreadLocalRandom.current().nextInt(); }
         boolean attention = NotificationManagement.attentionRequired(context);
-        String title = StatusNotificationPolicy.title(ready, active, phase, audioKind, location, seed);
+        String title = StatusNotificationPolicy.title(ready, active, phase, audioKind, location, 0);
         if (!active && audio == null && position == null && hardware != null) title = hardware.location()
             ? NativeLocale.text("正在获取当前位置", "Getting current location") : NativeLocale.text("设备连接进行中", "Device connection active");
         String detail = StatusNotificationPolicy.detail(active, phase, progress.optString("summary"), progress.optString("summaryKind"),
                 audioKind, camera, location, attention, ProductPermissions.stopped(context));
+        if (!ready && audio == null && position == null && hardware == null)
+            detail = NativeLocale.text("正在准备手机运行环境", "Preparing the mobile runtime");
         if (!active && audio == null && position == null && hardware != null && hardware.location())
             detail = NativeLocale.text("为当前任务读取位置，完成后停止。", "Reading location for the current task; stops when complete.");
         Intent target = new Intent(context, NativeAppActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -119,7 +160,6 @@ public final class ForegroundStatusNotifications {
         if (active && question != null) target.putExtra("petRequestId", question.optString("requestId"));
         if (!active && audio != null && (audioKind == StatusNotificationPolicy.Audio.RECORDING || audioKind == StatusNotificationPolicy.Audio.PLAYBACK))
             target.putExtra("audioCaptureId", audio.captureId());
-        if (!active && audio == null && attention) target.putExtra("notificationManagement", true);
         PendingIntent open = PendingIntent.getActivity(context, 0, target, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification publicVersion = new Notification.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_notification_droy)
                 .setContentTitle(title).setShowWhen(false).build();
@@ -140,16 +180,22 @@ public final class ForegroundStatusNotifications {
         if (hardware != null && hardware != position && hardware.stop() != null && actions < 3) {
             notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("暂停手机操作", "Pause phone operations"), hardware.stop()).build()); actions++;
         }
-        if (active && actions < 3 && !ProductPermissions.stopped(context)) {
-            PendingIntent pause = PendingIntent.getService(context, 1, new Intent(context, RuntimeService.class).setAction(RuntimeService.PAUSE),
+        if (active && actions < 3) {
+            notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("查看任务", "View task"), open).build()); actions++;
+        }
+        if (!active && audio == null && position == null && hardware == null) {
+            notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("打开 Droy", "Open Droy"), open).build()); actions++;
+            PendingIntent background = PendingIntent.getActivity(context, 4, new Intent(context, NativeAppActivity.class)
+                    .putExtra("destination", "permissions").addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP),
                     PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-            notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("暂停手机操作", "Pause phone operations"), pause).build()); actions++;
+            notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("后台设置", "Background settings"), background).build()); actions++;
         }
         if (attention && actions < 3) {
             PendingIntent settings = PendingIntent.getActivity(context, 3, new Intent(context, NativeAppActivity.class).putExtra("notificationManagement", true)
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-            notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("去设置", "Open settings"), settings).build());
+            notification.addAction(new Notification.Action.Builder(null, NativeLocale.text("通知设置", "Notification settings"), settings).build());
         }
-        return notification.build();
+        // PendingIntent identity alone does not include its updated task/request extras.
+        return new Rendered(notification.build(), target.toUri(0), NativeLocale.active(), List.copyOf(owners.values()));
     }
 }

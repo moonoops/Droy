@@ -1,6 +1,6 @@
 const installed = new WeakMap();
 const writers = ['initialize','start','prepareWorkspace','startInstance','memory','context','generate','agent','decorate',
-  'submit','enqueue','transcribeVoice','retry','flush','reply','sendEmoji','wait','publish','recoverReply','finishTurn','learn',
+  'submit','enqueue','transcribeVoice','retry','flush','reply','sendEmoji','wait','publish','recoverReply','markRead','deliverNotifications','syncReadNotifications','finishTurn','learn',
   'startWork','resumeWork','refreshProactiveSchedule','proactiveContext','considerProactive','wake','invalidate','forget','reviseMemory','removeMessage','resetMemories','clearHistory','resetChat','cancel'];
 const fail = (code, cause) => { throw Object.assign(new Error(code, cause === undefined ? undefined : { cause }), { code }); };
 const validOptions = value => value !== null && typeof value === 'object' && !Array.isArray(value);

@@ -115,6 +115,15 @@ public final class NativeProductSettingsHost {
         fields(request, Set.of("messagesEnabled", "tasksEnabled"));
         return ProactiveNotifications.get(context).request(new JSONObject(request.toString()).put("operation", "configure"), true);
     }
+    public void openMessageNotificationSettings(boolean quiet) {
+        android.app.NotificationManager manager = context.getSystemService(android.app.NotificationManager.class);
+        android.content.Intent intent = new android.content.Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName());
+        String channel = quiet ? "companion_messages_quiet" : ProactiveNotifications.MESSAGE_CHANNEL;
+        if (manager.areNotificationsEnabled() && manager.getNotificationChannel(channel) != null)
+            intent.setAction(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_CHANNEL_ID, channel);
+        context.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
     public android.view.View createPetPreview() {
         PetSpriteView preview = new PetSpriteView(context);
         preview.setContentDescription(NativeLocale.text("宠物形象", "Pet appearance"));

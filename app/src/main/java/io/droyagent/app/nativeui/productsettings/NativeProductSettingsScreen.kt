@@ -262,6 +262,25 @@ fun NativeProductSettingsScreen(
                                             }
                                         }
                                     }
+                                    delivery.optJSONObject("messageDelivery")?.let { status ->
+                                        val messageStatus = when (status.optString("reason")) {
+                                            "messages_disabled" -> R.string.nps_message_delivery_off
+                                            "system_disabled" -> R.string.nps_message_delivery_system_blocked
+                                            "channel_disabled" -> R.string.nps_message_delivery_channel_blocked
+                                            else -> R.string.nps_message_delivery_ready
+                                        }
+                                        Text(stringResource(messageStatus), style = MaterialTheme.typography.bodyMedium,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp).testTag("native-message-delivery-status"))
+                                        DroySettingsLinkGroup(items = listOf(
+                                            DroySettingsLink(stringResource(R.string.nps_message_system_settings), R.drawable.native_settings_notifications,
+                                                "native-message-channel-settings") { run { controller.openMessageNotificationSettings(false) } },
+                                            DroySettingsLink(stringResource(R.string.nps_message_quiet_settings), R.drawable.native_settings_notifications,
+                                                "native-message-quiet-channel-settings", supporting = stringResource(
+                                                    if (status.optBoolean("quietChannelEnabled")) R.string.nps_message_quiet_hint else R.string.nps_message_quiet_blocked)) {
+                                                run { controller.openMessageNotificationSettings(true) }
+                                            },
+                                        ), enabled = !busy)
+                                    }
                                 }
                                 if (deliveryFailed) {
                                     Text(stringResource(R.string.nps_delivery_error), color = MaterialTheme.colorScheme.error)

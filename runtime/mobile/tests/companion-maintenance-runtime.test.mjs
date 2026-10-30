@@ -368,3 +368,26 @@ test('outside a hold, restored chat timers keep their original liveness while pa
   f.runtime.scheduleWait(f.id, { waitingUntil: new Date(Date.now() + 60000).toISOString(), pendingIntent: { kind: 'wait' } });
   assert.equal(f.runtime.state(f.id).waitTimer.hasRef(), false);
 });
+
+test('notification read acknowledgement remains an observed writer until its bridge settles',async t=>{
+  const f=await fixture(t),started=deferred(),release=deferred();
+  const message=await f.store.appendMessage(f.id,{id:'notification-read-source',role:'assistant',text:'Synthetic notification preview.'});
+  f.runtime.notify=async value=>{started.resolve();await release.promise;return {ok:true};};
+  const reading=f.runtime.markRead(f.id,message.id);await started.promise;
+  const lease=f.lease('notification-read-drain'),suspended=lease.suspend();
+  await delay(2);assert.equal(lease.status().quiet,false);assert.ok(lease.status().activeWriters>0);
+  release.resolve();await reading;
+  assert.equal((await suspended).quiet,true);lease.resume();
+});
+
+test('runtime close aborts and drains notification delivery before releasing its pending identity',async t=>{
+  const f=await fixture(t),started=deferred();
+  await f.store.appendMessage(f.id,{id:'notification-close-source',role:'assistant',text:'Synthetic pending notification.'},{notification:true});
+  f.runtime.notify=async(_value,signal)=>new Promise((_resolve,reject)=>{
+    started.resolve();signal.addEventListener('abort',()=>reject(signal.reason),{once:true});
+  });
+  const delivery=f.runtime.deliverNotifications(f.id);await started.promise;
+  await f.runtime.close();assert.equal((await delivery).status,'failed');
+  assert.equal(f.runtime.background.size,0);
+  assert.deepEqual((await f.store.pendingNotifications(f.id)).map(item=>item.message.id),['notification-close-source']);
+});

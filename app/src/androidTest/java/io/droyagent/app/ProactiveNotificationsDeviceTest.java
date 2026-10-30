@@ -23,7 +23,7 @@ import static org.junit.Assert.*;
 /** Native publication and permissions with fictional recipients; no messages leave the device. */
 @RunWith(AndroidJUnit4.class)
 public class ProactiveNotificationsDeviceTest {
-    private static final String[] KEYS = {"notifyMessagesEnabled", "notifyTasksEnabled", "notifyLocalEnabled", "notifyAppsEnabled", "notifyAllowedApps", "proactiveNotificationRecords", "toolsStopped", "allowRoot"};
+    private static final String[] KEYS = {"notifyMessagesEnabled", "notifyTasksEnabled", "notifyLocalEnabled", "notifyAppsEnabled", "notifyAllowedApps", "proactiveNotificationRecords", "companionNotificationPositions", "toolsStopped", "allowRoot"};
     private Context context;
     private SharedPreferences preferences;
     private ProactiveNotifications notices;
@@ -49,7 +49,7 @@ public class ProactiveNotificationsDeviceTest {
     @After public void restore() throws Exception {
         if (notices != null) notices.request(new JSONObject().put("operation", "activate").put("enabled", false));
         NotificationManager manager = context.getSystemService(NotificationManager.class);
-        for (StatusBarNotification item : manager.getActiveNotifications()) if ("droy-task-notice".equals(item.getTag()) || ProactiveNotifications.COMPANION_TAG.equals(item.getTag())) manager.cancel(item.getTag(), item.getId());
+        for (StatusBarNotification item : manager.getActiveNotifications()) if ("droy-task-notice".equals(item.getTag()) || ProactiveNotifications.isCompanionTag(item.getTag())) manager.cancel(item.getTag(), item.getId());
         SharedPreferences.Editor editor = preferences.edit();
         for (String key : KEYS) {
             Object value = saved.get(key);
@@ -133,7 +133,7 @@ public class ProactiveNotificationsDeviceTest {
     }
     private StatusBarNotification findCompanion(String id) {
         for (StatusBarNotification item : context.getSystemService(NotificationManager.class).getActiveNotifications())
-            if (ProactiveNotifications.COMPANION_TAG.equals(item.getTag()) && item.getId() == (id.hashCode() & 0x7fffffff)) return item;
+            if (ProactiveNotifications.companionTag(id).equals(item.getTag()) && item.getId() == (id.hashCode() & 0x7fffffff)) return item;
         return null;
     }
 

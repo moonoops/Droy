@@ -61,6 +61,7 @@ export class CompanionRuntime {
     this.lifetime=new AbortController();this.background=new Set();this.decorated=new WeakSet();
     this.restrictedAgents=new Map();
     this.memoryManagement=new Set();
+    this.notificationDeliveries=new Map();
     this.workspaceStarts=new Map();this.instanceStarts=new Map();
     this.contextSources=new Map();this.learningSignals=new Map();this.turnMemories=new Map();this.turnProfiles=new Map();this.plannerRevisions=new WeakMap();
     this.learner=new CompanionLearning({store,memoryFor:id=>this.memory(id),generate:(...args)=>this.generate(...args),
@@ -227,6 +228,9 @@ export class CompanionRuntime {
           },{unref:true});if(timer)state.workRecoveryTimers.add(timer);
         }
       }
+      const read=await this.store.notificationReadState(id);
+      if(read.throughSequence>0)await this.syncReadNotifications(id,read);
+      await this.deliverNotifications(id);
     })();
     this.instanceStarts.set(id,starting);
     starting.catch(()=>this.instanceStarts.delete(id));
@@ -701,12 +705,11 @@ export class CompanionRuntime {
       parts.push({type:'image',text:'',attachments:images,...this.contextSources.get(owner.sessionId)});
     }
     const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts,proactive:state.proactiveIntent});
-    const delivered=await this.publish(id,draft,combined),ids=delivered.messageIds;
+    const delivered=await this.publish(id,draft,combined,{onCommitted:()=>{
+      state.delivered++;state.turnAction='reply';state.replyAbort=null;state.phase='idle';delete state.error;this.emit(id,'status');
+    }}),ids=delivered.messageIds;
     if(delivered.suppressed){state.phase='idle';this.emit(id,'status');return {delivered:false,reason:delivered.reason??'proactive_no_longer_appropriate'};}
-    state.delivered++;state.turnAction='reply';state.replyAbort=null;state.phase='idle';delete state.error;this.emit(id,'status');
-    let notification;
-    try {notification=await this.notify({companionId:id,name:localizedProfile(profile,locale).name,text,messageId:ids[0]});}
-    catch(error){notification={status:'failed'};this.ctx.logger.warn('COMPANION_NOTICE_FAILED: '+(error.code||error.name));}
+    const notification=delivered.notification;
     return {delivered:true,messageIds:ids,text,parts:draft.parts.filter(part=>ids.includes(part.id)).map(part=>({messageId:part.id,type:part.type,text:part.text,
       ...(part.stickerId?{stickerId:part.stickerId}:{})})),notification};
     } finally {finish();}
@@ -817,10 +820,11 @@ export class CompanionRuntime {
     if(revision!==state.revision)fail('COMPANION_REPLY_SUPERSEDED');
     const parts=[{type:'sticker',text:'',stickerId:selected.id,quoteReply:args.quoteReply===true,...this.contextSources.get(owner.sessionId),...(args.msg_id?{replyTo:args.msg_id}:{})}];
     const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts,proactive:state.proactiveIntent});
-    const delivered=await this.publish(id,draft,combined);
+    const delivered=await this.publish(id,draft,combined,{onCommitted:()=>{
+      state.turnAction='emoji';state.delivered++;this.emit(id,'status');
+    }});
     if(delivered.suppressed){state.phase='idle';this.emit(id,'status');return {delivered:false,reason:delivered.reason??'proactive_no_longer_appropriate'};}
-    state.turnAction='emoji';state.delivered++;this.emit(id,'status');
-    return {delivered:true,messageIds:delivered.messageIds,stickerId:selected.id,description:selected.description};
+    return {delivered:true,messageIds:delivered.messageIds,stickerId:selected.id,description:selected.description,notification:delivered.notification};
     } finally {finish();}
   }
   async wait(owner,args,signal) {
@@ -851,7 +855,7 @@ export class CompanionRuntime {
     return {waitedSeconds:(Date.now()-startedAt)/1000,reason,...(state.waitCount>1?{reminder:buildWaitReminder(this.locale())}:{})};
     } finally {finish();}
   }
-  async publish(id,draft,signal) {
+  async publish(id,draft,signal,{alert=true,onCommitted}={}) {
     const finish=this.beginChat(id);
     try {
       let result;
@@ -874,7 +878,10 @@ export class CompanionRuntime {
         return {...result,suppressed:true,reason:'sticker_no_longer_available'};
       if(result.newMessageIds?.length)this.state(id).lastReplyAt=Date.now();
       if(draft.proactive)this.state(id).proactiveIntent=null;
-      return result;
+      // A slow notification bridge must not prolong the visible typing state
+      // after the chat message itself has already been committed.
+      await onCommitted?.(result);
+      return {...result,notification:await this.deliverNotifications(id,{alertMessageId:alert?result.newMessageIds?.[0]:undefined})};
     }
     finally {finish();}
   }
@@ -885,18 +892,88 @@ export class CompanionRuntime {
     if(cancelRevision!==state.chatCancelRevision)return;
     if(!draft)return await this.flush(id);
     const abort=new AbortController();state.replyAbort=abort;state.phase='typing';this.emit(id,'status');
-    const delivered=await this.publish(id,draft,AbortSignal.any([abort.signal,this.lifetime.signal]));
+    const delivered=await this.publish(id,draft,AbortSignal.any([abort.signal,this.lifetime.signal]),{alert:false});
     for(const messageId of draft.sourceMessageIds)state.admitted.delete(messageId);
     state.pending=await this.activePending(id,(await this.store.getState(id)).pendingMessageIds??[]);
     state.inFlightIds=[];state.phase='idle';delete state.error;
     await this.store.updateState(id,{chatNeedsReset:state.pending.length>0});
-    if(delivered.newMessageIds.length) {
-      const profile=await this.store.getProfile(id),text=draft.parts.filter(part=>part.type==='text').map(part=>part.text).join('\n\n');
-      try{await this.notify({companionId:id,name:localizedProfile(profile,this.locale()).name,text,messageId:delivered.messageIds[0]});}
-      catch(error){this.ctx.logger.warn('COMPANION_NOTICE_FAILED: '+(error.code||error.name));}
-    }
     this.emit(id,'status');if(state.pending.length)return await this.flush(id);
     } finally {finish();}
+  }
+  notificationPreview(message) {
+    if(message.text?.trim())return [...message.text].slice(0,2000).join('');
+    const copy=this.copy();
+    return message.type==='sticker'?copy.notificationSticker:message.type==='image'?copy.notificationImage
+      :message.type==='voice'?copy.notificationVoice:message.type==='file'?copy.notificationFile:copy.notificationMessage;
+  }
+  sendNotification(value) {
+    this.lifetime.signal.throwIfAborted();
+    const pending=Promise.resolve().then(()=>this.notify(value,this.lifetime.signal));
+    this.background.add(pending);
+    pending.finally(()=>this.background.delete(pending)).catch(()=>{});
+    return pending;
+  }
+  deliverNotifications(id,{alertMessageId}={}) {
+    const deliveries=this.notificationDeliveries??=new Map(),previous=deliveries.get(id)??Promise.resolve();
+    const pending=previous.catch(()=>{}).then(async()=>{
+      try {
+        if(this.closed)return {status:'stopped'};
+        for(const messageId of await this.store.pendingNotificationRemovals(id)) {
+          try {
+            const {unreadCount}=await this.store.notificationReadState(id);
+            const notice=await this.sendNotification({operation:'companionRemove',companionId:id,messageId,unreadCount});
+            if(['failed','unknown','dispatching'].includes(notice?.status))throw Object.assign(new Error('Notification cleanup is pending'),{code:'COMPANION_NOTICE_CLEANUP_PENDING'});
+            await this.store.acknowledgeNotificationRemovals(id,[messageId]);
+          } catch(error) {
+            this.ctx.logger.warn('COMPANION_NOTICE_REMOVE_FAILED: '+(error.code||error.name));
+            return {status:'failed',reason:'notification_removal'};
+          }
+        }
+        const messages=await this.store.pendingNotifications(id);
+        if(!messages.length)return {status:'unchanged'};
+        const profile=await this.store.getProfile(id),name=localizedProfile(profile,this.locale()).name;
+        let result={status:'unchanged'};
+        for(const {message,sequence} of messages) {
+          const {throughSequence,unreadCount}=await this.store.notificationReadState(id);
+          try {
+            const notice=await this.sendNotification({operation:'companion',companionId:id,name,messageId:message.id,
+              sequence,sentAt:Date.parse(message.createdAt),text:this.notificationPreview(message),throughSequence,unreadCount,
+              alert:message.id===alertMessageId,...(profile.avatar?{avatar:profile.avatar}:{})});
+            result=notice??{status:'published'};
+            if(['failed','unknown','dispatching'].includes(notice?.status))break;
+            await this.store.acknowledgeNotifications(id,[message.id]);
+          } catch(error) {
+            result={status:'failed'};
+            this.ctx.logger.warn('COMPANION_NOTICE_FAILED: '+(error.code||error.name));
+            break;
+          }
+        }
+        return result;
+      } catch(error) {
+        this.ctx.logger.warn('COMPANION_NOTICE_FAILED: '+(error.code||error.name));
+        return {status:'failed'};
+      }
+    });
+    deliveries.set(id,pending);
+    this.background.add(pending);
+    pending.finally(()=>{this.background.delete(pending);if(deliveries.get(id)===pending)deliveries.delete(id);}).catch(()=>{});
+    return pending;
+  }
+  async syncReadNotifications(id,read) {
+    try {
+      read??=await this.store.notificationReadState(id);
+      return await this.sendNotification({operation:'companionRead',companionId:id,...read});
+    } catch(error) {
+      this.ctx.logger.warn('COMPANION_NOTICE_READ_FAILED: '+(error.code||error.name));
+      return {status:'failed'};
+    }
+  }
+  async markRead(id,messageId) {
+    if(this.closed)fail('COMPANION_CLOSED');
+    const result=await this.store.markRead(id,messageId);
+    await this.syncReadNotifications(id,{throughSequence:result.throughSequence,unreadCount:result.unreadCount});
+    this.emit(id,'read');
+    return result;
   }
   async finishTurn(owner,event) {
     const finish=owner.kind==='chat'?this.beginChat(owner.companionId):()=>{};
@@ -1202,12 +1279,22 @@ export class CompanionRuntime {
     await this.invalidate(id,sourceIds);this.emit(id);return result;
   }
   async removeMessage(id,messageId) {
-    if (!await this.store.getMessage(id,messageId)) return {removed:true};
-    await this.invalidate(id,[messageId],{preserveMemorySources:true});
-    const removed=await this.store.removeMessage(id,messageId);
-    this.state(id).pending=this.state(id).pending.filter(item=>item.id!==messageId);
-    await this.store.updateState(id,current=>({pendingMessageIds:(current.pendingMessageIds??[]).filter(value=>value!==messageId)}));
-    this.emit(id);return removed??{removed:true};
+    const current=await this.store.getMessage(id,messageId);
+    let removed;
+    if(current) {
+      if((await this.store.pendingNotificationRemovals(id)).length>=200) {
+        await this.deliverNotifications(id);
+        if((await this.store.pendingNotificationRemovals(id)).length>=200)fail('COMPANION_NOTIFICATION_REMOVALS_PENDING');
+      }
+      await this.invalidate(id,[messageId],{preserveMemorySources:true});
+      removed=await this.store.removeMessage(id,messageId);
+      this.state(id).pending=this.state(id).pending.filter(item=>item.id!==messageId);
+      await this.store.updateState(id,current=>({pendingMessageIds:(current.pendingMessageIds??[]).filter(value=>value!==messageId)}));
+    }
+    const notification=await this.deliverNotifications(id);
+    this.emit(id);
+    if(notification.reason==='notification_removal')fail('COMPANION_NOTIFICATION_REMOVE_FAILED');
+    return removed??{removed:true};
   }
   async resetMemories(id) {
     fail('COMPANION_MEMORY_WORKBENCH_REQUIRED');
@@ -1295,7 +1382,10 @@ export class CompanionRuntime {
     await this.cancel(id);await this.store.clearMessages(id);
     await this.invalidate(id,[],{all:true});
     await this.store.updateState(id,{pendingMessageIds:[],summary:'',summaryState:null,summaryThrough:null,events:[]});
-    this.emit(id);return {cleared:true};
+    const notification=await this.syncReadNotifications(id);
+    this.emit(id);
+    if(notification?.status==='failed')fail('COMPANION_NOTIFICATION_REMOVE_FAILED');
+    return {cleared:true};
   }
   async resetChat(id) {
     const finish=this.beginChat(id);

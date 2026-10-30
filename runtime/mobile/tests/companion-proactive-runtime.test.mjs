@@ -23,7 +23,7 @@ function fixture() {
   let saved={lastUserAt:new Date(now-60*60_000).toISOString(),memoryRevision:0};
   const records=new Map([['fictional-user',{id:'fictional-user',role:'user',type:'text',text:'Fictional hiking conversation',createdAt:saved.lastUserAt}]]);
   const calls={models:[],agents:[],scheduled:[],warnings:[],emits:[]};
-  Object.assign(runtime,{closed:false,lifetime:new AbortController(),options:{proactiveIntervalMs:1800000},
+  Object.assign(runtime,{closed:false,lifetime:new AbortController(),background:new Set(),options:{proactiveIntervalMs:1800000},
     states:new Map([[id,state]]),turnMemories:new Map(),state:()=>state,beginChat:()=>()=>{},locale:()=> 'en',copy:()=>({proactive:'Consider a grounded follow-up.'}),
     emit:(...args)=>calls.emits.push(args),ctx:{logger:{warn:value=>calls.warnings.push(value)}},
     clock:async()=>({currentTime:new Date(now).toISOString(),timeZone:'UTC'}),profileForUse:async()=>structuredClone(profile),
@@ -32,7 +32,7 @@ function fixture() {
       updateState:async(_id,patch)=>{saved={...saved,...(typeof patch==='function'?patch(structuredClone(saved)):patch)};return structuredClone(saved);},
       getMessage:async(_id,messageId)=>records.get(messageId),getMessageCursor:async()=> 'seq:1',
       appendMessage:async(_id,message)=>{records.set(message.id,structuredClone(message));return structuredClone(message);},
-      completeInputs:async()=>{saved.replyDraft=null;}},
+      completeInputs:async()=>{saved.replyDraft=null;},queueNotifications:async()=>{},pendingNotifications:async()=>[],pendingNotificationRemovals:async()=>[]},
     proactiveContext:async(_id,_profile,_saved,clock)=>({context:buildProactiveContext({profile,messages:[...records.values()],state:saved,
       now:Date.parse(clock.currentTime),timeZone:clock.timeZone}),memories:[]}),
     generate:async(...args)=>{calls.models.push(args);return JSON.stringify(decision());},

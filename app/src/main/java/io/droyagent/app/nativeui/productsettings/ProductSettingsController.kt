@@ -34,6 +34,7 @@ internal class ProductSettingsController(private val host: NativeProductSettings
     }
     suspend fun display(key: String, value: Any) = withContext(Dispatchers.IO) { host.setDisplay(key, value) }
     suspend fun notifications(body: JSONObject) = withContext(Dispatchers.IO) { host.notificationManagement(body) }
+    suspend fun openMessageNotificationSettings(quiet: Boolean) = withContext(Dispatchers.Main.immediate) { host.openMessageNotificationSettings(quiet) }
     suspend fun proactive(body: JSONObject): JSONObject {
         val previous = if (body.optBoolean("tasksEnabled")) snapshot(ProductSettingsSection.Proactive) else null
         val result = withContext(Dispatchers.IO) { host.configureProactive(body) }

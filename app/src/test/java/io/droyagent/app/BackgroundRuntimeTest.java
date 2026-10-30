@@ -17,10 +17,10 @@ public final class BackgroundRuntimeTest {
     }
 
     @Test public void notificationUsesCurrentTaskStateAndReturnsToStandbyAfterCompletion() {
-        assertEquals("Droy · 正在启动", RuntimeService.notificationTitle(false, false, ""));
-        assertEquals("Droy · 正在处理任务", RuntimeService.notificationTitle(true, true, "executing"));
-        assertEquals("Droy · 需要你的回应", RuntimeService.notificationTitle(true, true, "waiting_input"));
-        assertEquals("Droy · 待命", RuntimeService.notificationTitle(true, false, "completed"));
-        assertEquals("Droy · 待命", RuntimeService.notificationTitle(true, false, "interrupted"));
+        assertEquals("正在启动", RuntimeService.notificationTitle(false, false, ""));
+        assertEquals("正在处理任务", RuntimeService.notificationTitle(true, true, "executing"));
+        assertEquals("需要你的确认", RuntimeService.notificationTitle(true, true, "waiting_input"));
+        assertEquals("后台运行中", RuntimeService.notificationTitle(true, false, "completed"));
+        assertEquals("后台运行中", RuntimeService.notificationTitle(true, false, "interrupted"));
     }
 }

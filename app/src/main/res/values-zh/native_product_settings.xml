@@ -140,6 +140,14 @@
     <string name="nps_no_matching_apps">没有匹配的应用</string>
     <string name="nps_no_notification_history">暂无通知记录</string>
     <string name="nps_pet_display">显示方式</string>
+    <string name="nps_message_delivery_ready">消息通知已开启</string>
+    <string name="nps_message_delivery_off">消息通知已关闭</string>
+    <string name="nps_message_delivery_system_blocked">系统通知未开启，开启后才能收到消息提醒。</string>
+    <string name="nps_message_delivery_channel_blocked">伙伴消息通知渠道已关闭。</string>
+    <string name="nps_message_system_settings">消息通知设置</string>
+    <string name="nps_message_quiet_settings">静默消息设置</string>
+    <string name="nps_message_quiet_hint">免打扰期间，已收到的消息会静默保留在通知栏。</string>
+    <string name="nps_message_quiet_blocked">静默消息渠道已关闭，免打扰期间的消息不会显示在通知栏。</string>
     <string name="nps_organization_off">通知整理已关闭</string>
     <string name="nps_organization_setup">待完成设置</string>
     <string name="nps_organization_ready">通知整理已就绪</string>

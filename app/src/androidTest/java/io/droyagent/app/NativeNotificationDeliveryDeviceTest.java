@@ -33,7 +33,8 @@ public final class NativeNotificationDeliveryDeviceTest {
     private NotificationManager manager;
     private ProactiveNotifications delivery;
     private String prefix, preferencesName;
-    private final Set<Integer> messageIds = new HashSet<>(), taskIds = new HashSet<>();
+    private final Set<String> companionIds = new HashSet<>();
+    private final Set<Integer> taskIds = new HashSet<>();
     private final Object companionOwner = new Object(), conversationOwner = new Object();
     private ActivityScenario<NativeAppActivity> activity;
 
@@ -82,7 +83,7 @@ public final class NativeNotificationDeliveryDeviceTest {
         if (context == null || prefix == null) return;
         NativeRuntimeHost.presentCompanion(companionOwner, null, false);
         NativeRuntimeHost.presentConversation(context, conversationOwner, null, false);
-        for (int id : messageIds) manager.cancel(ProactiveNotifications.COMPANION_TAG, id);
+        for (String companion : companionIds) delivery.clearCompanion(companion);
         for (int id : taskIds) manager.cancel("droy-task-notice", id);
         stage("after.activity_close");
         if (activity != null) activity.close();
@@ -107,7 +108,7 @@ public final class NativeNotificationDeliveryDeviceTest {
             JSONObject task = task(prefix + "-task-" + messages + tasks, "event-1", "Result");
             assertEquals(tasks ? "published" : "failed", task.getString("status"));
             if (messages) assertEquals(ProactiveNotifications.MESSAGE_CHANNEL,
-                posted(ProactiveNotifications.COMPANION_TAG, companion.hashCode() & 0x7fffffff).getNotification().getChannelId());
+                posted(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff).getNotification().getChannelId());
             if (tasks) assertEquals("task_attention", posted("droy-task-notice", task.getString("noticeId").hashCode() & 0x7fffffff)
                 .getNotification().getChannelId());
         }
@@ -132,9 +133,12 @@ public final class NativeNotificationDeliveryDeviceTest {
         assertTrue(message(companion, "visible").getBoolean("duplicate"));
         JSONObject first = message(companion, "next");
         assertTrue("Other pages still receive messages", first.getBoolean("published"));
-        assertFalse((posted(ProactiveNotifications.COMPANION_TAG, companion.hashCode() & 0x7fffffff).getNotification().flags
+        assertFalse((posted(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff).getNotification().flags
             & Notification.FLAG_ONLY_ALERT_ONCE) != 0);
+        long originalPostTime = posted(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff).getPostTime();
         assertTrue(message(companion, "next").getBoolean("duplicate"));
+        assertEquals("An unchanged duplicate must not re-post or reorder its notification", originalPostTime,
+            posted(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff).getPostTime());
         delivery.request(new JSONObject().put("operation", "activate").put("enabled", false));
         assertTrue("Task plugin shutdown cannot suppress companion messages", message(companion, "plugin-off").getBoolean("published"));
         delivery.request(new JSONObject().put("operation", "activate").put("enabled", true));
@@ -149,6 +153,115 @@ public final class NativeNotificationDeliveryDeviceTest {
         task(session, "next-task", "Updated result");
         assertTrue((posted("droy-task-notice", task.getString("noticeId").hashCode() & 0x7fffffff).getNotification().flags
             & Notification.FLAG_ONLY_ALERT_ONCE) != 0);
+    }
+
+    @Test public void silentMessagesRetainConversationHistoryAndOldReadsKeepNewMessages() throws Exception {
+        configure(true, false);
+        String companion = prefix + "-history";
+        assertTrue(sequenced(companion, "old", 11, false, true, 1).getBoolean("published"));
+        assertTrue(sequenced(companion, "new", 12, true, false, 2).getBoolean("published"));
+        DeviceUi.await("Silent update must retain both unread messages", 3000, () -> {
+            StatusBarNotification item = find(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff);
+            return item != null && ProactiveNotifications.QUIET_MESSAGE_CHANNEL.equals(item.getNotification().getChannelId())
+                && item.getNotification().extras.getParcelableArray(Notification.EXTRA_MESSAGES).length == 2;
+        });
+        Notification notification = posted(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff).getNotification();
+        assertEquals(ProactiveNotifications.QUIET_MESSAGE_CHANNEL, notification.getChannelId());
+        assertNull(manager.getNotificationChannel(notification.getChannelId()).getSound());
+        assertFalse(manager.getNotificationChannel(notification.getChannelId()).shouldVibrate());
+        assertEquals(Notification.GROUP_ALERT_SUMMARY, notification.getGroupAlertBehavior());
+        assertEquals(2, notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES).length);
+        assertEquals(2, notification.number);
+        assertNotNull(notification.getShortcutId());
+        assertNotNull(notification.publicVersion);
+        assertEquals(Notification.VISIBILITY_PRIVATE, notification.visibility);
+        assertEquals(Notification.MessagingStyle.class.getName(), notification.extras.getString(Notification.EXTRA_TEMPLATE));
+        assertEquals(2, notification.actions.length);
+        assertEquals(Notification.Action.SEMANTIC_ACTION_MARK_AS_READ, notification.actions[1].getSemanticAction());
+        delivery.request(new JSONObject().put("operation", "companionRead").put("companionId", companion).put("throughSequence", 11).put("unreadCount", 1));
+        DeviceUi.await("An old read must leave the later message", 3000, () -> {
+            StatusBarNotification item = find(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff);
+            return item != null && item.getNotification().extras.getParcelableArray(Notification.EXTRA_MESSAGES).length == 1;
+        });
+        delivery.request(new JSONObject().put("operation", "companionRemove").put("companionId", companion).put("messageId", "new").put("unreadCount", 0));
+        DeviceUi.await("Removing the final message must clear only its notice", 3000,
+            () -> find(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff) == null);
+        assertEquals("read", sequenced(companion, "delayed-old", 11, false, false, 0).getString("status"));
+    }
+
+    @Test public void unchangedReadRepairsAShedChannelChangeWithoutRepostingItAgain() throws Exception {
+        configure(true, false);
+        String companion = prefix + "-channel-repair", tag = ProactiveNotifications.companionTag(companion);
+        int id = companion.hashCode() & 0x7fffffff;
+        sequenced(companion, "normal", 21, false, true, 1);
+        Notification stale = posted(tag, id).getNotification();
+        sequenced(companion, "quiet", 22, true, false, 2);
+        DeviceUi.await("The quiet arrival must first be posted", 3000, () -> {
+            StatusBarNotification item = find(tag, id);
+            return item != null && ProactiveNotifications.QUIET_MESSAGE_CHANNEL.equals(item.getNotification().getChannelId());
+        });
+        manager.notify(tag, id, stale);
+        DeviceUi.await("Use the actual old system card to reproduce a dropped channel update", 3000, () -> {
+            StatusBarNotification item = find(tag, id);
+            return item != null && ProactiveNotifications.MESSAGE_CHANNEL.equals(item.getNotification().getChannelId())
+                && item.getNotification().number == 1;
+        });
+        JSONObject read = new JSONObject().put("operation", "companionRead").put("companionId", companion)
+            .put("throughSequence", 0).put("unreadCount", 2);
+        delivery.request(read);
+        DeviceUi.await("An unchanged read must restore the latest receipt's channel and messages", 3000, () -> {
+            StatusBarNotification item = find(tag, id);
+            return item != null && ProactiveNotifications.QUIET_MESSAGE_CHANNEL.equals(item.getNotification().getChannelId())
+                && item.getNotification().number == 2;
+        });
+        Notification repaired = posted(tag, id).getNotification();
+        assertEquals(Notification.GROUP_ALERT_SUMMARY, repaired.getGroupAlertBehavior());
+        assertTrue((repaired.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0);
+        long postTime = posted(tag, id).getPostTime();
+        delivery.request(read);
+        android.os.SystemClock.sleep(300);
+        assertEquals("An identical read must not re-post the repaired card", postTime, posted(tag, id).getPostTime());
+    }
+
+    @Test public void companionsWithCollidingHashCodesStillHaveIndependentNotifications() throws Exception {
+        configure(true, false);
+        String first = prefix + "Aa", second = prefix + "BB";
+        assertEquals(first.hashCode(), second.hashCode());
+        assertTrue(message(first, "first").getBoolean("published"));
+        assertTrue(message(second, "second").getBoolean("published"));
+        assertNotNull(posted(ProactiveNotifications.companionTag(first), first.hashCode() & 0x7fffffff));
+        assertNotNull(posted(ProactiveNotifications.companionTag(second), second.hashCode() & 0x7fffffff));
+        configure(false, false);
+        assertEquals("messages_disabled", sequenced(first, "disabled-quiet", 1, true, true, 1).getString("reason"));
+        assertNull(find(ProactiveNotifications.companionTag(first), first.hashCode() & 0x7fffffff));
+    }
+
+    @Test public void laterMessagesHealAMissedReadCallbackAndDuplicateStillClearsReadRows() throws Exception {
+        configure(true, false);
+        String companion = prefix + "-read-heal";
+        assertTrue(sequenced(companion, "old", 31, false, true, 1).getBoolean("published"));
+        JSONObject current = new JSONObject().put("operation", "companion").put("companionId", companion)
+            .put("name", "Notification fixture").put("messageId", "current").put("text", "Synthetic current")
+            .put("sequence", 32).put("throughSequence", 31).put("unreadCount", 1);
+        assertTrue(delivery.request(current).getBoolean("published"));
+        DeviceUi.await("A new message must apply the latest authoritative read cursor", 3000, () -> {
+            StatusBarNotification item = find(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff);
+            return item != null && item.getNotification().extras.getParcelableArray(Notification.EXTRA_MESSAGES).length == 1;
+        });
+        current.put("unreadCount", 3);
+        assertTrue(delivery.request(current).getBoolean("duplicate"));
+        DeviceUi.await("A changed authoritative unread count must update the existing notification", 3000, () -> {
+            StatusBarNotification item = find(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff);
+            return item != null && item.getNotification().number == 3;
+        });
+        current.put("throughSequence", 0).put("unreadCount", 9);
+        assertTrue(delivery.request(current).getBoolean("duplicate"));
+        assertEquals("A publication delayed behind a newer read cannot restore its stale unread count", 3,
+            posted(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff).getNotification().number);
+        current.put("throughSequence", 32).put("unreadCount", 0);
+        assertTrue(delivery.request(current).getBoolean("duplicate"));
+        DeviceUi.await("Even a duplicate payload must clear rows already read on the server", 3000,
+            () -> find(ProactiveNotifications.companionTag(companion), companion.hashCode() & 0x7fffffff) == null);
     }
 
     /** Retains one real notification for an external system-vibrator dump; not a motor assertion. */
@@ -172,15 +285,15 @@ public final class NativeNotificationDeliveryDeviceTest {
         try {
             assertTrue(message(companion, "single-observation").getBoolean("published"));
             assertEquals(ProactiveNotifications.MESSAGE_CHANNEL,
-                posted(ProactiveNotifications.COMPANION_TAG, id).getNotification().getChannelId());
+                posted(ProactiveNotifications.companionTag(companion), id).getNotification().getChannelId());
             stage("observation.active.utc_ms=" + System.currentTimeMillis() + ".window_ms=15000");
             android.os.SystemClock.sleep(15_000);
             assertNotNull("The synthetic notification must remain active during observation",
-                find(ProactiveNotifications.COMPANION_TAG, id));
+                find(ProactiveNotifications.companionTag(companion), id));
         } finally {
-            manager.cancel(ProactiveNotifications.COMPANION_TAG, id);
+            manager.cancel(ProactiveNotifications.companionTag(companion), id);
             DeviceUi.await("Synthetic observation notification cancelled", 3000,
-                () -> find(ProactiveNotifications.COMPANION_TAG, id) == null);
+                () -> find(ProactiveNotifications.companionTag(companion), id) == null);
             stage("observation.cancelled.utc_ms=" + System.currentTimeMillis());
         }
     }
@@ -189,9 +302,15 @@ public final class NativeNotificationDeliveryDeviceTest {
         delivery.request(new JSONObject().put("operation", "configure").put("messagesEnabled", messages).put("tasksEnabled", tasks));
     }
     private JSONObject message(String companion, String message) throws Exception {
-        messageIds.add(companion.hashCode() & 0x7fffffff);
+        companionIds.add(companion);
         return delivery.request(new JSONObject().put("operation", "companion").put("companionId", companion)
             .put("name", "Notification fixture").put("messageId", message).put("text", "Synthetic message"));
+    }
+    private JSONObject sequenced(String companion, String message, long sequence, boolean quiet, boolean alert, int count) throws Exception {
+        companionIds.add(companion);
+        return delivery.request(new JSONObject().put("operation", "companion").put("companionId", companion)
+            .put("name", "Notification fixture").put("messageId", message).put("text", "Synthetic " + message)
+            .put("sequence", sequence).put("sentAt", System.currentTimeMillis()).put("quiet", quiet).put("alert", alert).put("unreadCount", count));
     }
     private JSONObject task(String session, String key, String text) throws Exception {
         String id = ProactiveNoticeStore.identity(session, "1", key, "system", "", "");
@@ -213,6 +332,6 @@ public final class NativeNotificationDeliveryDeviceTest {
             manager.getNotificationChannel(id).getImportance() != NotificationManager.IMPORTANCE_NONE);
     }
     private static boolean ownedTag(String tag) {
-        return ProactiveNotifications.COMPANION_TAG.equals(tag) || "droy-task-notice".equals(tag);
+        return ProactiveNotifications.isCompanionTag(tag) || "droy-task-notice".equals(tag);
     }
 }

@@ -165,6 +165,7 @@
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>
+        <receiver android:name=".CompanionNotificationReceiver" android:exported="false" />
         <service android:name=".RuntimeService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started on-device AI conversation and Android automation with visible stop control" />
         </service>

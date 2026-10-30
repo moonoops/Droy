@@ -1,4 +1,6 @@
-import { isAbsolute } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
+import { realpath } from 'node:fs';
+import { promisify } from 'node:util';
 import { TYPERT as SESSIONS } from '@deepseek-ai/dsh-api-session-controller/typert';
 import { TYPERT as WORKSPACES } from '@deepseek-ai/dsh-api-workspace-controller/typert';
 import { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session';
@@ -20,6 +22,7 @@ const identity = (value, maximum = 256) => typeof value === 'string' && value.le
 const fields = (value, allowed, required = allowed) => object(value)
   && Object.keys(value).every(key => allowed.includes(key)) && required.every(key => Object.hasOwn(value, key));
 const get = (ctx, name) => typeof ctx.get === 'function' ? ctx.get(name) : ctx[name];
+const canonicalPath = promisify(realpath.native);
 
 /** Safe product errors; raw provider exceptions and personal paths never cross this boundary. */
 export class NativeNavigationError extends Error {
@@ -117,8 +120,10 @@ export function createNativeNavigationService(ctx) {
     const value = header(attached?.header ?? persisted.header, sessionId);
     if (persisted !== undefined) {
       const stored = header(persisted.header, sessionId);
-      for (const key of ['id', 'version', 'createdAt', 'isSeeded', 'cwd', 'origin', 'parentSession', 'delegationDepth'])
+      for (const key of ['id', 'version', 'createdAt', 'isSeeded', 'cwd', 'origin', 'parentSession'])
         if (stored[key] !== value[key]) mismatch();
+      // JSONL writes an omitted ordinary-session depth as zero, as accepted by the SDK's source checks.
+      if ((stored.delegationDepth ?? 0) !== (value.delegationDepth ?? 0)) mismatch();
     }
     if (row === undefined) fail('ACCESS_DENIED', 403, 'ACCESS_DENIED', 'denied');
     if (row.cwd !== undefined && row.cwd !== value.cwd || row.origin !== value.origin || row.parentSessionId !== value.parentSession) mismatch();
@@ -151,9 +156,20 @@ export function createNativeNavigationService(ctx) {
         || !identity(owner.workspaceId) || !['chat', 'work'].includes(owner.kind)) unavailable();
       if (meta.origin === 'subagent' || meta.delegationDepth > 0) mismatch();
       const saved = await profile(companionStore, owner.companionId);
-      if (saved.workspaceId !== owner.workspaceId || workspace?.workspaceId !== owner.workspaceId) mismatch();
-      if (owner.kind === 'chat' && owner.taskId !== null) mismatch();
+      if (saved.workspaceId !== owner.workspaceId) mismatch();
+      if (owner.kind === 'chat') {
+        if (typeof runtime.directory !== 'string' || !isAbsolute(runtime.directory)) unavailable();
+        // Chat sessions use a private directory and are intentionally absent from the work workspace.
+        if (owner.taskId !== null || workspace !== undefined && workspace.workspaceId !== owner.workspaceId) mismatch();
+        if (meta.cwd !== join(runtime.directory, owner.companionId, 'chat')) {
+          if (basename(meta.cwd) !== 'chat' || basename(dirname(meta.cwd)) !== owner.companionId) mismatch();
+          const [base, cwd] = await Promise.all([canonicalPath(runtime.directory), canonicalPath(meta.cwd)]);
+          // Match the SDK's native realpath identity, while keeping the companion's child directory exact.
+          if (cwd !== join(base, owner.companionId, 'chat')) mismatch();
+        }
+      }
       if (owner.kind === 'work') {
+        if (workspace?.workspaceId !== owner.workspaceId) mismatch();
         if (!identity(owner.taskId) || typeof companionStore.getMessage !== 'function') unavailable();
         const message = await companionStore.getMessage(owner.companionId, owner.taskId);
         if (message === null) missing();

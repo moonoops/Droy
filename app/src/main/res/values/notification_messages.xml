@@ -1,0 +1,14 @@
+<resources>
+    <string name="cnotice_language_update_failed">Notification language update failed</string>
+    <string name="cnotice_channel">Companion messages</string>
+    <string name="cnotice_quiet_channel">Silent companion messages</string>
+    <string name="cnotice_you">You</string>
+    <string name="cnotice_open">Open chat</string>
+    <string name="cnotice_mark_read">Mark as read</string>
+    <string name="cnotice_private">New companion message</string>
+    <string name="cnotice_read_failed">Could not mark this message as read. Open the chat to try again.</string>
+    <plurals name="cnotice_unread">
+        <item quantity="one">%1$d unread message</item>
+        <item quantity="other">%1$d unread messages</item>
+    </plurals>
+</resources>

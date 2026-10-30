@@ -6,8 +6,8 @@ import static org.junit.Assert.*;
 public final class StatusNotificationPolicyTest {
     private static final StatusNotificationPolicy.Audio NONE = StatusNotificationPolicy.Audio.NONE;
 
-    @Test public void idleHasNoFillerAndWakeUsesOneShortLine() {
-        assertEquals("", detail(false, NONE, false, false, false, false));
+    @Test public void idleShowsAnEntryHintAndWakeUsesOneShortLine() {
+        assertEquals("点按打开 Droy", detail(false, NONE, false, false, false, false));
         assertEquals("可以直接叫我", detail(false, StatusNotificationPolicy.Audio.WAKE, false, false, false, false));
         assertEquals("通知整理需要设置", detail(false, NONE, false, false, true, false));
     }
@@ -23,9 +23,11 @@ public final class StatusNotificationPolicyTest {
     }
 
     @Test public void recordingAndLocationRemainVisibleWithoutTheRuntime() {
-        assertEquals("Droy · 正在录音", StatusNotificationPolicy.title(true, false, "", StatusNotificationPolicy.Audio.RECORDING, false, 0));
-        assertEquals("Droy · 正在记录位置", StatusNotificationPolicy.title(true, false, "", NONE, true, 0));
-        assertEquals("Droy · 正在和你交谈", StatusNotificationPolicy.title(true, false, "", StatusNotificationPolicy.Audio.VOICE, true, 0));
+        assertEquals("正在录音", StatusNotificationPolicy.title(true, false, "", StatusNotificationPolicy.Audio.RECORDING, false, 0));
+        assertEquals("正在记录位置", StatusNotificationPolicy.title(true, false, "", NONE, true, 0));
+        assertEquals("正在和你交谈", StatusNotificationPolicy.title(true, false, "", StatusNotificationPolicy.Audio.VOICE, true, 0));
+        assertEquals("正在录音", StatusNotificationPolicy.title(false, false, "", StatusNotificationPolicy.Audio.RECORDING, false, 0));
+        assertEquals("正在记录位置", StatusNotificationPolicy.title(false, false, "", NONE, true, 0));
         assertTrue(detail(false, NONE, false, true, false, false).contains("位置记录中"));
     }
 
@@ -35,6 +37,8 @@ public final class StatusNotificationPolicyTest {
         assertEquals(101, result.codePointCount(0, result.length()));
         try {
             NativeLocale.mirrorProcessLanguage("en");
+            assertEquals("Running in background", StatusNotificationPolicy.title(true, false, "", NONE, false, 21));
+            assertEquals("Tap to open Droy", detail(false, NONE, false, false, false, false));
             assertEquals("You can call me", detail(false, StatusNotificationPolicy.Audio.WAKE, false, false, false, false));
             assertEquals("Notification management needs setup", detail(false, NONE, false, false, true, false));
             assertEquals("原始任务内容", StatusNotificationPolicy.detail(true, "executing", "原始任务内容", "progress", NONE, false, false, false, false));

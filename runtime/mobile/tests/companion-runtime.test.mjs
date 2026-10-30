@@ -202,6 +202,19 @@ test('ordinary text stays in one exact bubble and does not automatically quote i
   assert.equal(events[0].status.phase,'typing');assert.equal(events.at(-1).status.phase,'idle');
 });
 
+test('a slow notification bridge cannot keep a committed text reply in the typing state',async t=>{
+  const f=await fixture(t),started=Promise.withResolvers(),release=Promise.withResolvers();
+  await f.runtime.submit('kaka',{clientId:'notice-typing-source',text:'A fictional question.'});
+  await f.runtime.flush('kaka');
+  const owner=await f.store.sessionOwner((await f.runtime.agent('kaka')).id);
+  f.runtime.notify=async()=>{started.resolve();await release.promise;return {status:'published'};};
+  const reply=f.runtime.reply(owner,{msg_id:'notice-typing-source',reply_reference:'A fictional complete answer.'});
+  await started.promise;
+  assert.equal(f.runtime.state('kaka').phase,'idle');
+  assert.equal((await f.store.listMessages('kaka')).messages.filter(message=>message.role==='assistant').length,1);
+  release.resolve();assert.equal((await reply).delivered,true);
+});
+
 test('visible quotes are explicit, scoped, and cannot expose excluded or internal task messages',async t=>{
   const f=await fixture(t),agent=await f.runtime.agent('kaka'),owner=await f.store.sessionOwner(agent.id);
   await f.store.appendMessage('kaka',{id:'earlier-question',role:'user',text:'An earlier fictional question'});

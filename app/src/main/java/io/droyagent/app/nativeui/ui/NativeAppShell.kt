@@ -414,7 +414,7 @@ fun NativeAppShell(
                 if (shared.importId != target.previewImportId) return@LaunchedEffect
                 shareModel.showPending(); open("share")
             }
-            is NativeExternalResolvedTarget.Root -> root(target.page.wire)
+            is NativeExternalResolvedTarget.Root -> root(target.page.wire, restoreScene = false)
         }
         navigatedRequest = request.id
     }

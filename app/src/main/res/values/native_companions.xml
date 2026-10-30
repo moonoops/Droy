@@ -134,4 +134,6 @@
     <string name="native_companion_communication">Communication</string>
     <string name="native_companion_settings">Companion settings</string>
     <string name="native_companion_background_options">Background</string>
+    <string name="native_companion_notification_remove_failed">The message was deleted, but its notification could not be cleared. Please try again later.</string>
+    <string name="native_companion_notification_removals_pending">Notification cleanup is still pending. Retry it before deleting more messages.</string>
 </resources>
