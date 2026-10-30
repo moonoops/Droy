@@ -12,3 +12,11 @@ internal fun companionImageSampleSize(width: Int, height: Int, maximumDimension:
     }
     return sample
 }
+
+/** Fill-cropped backgrounds must retain enough pixels for both viewport dimensions. */
+internal fun companionImageCropSampleSize(width: Int, height: Int, targetWidth: Int, targetHeight: Int): Int {
+    require(width > 0 && height > 0 && targetWidth > 0 && targetHeight > 0)
+    var sample = 1
+    while (width / (sample * 2) >= targetWidth && height / (sample * 2) >= targetHeight) sample *= 2
+    return sample
+}

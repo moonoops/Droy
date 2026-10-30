@@ -16,7 +16,7 @@ import { createCompanionEmbedder } from './embedding.mjs';
 
 const base='/droy/companions';
 export const stickerIds=stickerCatalog().map(sticker=>sticker.id);
-const assetNames=new Set(['kaka.png','maimai.png','user-default.png',...['01','02','03','04','05'].flatMap(id=>['wallpaper-'+id+'.webp','wallpaper-'+id+'-thumb.webp']),...stickerIds.map(id=>id+'.png')]);
+const assetNames=new Set(['kaka.png','maimai.png','user-default.png',...['01','02','03','04','05','06','07','08'].flatMap(id=>['wallpaper-'+id+'.webp','wallpaper-'+id+'-thumb.webp']),...stickerIds.map(id=>id+'.png')]);
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 async function body(req,limit=262144) {
   const chunks=[]; let bytes=0;

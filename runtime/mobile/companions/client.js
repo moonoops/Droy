@@ -410,8 +410,9 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
     return dateFormats.get(key).format(parsed);
   }
   const phaseText = phase => ['thinking', 'typing'].includes(phase) ? 'typing' : null;
-  const backgroundUrl = background => background?.type === 'preset' && /^0[1-5]$/.test(background.id)
-    ? '/droy/companions/assets/wallpaper-' + background.id + '.webp' : background?.type === 'upload' ? background.url : undefined;
+  const presetBackgroundUrl = (id, thumbnail = false) => '/droy/companions/assets/wallpaper-' + id + (thumbnail ? '-thumb' : '') + '.webp?v=20261030';
+  const backgroundUrl = background => background?.type === 'preset' && /^0[1-8]$/.test(background.id)
+    ? presetBackgroundUrl(background.id) : background?.type === 'upload' ? background.url : undefined;
   function ErrorNotice({ error, reload }) {
     const text = typeof error === 'string' && !/^[A-Z][A-Z0-9_:. -]*$/.test(error) ? error : t('requestFailed');
     return error ? h('div', { className: 'droy-im-error', role: 'alert' }, h('span', null, text),
@@ -935,7 +936,7 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
       return h('label', { className: 'droy-im-toggle-row' }, h('span', null, h('strong', null, t(label))),
         h('input', { type: 'checkbox', role: 'switch', 'data-droy-im-setting': label, checked: value === true, disabled: pending, onChange: event => change(event.target.checked) }));
     }
-    const presets = [{ type: 'default' }, ...['01', '02', '03', '04', '05'].map(id => ({ type: 'preset', id }))];
+    const presets = [{ type: 'default' }, ...['01', '02', '03', '04', '05', '06', '07', '08'].map(id => ({ type: 'preset', id }))];
     const backgroundKey = value => value.type + ':' + (value.id || '');
     const backgroundStyle = value => backgroundUrl(value) ? { backgroundImage: 'url(' + JSON.stringify(backgroundUrl(value)) + ')', backgroundPosition: (value.position?.x ?? 50) + '% ' + (value.position?.y ?? 50) + '%' } : undefined;
     return h('section', { className: 'droy-im-screen droy-im-profile-screen', 'data-droy-im-screen': 'profile' },
@@ -1006,8 +1007,8 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
       modal === 'background' ? dialog('chatBackground', h('div', { className: 'droy-im-background-editor' },
         h('div', { className: 'droy-im-background-preview', style: backgroundStyle(background), 'aria-label': t('previewImage') }, h('i'), h('i')),
         h('div', { className: 'droy-im-background-grid', role: 'group', 'aria-label': t('chatBackground') }, ...presets.map(item =>
-          h('button', { type: 'button', key: backgroundKey(item), 'data-droy-im-background': item.id || 'default', className: 'droy-im-background-option' + (item.type === 'default' ? ' is-default' : ''), style: item.type === 'preset' ? { backgroundImage: 'url(/droy/companions/assets/wallpaper-' + item.id + '-thumb.webp)' } : undefined,
-            'aria-label': item.type === 'default' ? t('defaultBackground') : t('presetBackground', { number: Number(item.id) }), 'aria-pressed': backgroundKey(item) === backgroundKey(background),
+          h('button', { type: 'button', key: backgroundKey(item), 'data-droy-im-background': item.id || 'default', className: 'droy-im-background-option' + (item.type === 'default' ? ' is-default' : ''), style: item.type === 'preset' ? { backgroundImage: 'url(' + presetBackgroundUrl(item.id, true) + ')' } : undefined,
+            'aria-label': item.type === 'default' ? t('defaultBackground') : t(`presetBackground${item.id}`), 'aria-pressed': backgroundKey(item) === backgroundKey(background),
             onClick: () => setBackground(item) }, backgroundKey(item) === backgroundKey(background) ? h('span', { className: 'droy-im-background-check' }, h(Icon, { name: 'check', size: 17 })) : null))),
         h('button', { type: 'button', className: 'droy-im-secondary', 'data-droy-im-action': 'upload-background', disabled: pending, onClick: () => run(async () => {
           let picked;

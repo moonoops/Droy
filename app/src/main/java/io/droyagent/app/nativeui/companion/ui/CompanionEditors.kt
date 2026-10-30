@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.companion.data.NativeCompanionSettings
 import io.droyagent.app.nativeui.data.NativeModel
+import io.droyagent.app.nativeui.media.NativeAvatarResult
 import io.droyagent.app.nativeui.ui.DroyIcon
 import io.droyagent.app.nativeui.ui.DroySettingsLink
 import io.droyagent.app.nativeui.ui.DroySettingsLinkGroup
@@ -242,7 +243,7 @@ internal fun CompanionTimeDialog(value: String, start: Boolean, onClose: () -> U
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoader, enabled: Boolean,
-    onChoose: (((String) -> Unit) -> Unit)?, onApply: (String) -> Unit, onClose: () -> Unit, incomingSelection: String? = null, onIncomingConsumed: () -> Unit = {}, errorContent: @Composable () -> Unit = {}) {
+    onChoose: (((NativeAvatarResult) -> Unit) -> Unit)?, onApply: (String) -> Unit, onClose: () -> Unit, incomingSelection: String? = null, onIncomingConsumed: () -> Unit = {}, errorContent: @Composable () -> Unit = {}) {
     val original = remember { initial ?: "{\"type\":\"default\"}" }
     var selection by rememberSaveable { mutableStateOf(initial ?: original) }
     var custom by rememberSaveable { mutableStateOf(initial?.takeIf { JSONObject(it).optString("type") == "upload" }) }
@@ -266,21 +267,16 @@ internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoa
     }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item("preview") {
-                val previewUrl = when (value.optString("type")) {
-                    "preset" -> value.optString("id").takeIf { it in setOf("01", "02", "03", "04", "05") }
-                        ?.let { "/droy/companions/assets/wallpaper-$it.webp" }
-                    "upload" -> value.optString("url").takeIf { it.isNotBlank() }
-                    else -> null
-                }
+                val previewUrl = companionBackgroundUrl(value)
                 val position = value.optJSONObject("position")
                 Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.fillMaxWidth().aspectRatio(1.4f).testTag("native-background-preview")) {
                     Box {
                         Crossfade(targetState = previewUrl, animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
                             label = "backgroundPreview", modifier = Modifier.fillMaxSize()) { url ->
-                            if (url != null) CompanionImage(url, null, loader, Modifier.fillMaxSize(), alignment = BiasAlignment(
+                            if (url != null) CompanionBackgroundImage(url, loader, Modifier.fillMaxSize(), alignment = BiasAlignment(
                                 ((position?.optDouble("x", 50.0) ?: 50.0) / 50.0 - 1.0).toFloat(),
-                                ((position?.optDouble("y", 50.0) ?: 50.0) / 50.0 - 1.0).toFloat())) { }
+                                ((position?.optDouble("y", 50.0) ?: 50.0) / 50.0 - 1.0).toFloat()))
                         }
                         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Center) {
                             Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
@@ -299,7 +295,7 @@ internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoa
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.native_companion_background_options), Modifier.weight(1f),
                         style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    FilledTonalButton(onClick = { onChoose?.invoke { url -> select(JSONObject().put("type", "upload").put("url", url).put("position", JSONObject().put("x", 50).put("y", 50)).toString()) } },
+                    FilledTonalButton(onClick = { onChoose?.invoke { result -> select(companionUploadedBackground(result)) } },
                         enabled = enabled && onChoose != null, shapes = ButtonDefaults.shapes(),
                         modifier = Modifier.heightIn(min = 48.dp).testTag("native-creation-background-upload")) {
                         DroyIcon(R.drawable.native_companion_image, null, Modifier.size(20.dp))
@@ -310,13 +306,14 @@ internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoa
             }
             item("choices") {
                 Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    val choices = listOf("default", "01", "02", "03", "04", "05") + if (custom != null) listOf("upload") else emptyList()
+                    val choices = listOf("default") + companionBackgroundPresets.map { it.id } + if (custom != null) listOf("upload") else emptyList()
                     choices.chunked(3).forEach { row ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             row.forEach { id ->
                                 val selected = when (id) { "default", "upload" -> value.optString("type") == id; else -> value.optString("type") == "preset" && value.optString("id") == id }
-                                val url = when (id) { "default" -> null; "upload" -> JSONObject(requireNotNull(custom)).getString("url"); else -> "/droy/companions/assets/wallpaper-$id.webp" }
-                                val title = when (id) { "default" -> stringResource(R.string.native_companion_default_background); "upload" -> stringResource(R.string.native_companion_custom_background); else -> stringResource(R.string.native_companion_creation_background_preset, id.toInt()) }
+                                val url = when (id) { "default" -> null; "upload" -> JSONObject(requireNotNull(custom)).getString("url"); else -> companionBackgroundPresetUrl(id) }
+                                val thumbnailUrl = if (id == "upload") url else companionBackgroundPresetUrl(id, thumbnail = true)
+                                val title = when (id) { "default" -> stringResource(R.string.native_companion_default_background); "upload" -> stringResource(R.string.native_companion_custom_background); else -> stringResource(companionBackgroundPresets.first { it.id == id }.label) }
                                 val interactions = remember(id) { MutableInteractionSource() }
                                 val pressed by interactions.collectIsPressedAsState()
                                 val corner by animateDpAsState(if (pressed) 24.dp else 16.dp,
@@ -331,9 +328,9 @@ internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoa
                                             if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
                                         modifier = Modifier.fillMaxWidth().aspectRatio(1.35f)) {
                                         Box(Modifier.fillMaxSize().indication(interactions, LocalIndication.current)) {
-                                            if (url != null) {
+                                            if (thumbnailUrl != null) {
                                                 val position = if (id == "upload") JSONObject(requireNotNull(custom)).optJSONObject("position") else null
-                                                CompanionImage(url, null, loader, Modifier.fillMaxSize(), alignment = BiasAlignment(
+                                                CompanionImage(thumbnailUrl, null, loader, Modifier.fillMaxSize(), alignment = BiasAlignment(
                                                     ((position?.optDouble("x", 50.0) ?: 50.0) / 50.0 - 1.0).toFloat(),
                                                     ((position?.optDouble("y", 50.0) ?: 50.0) / 50.0 - 1.0).toFloat())) { }
                                             }
@@ -359,7 +356,7 @@ internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoa
                     Slider(state = positionSlider, onValueChange = { number ->
                         val next = JSONObject(selection); val position = next.optJSONObject("position") ?: JSONObject().put("x", 50).put("y", 50)
                         next.put("position", position.put(axis, number.toDouble())); select(next.toString())
-                    }, enabled = enabled)
+                    }, enabled = enabled, modifier = Modifier.testTag("native-background-position-$axis"))
                 }
             }
         }

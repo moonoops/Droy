@@ -53,6 +53,7 @@ import io.droyagent.app.nativeui.engine.*
 import io.droyagent.app.nativeui.tools.*
 import io.droyagent.app.nativeui.media.NativeSharePreview
 import io.droyagent.app.nativeui.media.NativeSharePreviewViewModel
+import io.droyagent.app.nativeui.media.NativeAvatarResult
 import io.droyagent.app.nativeui.voiceinput.*
 import io.droyagent.app.nativeui.workspaces.*
 import io.droyagent.app.nativeui.presentation.LocalNativeProductPresentation
@@ -68,11 +69,11 @@ data class NativeShellMedia(
     val chooseImages: ((String) -> Unit)? = null,
     val chooseCamera: ((String) -> Unit)? = null,
     val chooseAvatar: CompanionAvatarPicker? = null,
-    val chooseBackground: CompanionAvatarPicker? = null,
+    val chooseBackground: CompanionBackgroundPicker? = null,
     val openAttachment: ((String, NativeCompanionAttachment) -> Unit)? = null,
     val playVoice: ((String, NativeCompanionVoice) -> Unit)? = null,
     val avatarUrl: (String?) -> String? = { null },
-    val backgroundUrl: (String?) -> String? = { null },
+    val backgroundResult: (String?) -> NativeAvatarResult? = { null },
     val consumeBackground: (String?) -> Unit = {},
     val consumeAvatar: (String?) -> Unit = {},
     val conversationChanged: (String?) -> Unit = {},
@@ -846,7 +847,7 @@ fun NativeAppShell(
                 val id = current.arguments!!.getString("id")!!
                 CompanionProfileScreen(companions, companionModel, id, onBack = ::back,
                     onChooseAvatar = media.chooseAvatar, uploadedAvatarUrl = media.avatarUrl(id), onAvatarConsumed = { media.consumeAvatar(id) },
-                    onChooseBackground = media.chooseBackground, uploadedBackgroundUrl = media.backgroundUrl(id),
+                    onChooseBackground = media.chooseBackground, uploadedBackground = media.backgroundResult(id),
                     onBackgroundConsumed = { media.consumeBackground(id) },
                     onDeleteCompanion = onDeleteCompanion?.let { begin -> { owner ->
                         if (!begin(owner)) shellScope.launch { snackbar.showSnackbar(deletionFailed) }

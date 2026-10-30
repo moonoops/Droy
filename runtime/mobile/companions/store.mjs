@@ -139,7 +139,7 @@ function validateBackground(value) {
     return { type: 'default' };
   }
   if (value.type === 'preset') {
-    if (!['01', '02', '03', '04', '05'].includes(value.id) || value.position !== undefined) fail('COMPANION_INVALID_INPUT');
+    if (!['01', '02', '03', '04', '05', '06', '07', '08'].includes(value.id) || value.position !== undefined) fail('COMPANION_INVALID_INPUT');
     const url = backgroundUrl(value.id);
     if (value.url !== undefined && value.url !== url) fail('COMPANION_ATTACHMENT_SCOPE');
     return { type: 'preset', id: value.id, url };

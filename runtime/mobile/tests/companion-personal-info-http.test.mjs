@@ -126,13 +126,23 @@ test('quoted messages return bounded current previews outside the loaded page an
 
 test('wallpaper assets and thumbnails serve WebP and unknown files are not exposed', async t => {
   const f = await fixture(t);
-  for (const name of ['wallpaper-01.webp', 'wallpaper-05-thumb.webp', 'user-default.png']) {
+  const wallpapers = ['01', '02', '03', '04', '05', '06', '07', '08']
+    .flatMap(id => ['wallpaper-' + id + '.webp', 'wallpaper-' + id + '-thumb.webp']);
+  for (const name of [...wallpapers, 'user-default.png']) {
     const response = await f.request('/assets/' + name);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), name.endsWith('.webp') ? 'image/webp' : 'image/png');
     assert.ok((await response.arrayBuffer()).byteLength > 0);
   }
-  assert.equal((await f.api('/assets/host.mjs')).status, 404);
+  for (const name of ['wallpaper-00.webp', 'wallpaper-09.webp', 'wallpaper-09-thumb.webp', 'host.mjs'])
+    assert.equal((await f.api('/assets/' + name)).status, 404);
+  for (const name of ['wallpaper-01.webp', 'wallpaper-08-thumb.webp']) {
+    const response = await f.request('/assets/' + name + '?v=20261030');
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'image/webp');
+    assert.ok((await response.arrayBuffer()).byteLength > 0);
+  }
+  assert.equal((await fetch(f.url + '/assets/wallpaper-08.webp')).status, 401);
 });
 
 test('profile and image failures use the current operation language and retain the saved profile', async t => {
@@ -145,7 +155,7 @@ test('profile and image failures use the current operation language and retain t
     assert.equal(invalidProfile.status, 400);
     assert.equal(invalidProfile.value.message, copy.operationFailed);
     assert.notEqual(invalidProfile.value.message, copy.generationFailed);
-    const invalidBackground = await f.api('/kaka', 'PATCH', { chatBackground: { type: 'preset', id: '06' } });
+    const invalidBackground = await f.api('/kaka', 'PATCH', { chatBackground: { type: 'preset', id: '09' } });
     assert.equal(invalidBackground.status, 400);
     assert.equal(invalidBackground.value.message, copy.operationFailed);
     const invalidImage = await f.api('/user-profile/uploads', 'POST', {

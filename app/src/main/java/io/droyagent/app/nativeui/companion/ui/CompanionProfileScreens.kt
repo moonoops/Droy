@@ -20,10 +20,10 @@ import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.companion.data.*
 import io.droyagent.app.nativeui.data.NativeModel
+import io.droyagent.app.nativeui.media.NativeAvatarResult
 import io.droyagent.app.nativeui.ui.DroySettingsLink
 import io.droyagent.app.nativeui.ui.DroySettingsLinkGroup
 import io.droyagent.app.nativeui.ui.DroyIcon
-import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -37,9 +37,9 @@ fun CompanionProfileScreen(
     onChooseAvatar: CompanionAvatarPicker? = null,
     uploadedAvatarUrl: String? = null,
     onAvatarConsumed: () -> Unit = {},
-    onChooseBackground: CompanionAvatarPicker? = null,
+    onChooseBackground: CompanionBackgroundPicker? = null,
     onDeleteCompanion: ((String) -> Unit)? = null,
-    uploadedBackgroundUrl: String? = null,
+    uploadedBackground: NativeAvatarResult? = null,
     onBackgroundConsumed: () -> Unit = {},
 ) {
     val companion = state.companions.firstOrNull { it.id == companionId }
@@ -127,7 +127,7 @@ fun CompanionProfileScreen(
         CompanionBackgroundPage(companion.chatBackgroundJson, imageLoader, state.runtime.ready && !profileBusy,
             onChooseBackground?.let { choose -> { selected -> choose(companionId, selected) } },
             { submittedSheet = "background"; model.updateProfile(companionId, NativeCompanionProfilePatch(chatBackgroundJson = it)) }, { sheet = "interaction" },
-            incomingSelection = uploadedBackgroundUrl?.let { JSONObject().put("type", "upload").put("url", it).put("position", JSONObject().put("x", 50).put("y", 50)).toString() },
+            incomingSelection = uploadedBackground?.let(::companionUploadedBackground),
             onIncomingConsumed = onBackgroundConsumed,
             errorContent = { CompanionError(state.error, model::dismissError, modifier = Modifier.padding(horizontal = 20.dp)) })
     } else {

@@ -656,16 +656,45 @@ function renderedMessages(f, tree) {
   assert.equal(f.calls.some(call => /session|default-model/.test(call.path)), false); f.ui.dispose();
 });
 
- test('background selector has six unnamed previews and applies only to the current companion', async () => {
+ test('background selector offers the default and eight localized previews, follows language changes and applies only to the current companion', async () => {
   const f = companionUiFixture((path, options) => path === '' ? root() : options.method ? {} : { messages: [] });
   await f.ui.state.initialize(); f.ui.state.open('kaka'); await tick(); f.ui.state.showProfile();
   byAction(f.render(), 'background').props.onClick(); let tree = f.render();
-  const options = treeNodes(tree).filter(node => node.props['data-droy-im-background']);
-  assert.equal(options.length, 6); assert.equal(options.every(node => node.children.every(child => typeof child !== 'string')), true);
-  assert.match(options[1].props.style.backgroundImage, /wallpaper-01-thumb\.webp/);
-  options.find(node => node.props['data-droy-im-background'] === '03').props.onClick(); tree = f.render();
+  const ids = ['default', '01', '02', '03', '04', '05', '06', '07', '08'];
+  for (const language of ['en', 'zh']) {
+    f.changeLocale(language); tree = f.render();
+    const options = treeNodes(tree).filter(node => node.props['data-droy-im-background']);
+    assert.equal(options.map(node => node.props['data-droy-im-background']).join(), ids.join());
+    assert.equal(options.every(node => node.children.every(child => typeof child !== 'string')), true);
+    for (const [index, option] of options.entries()) {
+      assert.equal(option.props['aria-label'], loaded.DROY_COMPANION_COPY[language][index ? 'presetBackground' + ids[index] : 'defaultBackground']);
+      if (index) assert.ok(option.props.style.backgroundImage.includes('wallpaper-' + ids[index] + '-thumb.webp?v=20261030'));
+    }
+    assert.ok(byAction(tree, 'upload-background'));
+  }
+  treeNodes(tree).find(node => node.props['data-droy-im-background'] === '08').props.onClick(); tree = f.render();
+  assert.equal(f.calls.some(call => call.method === 'PATCH'), false);
+  assert.equal(treeNodes(tree).find(node => node.props['data-droy-im-background'] === '08').props['aria-pressed'], true);
+  assert.ok(treeNodes(tree).find(node => node.props.className === 'droy-im-background-preview').props.style.backgroundImage.includes('wallpaper-08.webp?v=20261030'));
   byAction(tree, 'apply').props.onClick(); await tick();
-  const patch = f.calls.find(call => call.method === 'PATCH'); assert.equal(patch.path, '/kaka'); assert.equal(patch.body.chatBackground.id, '03'); assert.equal(patch.body.chatBackground.type, 'preset'); f.ui.dispose();
+  const patch = f.calls.find(call => call.method === 'PATCH'); assert.equal(patch.path, '/kaka'); assert.equal(patch.body.chatBackground.id, '08'); assert.equal(patch.body.chatBackground.type, 'preset'); f.ui.dispose();
+});
+
+ test('saved backgrounds render all eight versioned presets and preserve custom image URLs', async () => {
+  const backgrounds = [{ type: 'default' }, ...['01', '02', '03', '04', '05', '06', '07', '08'].map(id => ({ type: 'preset', id })),
+    { type: 'upload', id: 'custom', url: '/droy/companions/kaka/attachments/custom', position: { x: 20, y: 80 } }];
+  for (const background of backgrounds) {
+    const f = companionUiFixture(path => path === '' ? { ...root(), companions: [{ id: 'kaka', name: 'Fictional Friend', chatBackground: background }] } : { messages: [] });
+    await f.ui.state.initialize(); f.ui.state.open('kaka'); await tick();
+    const messages = treeNodes(f.render()).find(node => node.props.role === 'log');
+    if (background.type === 'default') assert.equal(messages.props.style, undefined);
+    else {
+      const expected = background.type === 'preset' ? '/droy/companions/assets/wallpaper-' + background.id + '.webp?v=20261030' : background.url;
+      assert.ok(messages.props.style.backgroundImage.includes(expected));
+      if (background.type === 'upload') assert.equal(messages.props.style.backgroundPosition, '20% 80%');
+    }
+    f.ui.dispose();
+  }
 });
 
  test('user profile uses a global endpoint and is shared by every companion conversation', async () => {

@@ -195,6 +195,17 @@ test('creation commits interaction settings and backgrounds with the same defaul
   assert.equal((await f.store.profiles()).length, 3);
 });
 
+test('each of the eight backgrounds can be selected when creating a companion through HTTP', async t => {
+  const f = await fixture(t), { api } = await f.serve();
+  for (const id of ['01', '02', '03', '04', '05', '06', '07', '08']) {
+    const created = await api('', 'POST', create('background-preset-' + id, 'Fictional background ' + id, { chatBackground: { type: 'preset', id } }));
+    assert.equal(created.status, 201);
+    assert.deepEqual(created.value.profile.chatBackground, { type: 'preset', id, url: '/droy/companions/assets/wallpaper-' + id + '.webp' });
+  }
+  await f.reopen();
+  assert.equal((await f.store.profiles()).filter(profile => profile.chatBackground.type === 'preset').length, 8);
+});
+
 test('a draft background and avatar transfer atomically, including one shared image and stable retry content', async t => {
   for (const shared of [true, false]) await t.test(shared ? 'shared image' : 'distinct images', async child => {
     const f = await fixture(child), { api } = await f.serve(), draft = await f.store.createDraft({ requestId: 'background-draft' });

@@ -137,11 +137,28 @@ test('the global user avatar is independent of companion uploads, profile change
   assert.deepEqual(await f.store.removeUserUpload(avatar.id), { removed: true });
 });
 
+test('all eight preset backgrounds remain valid after restart while unknown presets cannot replace them', async t => {
+  const f = await fixture(t);
+  for (const id of ['01', '02', '03', '04', '05', '06', '07', '08']) {
+    const background = { type: 'preset', id, url: '/droy/companions/assets/wallpaper-' + id + '.webp' };
+    await f.store.updateProfile('kaka', { chatBackground: { type: 'preset', id } });
+    await f.reopen();
+    assert.deepEqual((await f.store.getProfile('kaka')).chatBackground, background);
+    for (const invalid of ['00', '09', '1', 8, null])
+      await assert.rejects(f.store.updateProfile('kaka', { chatBackground: { type: 'preset', id: invalid } }), code('COMPANION_INVALID_INPUT'));
+    await assert.rejects(f.store.updateProfile('kaka', { chatBackground: { ...background, url: 'https://example.invalid/wallpaper.webp' } }), code('COMPANION_ATTACHMENT_SCOPE'));
+    assert.deepEqual((await f.store.getProfile('kaka')).chatBackground, background);
+  }
+  await f.store.updateProfile('kaka', { chatBackground: { type: 'default' } });
+  await f.reopen();
+  for (const id of ['kaka', 'maimai']) assert.deepEqual((await f.store.getProfile(id)).chatBackground, { type: 'default' });
+});
+
 test('backgrounds validate image ownership, retain crop and protect in-use uploads', async t => {
   const f = await fixture(t), image = imageUpload('wallpaper'), other = imageUpload('other', 'maimai');
   await f.store.putUpload('kaka', image); await f.store.putUpload('maimai', other);
   await f.store.putUpload('kaka', { ...imageUpload('text-file'), mediaType: 'text/plain' });
-  for (const value of [{ type: 'preset', id: '06' }, { type: 'default', url: image.url },
+  for (const value of [{ type: 'preset', id: '09' }, { type: 'default', url: image.url },
     { type: 'upload', id: other.id }, { type: 'upload', id: 'text-file' },
     { type: 'upload', id: image.id, url: other.url }, { type: 'upload', id: image.id, position: { x: -1, y: 50 } }])
     await assert.rejects(f.store.updateProfile('kaka', { chatBackground: value }));

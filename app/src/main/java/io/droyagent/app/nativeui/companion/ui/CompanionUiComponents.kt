@@ -28,11 +28,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.companion.data.*
 import io.droyagent.app.nativeui.data.NativeApiException
 import io.droyagent.app.nativeui.data.NativeRuntimeState
+import io.droyagent.app.nativeui.media.NativeAvatarResult
 import io.droyagent.app.nativeui.ui.DroyIcon
 import io.droyagent.app.nativeui.ui.DroyIconAction
 import java.io.IOException
@@ -47,6 +49,7 @@ import kotlinx.coroutines.sync.withLock
 
 typealias CompanionImageLoader = suspend (String) -> ByteArray
 typealias CompanionAvatarPicker = (String?, (String) -> Unit) -> Unit
+typealias CompanionBackgroundPicker = (String?, (NativeAvatarResult) -> Unit) -> Unit
 
 private object CompanionImages {
     val cache = object : LruCache<String, Bitmap>(16 * 1024) {
@@ -92,12 +95,13 @@ internal fun CompanionImage(
     maximumDimension: Int = 1024,
     alignment: Alignment = Alignment.Center,
     cropTargetPixels: Int? = null,
+    cropTargetSize: IntSize? = null,
     onImageSize: ((Int, Int) -> Unit)? = null,
     fallback: @Composable (Boolean) -> Unit,
 ) {
     val currentLoader by rememberUpdatedState(loader)
     val currentImageSize by rememberUpdatedState(onImageSize)
-    val key = "$url@$maximumDimension@$cropTargetPixels"
+    val key = "$url@$maximumDimension@$cropTargetPixels" + (cropTargetSize?.let { "@${it.width}x${it.height}" } ?: "")
     val cached = remember(key) { CompanionImages.cache.get(key)?.asImageBitmap() }
     val result by produceState(ImageResult(cached, cached == null), key) {
         if (cached != null) return@produceState
@@ -110,11 +114,16 @@ internal fun CompanionImage(
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
                 if (bounds.outWidth !in 1..32768 || bounds.outHeight !in 1..32768) null else {
+                    val orientation = try { ByteArrayInputStream(bytes).use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) } }
+                    catch (_: IOException) { ExifInterface.ORIENTATION_NORMAL }
                     val options = BitmapFactory.Options().apply { inSampleSize = 1 }
-                    options.inSampleSize = companionImageSampleSize(bounds.outWidth, bounds.outHeight, maximumDimension, cropTargetPixels)
+                    val rotated = orientation in setOf(ExifInterface.ORIENTATION_TRANSPOSE, ExifInterface.ORIENTATION_ROTATE_90,
+                        ExifInterface.ORIENTATION_TRANSVERSE, ExifInterface.ORIENTATION_ROTATE_270)
+                    options.inSampleSize = cropTargetSize?.let { target ->
+                        companionImageCropSampleSize(if (rotated) bounds.outHeight else bounds.outWidth,
+                            if (rotated) bounds.outWidth else bounds.outHeight, target.width, target.height)
+                    } ?: companionImageSampleSize(bounds.outWidth, bounds.outHeight, maximumDimension, cropTargetPixels)
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)?.let { decoded ->
-                        val orientation = try { ByteArrayInputStream(bytes).use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) } }
-                        catch (_: IOException) { ExifInterface.ORIENTATION_NORMAL }
                         val matrix = Matrix().apply {
                             when (orientation) {
                                 ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> setScale(-1f, 1f)

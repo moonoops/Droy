@@ -231,7 +231,7 @@ fun CompanionChatScreen(
                             modifier = io.droyagent.app.nativeui.ui.messageEntranceModifier(message.itemIdentity() in entering))
                     }
                     item(key = "history-start") {
-                        if (state.hasMore || state.loadingOlder) TextButton(onClick = { followingTail = false; model.loadOlder() },
+                        if (state.hasMore || state.loadingOlder) FilledTonalButton(onClick = { followingTail = false; model.loadOlder() },
                             enabled = !state.loadingOlder, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                             if (state.loadingOlder) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                             else Text(stringResource(R.string.native_companion_earlier))
@@ -239,8 +239,13 @@ fun CompanionChatScreen(
                     }
 
                 }
-                if (state.runtime.ready && !state.loading && state.messages.isEmpty() && pendingVoiceKey == null) Text(stringResource(R.string.native_companion_no_messages),
-                    modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (state.runtime.ready && !state.loading && state.messages.isEmpty() && pendingVoiceKey == null) Surface(
+                    modifier = Modifier.align(Alignment.Center), shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                    Text(stringResource(R.string.native_companion_no_messages),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 if (positioned && !followingTail && state.messages.isNotEmpty()) SmallFloatingActionButton(onClick = {
                     followingTail = true
                     scope.launch { list.animateScrollToItem(0) }
@@ -403,12 +408,7 @@ private fun BoxScope.CompanionChatBackground(raw: String?, loader: CompanionImag
     val background = remember(raw) {
         try {
             raw?.let(::JSONObject)?.let { value ->
-                val url = when (value.optString("type")) {
-                    "preset" -> value.optString("id").takeIf { it in setOf("01", "02", "03", "04", "05") }
-                    ?.let { "/droy/companions/assets/wallpaper-$it.webp" }
-                    "upload" -> value.optString("url").takeIf(String::isNotBlank)
-                    else -> null
-                }
+                val url = companionBackgroundUrl(value)
                 val position = value.optJSONObject("position")
                 url?.let { it to BiasAlignment(
                     ((position?.optDouble("x", 50.0)?.takeIf { x -> x.isFinite() } ?: 50.0).coerceIn(0.0, 100.0).toFloat() - 50f) / 50f,
@@ -416,5 +416,6 @@ private fun BoxScope.CompanionChatBackground(raw: String?, loader: CompanionImag
             }
         } catch (_: JSONException) { null }
     }
-    if (background != null) CompanionImage(background.first, null, loader, Modifier.matchParentSize(), alignment = background.second) { }
+    if (background != null) CompanionBackgroundImage(background.first, loader,
+        Modifier.matchParentSize().testTag("native-companion-chat-background"), alignment = background.second)
 }

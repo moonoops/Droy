@@ -159,7 +159,7 @@ class NativeAppActivity : ComponentActivity() {
                         openAttachment = media::openAttachment,
                         playVoice = media::playVoice,
                         avatarUrl = { owner -> mediaState.avatarFor(owner)?.url },
-                        backgroundUrl = { owner -> mediaState.backgroundFor(owner)?.url },
+                        backgroundResult = { owner -> mediaState.backgroundFor(owner) },
                         consumeBackground = { owner -> mediaState.backgroundFor(owner)?.let { media.consumeBackground(owner, it.id) } },
                         consumeAvatar = { owner -> mediaState.avatarFor(owner)?.let { media.consumeAvatar(owner, it.id) } },
                         conversationChanged = media::onConversationChanged,

@@ -35,7 +35,7 @@ class NativeMediaCoordinator(
     val mediaModel: NativeMediaViewModel = ViewModelProvider(activity)[NativeMediaViewModel::class.java]
     val state = mediaModel.state
     private val avatarCallbacks = mutableMapOf<String, (String) -> Unit>()
-    private val backgroundCallbacks = mutableMapOf<String, (String) -> Unit>()
+    private val backgroundCallbacks = mutableMapOf<String, (NativeAvatarResult) -> Unit>()
     private val picker = activity.activityResultRegistry.register(
         "droy-native-companion-media-v1", activity, ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -70,7 +70,7 @@ class NativeMediaCoordinator(
                 launch {
                     state.collect { snapshot ->
                         snapshot.avatarResults.values.forEach { result -> avatarCallbacks.remove(result.id)?.invoke(result.url) }
-                        snapshot.backgroundResults.values.forEach { result -> backgroundCallbacks.remove(result.id)?.invoke(result.url) }
+                        snapshot.backgroundResults.values.forEach { result -> backgroundCallbacks.remove(result.id)?.invoke(result) }
                     }
                 }
                 launch {
@@ -112,11 +112,11 @@ class NativeMediaCoordinator(
         }
     }
 
-    fun chooseBackground(targetId: String?, onSelectedUrl: (String) -> Unit) {
+    fun chooseBackground(targetId: String?, onSelected: (NativeAvatarResult) -> Unit) {
         if (targetId == null) { mediaModel.report(NativeMediaError.OWNER); return }
         activity.lifecycleScope.launch {
             mediaModel.begin(targetId, NativeMediaKind.BACKGROUND, 1, true)?.let { operation ->
-                backgroundCallbacks[operation.id] = onSelectedUrl
+                backgroundCallbacks[operation.id] = onSelected
                 launch(operation)
             }
         }
