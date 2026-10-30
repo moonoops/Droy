@@ -2,6 +2,8 @@ package io.droyagent.app.nativeui.companion.data
 
 import io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier
 import android.app.Application
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.droyagent.app.NativeRuntimeHost
@@ -223,7 +225,8 @@ class NativeCompanionViewModel(application: Application) : AndroidViewModel(appl
     fun sendSticker(stickerId: String) {
         if (NativeCompanionWriteBarrier.frozen) return
         val id = _state.value.selectedCompanionId ?: return
-        if (_state.value.stickers.none { it.id == stickerId }) { fail("COMPANION_NOT_FOUND"); return }
+        val companion = _state.value.companions.firstOrNull { it.id == id } ?: return
+        if (enabledCompanionStickers(companion.settings, _state.value.stickers).none { it.id == stickerId }) { fail("COMPANION_INVALID_STICKER"); return }
         submit(id, NativeCompanionDraft(stickerId = stickerId))
     }
     fun send() {
@@ -468,11 +471,45 @@ class NativeCompanionViewModel(application: Application) : AndroidViewModel(appl
 
     fun updateProfile(id: String, patch: NativeCompanionProfilePatch) {
         if (NativeCompanionWriteBarrier.frozen) return
-        if (_state.value.profileSaving) return
+        if (_state.value.profileSaving || _state.value.stickerPackImporting) return
         _state.update { it.copy(profileSaving = true, error = null) }
         action {
             try { api.updateProfile(id, patch); refreshRoot() }
             finally { _state.update { it.copy(profileSaving = false) } }
+        }
+    }
+    fun importStickerPack(id: String, uri: Uri) {
+        if (NativeCompanionWriteBarrier.frozen || _state.value.profileSaving || _state.value.stickerPackImporting) return
+        if (_state.value.companions.none { it.id == id }) { fail("COMPANION_NOT_FOUND"); return }
+        action {
+            _state.update { it.copy(stickerPackImporting = true) }
+            try {
+                val (name, bytes) = withContext(Dispatchers.IO) {
+                    if (uri.scheme != "content") throw NativeApiException("COMPANION_STICKER_PACK_INVALID")
+                    val resolver = getApplication<Application>().contentResolver
+                    var filename = "stickers.zip"
+                    resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex >= 0 && !cursor.isNull(nameIndex)) filename = cursor.getString(nameIndex).take(160)
+                            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (sizeIndex >= 0 && !cursor.isNull(sizeIndex) && cursor.getLong(sizeIndex) > MAX_STICKER_PACK_BYTES)
+                                throw NativeApiException("COMPANION_STICKER_PACK_TOO_LARGE")
+                        }
+                    }
+                    val data = resolver.openInputStream(uri)?.use(::readCompanionStickerPack)
+                        ?: throw NativeApiException("COMPANION_STICKER_PACK_INVALID")
+                    filename to data
+                }
+                if (NativeCompanionWriteBarrier.frozen) return@action
+                api.importStickerPack(id, bytes, name)
+                refreshRoot()
+                rootJob?.join()
+            } catch (error: java.io.IOException) {
+                throw NativeApiException("COMPANION_STICKER_PACK_INVALID", error)
+            } catch (error: SecurityException) {
+                throw NativeApiException("COMPANION_STICKER_PACK_INVALID", error)
+            } finally { _state.update { it.copy(stickerPackImporting = false) } }
         }
     }
     fun updateUserProfile(name: String, avatarUrl: String? = null, bio: String? = null) {
@@ -512,11 +549,12 @@ class NativeCompanionViewModel(application: Application) : AndroidViewModel(appl
                     val models = value.getJSONArray("models").objects().map {
                         NativeModel(it.getString("provider"), it.getString("id"), it.getString("name"), it.optString("providerName", it.getString("provider")))
                     }
-                    val stickers = value.getJSONArray("stickers").objects().map { NativeCompanionSticker(it.getString("id"), it.getString("url"), it.optString("label")) }
+                    val stickers = value.getJSONArray("stickers").objects().map(NativeCompanionJson::sticker)
+                    val stickerPacks = value.optJSONArray("stickerPacks").objects().map(NativeCompanionJson::stickerPack)
                     rootLoaded = true
                     val user = NativeCompanionJson.user(value.getJSONObject("userProfile"))
                     _state.update { it.copy(companions = companions, userProfile = if (userRevision == userProfileRevision) user else it.userProfile,
-                        models = models, defaultModel = value.optJSONObject("defaultModel")?.let(NativeCompanionJson::model)?.let { route -> models.firstOrNull { it.provider == route.provider && it.id == route.id } ?: route }, stickers = stickers, loading = it.selectedCompanionId != null && histories[it.selectedCompanionId]?.loaded != true,
+                        models = models, defaultModel = value.optJSONObject("defaultModel")?.let(NativeCompanionJson::model)?.let { route -> models.firstOrNull { it.provider == route.provider && it.id == route.id } ?: route }, stickers = stickers, stickerPacks = stickerPacks, loading = it.selectedCompanionId != null && histories[it.selectedCompanionId]?.loaded != true,
                         draftsByCompanion = companions.associate { profile -> profile.id to draft(profile.id) },
                         error = if (it.error in transientErrors) null else it.error) }
                     publish()

@@ -9,6 +9,7 @@ import { requireMobileSession } from '../auth.mjs';
 import { resolveMobileLocale } from '../locale.mjs';
 import { isQuietTime } from './dialogue.mjs';
 import { stickerCatalog } from './media.mjs';
+import { StickerPackLibrary } from './sticker-packs.mjs';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import { installCompanionMemoryManagement } from './memory-management.mjs';
 import { createCompanionEmbedder } from './embedding.mjs';
@@ -70,6 +71,13 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         const data=await readFile(new URL(path[1],assets));
         res.writeHead(200,{'Content-Type':path[1].endsWith('.webp')?'image/webp':'image/png','Cache-Control':'private, max-age=86400','Content-Length':data.length});res.end(data);return;
       }
+      if(path[0]==='sticker-media'&&path.length===2&&req.method==='GET') {
+        if(!/^[A-Za-z0-9_.:-]{1,160}$/u.test(path[1]))fail('COMPANION_NOT_FOUND');
+        const image=await runtime.stickerLibrary?.read(path[1]);
+        if(!image)fail('COMPANION_NOT_FOUND');
+        res.writeHead(200,{'Content-Type':image.mediaType,'Cache-Control':'private, max-age=86400',
+          'X-Content-Type-Options':'nosniff','Content-Length':image.data.length});res.end(image.data);return;
+      }
       if(!path.length && req.method==='GET') {
         const profiles=await store.profiles(),catalog=await ctx.sessionController.modelCatalog();
         const locale=resolveMobileLocale(ctx);
@@ -78,7 +86,8 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
           companions:profiles.map(profile=>({...localizedProfile(profile,locale),model:profile.model??ctx.agentDefaultModel?.currentSelection(),modelInherited:profile.model==null,avatarUrl:profile.avatar,unread:profile.unreadCount,
             status:runtime.status(profile.id)})),
           settings:await store.getSettings(),userProfile:await store.getUserProfile(),defaultModel:ctx.agentDefaultModel?.currentSelection()??null,models:catalog.groups.flatMap(group=>group.models.map(model=>({...model,provider:group.id,providerName:group.name??group.id}))),
-          stickers:stickerCatalog(locale),
+          stickers:runtime.stickerLibrary?.catalog(locale)??stickerCatalog(locale).map(item=>({...item,packId:'droy-default'})),
+          stickerPacks:runtime.stickerPacks?.()??[{id:'droy-default',name:dialoguePrompts[locale].defaultStickerPack,count:stickerCatalog().length,builtin:true}],
         });
       }
       if(path[0]==='templates'&&path.length===1&&req.method==='GET') {
@@ -135,6 +144,21 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         return send(res,405,{error:'METHOD_NOT_ALLOWED'});
       }
       const id=path[0],profile=await store.getProfile(id);
+      if(path[1]==='sticker-packs'&&path.length===2&&req.method==='POST') {
+        const input=await body(req,28*1024*1024+4096);
+        if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!['name','base64'].includes(key))
+          ||typeof input.base64!=='string'||!input.base64.length||input.base64.length%4
+          ||!/^[A-Za-z0-9+/]*={0,2}$/u.test(input.base64)
+          ||typeof input.name!=='string'||!input.name.trim()||Buffer.byteLength(input.name)>1024)fail('COMPANION_STICKER_PACK_INVALID');
+        if(input.base64.length>Math.ceil(20*1024*1024/3)*4)fail('COMPANION_STICKER_PACK_TOO_LARGE');
+        const bytes=Buffer.from(input.base64,'base64');
+        if(!bytes.length||bytes.toString('base64')!==input.base64)fail('COMPANION_STICKER_PACK_INVALID');
+        if(bytes.length>20*1024*1024)fail('COMPANION_STICKER_PACK_TOO_LARGE');
+        const abort=new AbortController(),cancel=()=>{if(!res.writableEnded)abort.abort();};
+        req.once('aborted',cancel);res.once('close',cancel);
+        try {return send(res,201,{pack:await runtime.importStickerPack(id,bytes,{name:input.name,signal:abort.signal})});}
+        finally {req.off('aborted',cancel);res.off('close',cancel);}
+      }
       if(path[1]==='conversation' && path.length===2 && req.method==='POST') {
         const conversation=await store.updateConversation(id,await body(req));
         runtime.emit(id,'profile');return send(res,200,conversation);
@@ -147,6 +171,10 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
           input.avatar=input.avatarUrl;delete input.avatarUrl;
         }
         if(Object.keys(input).some(key=>!['name','avatar','model','settings','personalityOverride','behaviorStyleOverride','replyStyleOverride','chatBackground'].includes(key))) fail('COMPANION_INVALID_INPUT');
+        if(input.settings?.stickerPackIds!==undefined) {
+          const ids=input.settings.stickerPackIds,known=new Set((runtime.stickerPacks?.()??[{id:'droy-default'}]).map(pack=>pack.id));
+          if(!Array.isArray(ids)||ids.some(value=>!known.has(value)))fail('COMPANION_INVALID_INPUT');
+        }
         const updated=await store.updateProfile(id,input);
         if(input.name!==undefined)await ctx.workspaceRegistry.get(updated.workspaceId)?.setTitle?.(input.name);
         if(input.settings?.memoryEnabled===false) {
@@ -224,6 +252,9 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         :code==='COMPANION_DRAFT_CLOSED'?copy.draftClosed
         :['COMPANION_IMAGE_REQUIRED','INVALID_IMAGE','UNSUPPORTED_IMAGE_TYPE'].includes(code)?copy.invalidImage
         :['IMAGE_TOO_LARGE','IMAGE_TOO_MANY_PIXELS','IMAGE_DIMENSION_TOO_LARGE'].includes(code)?copy.imageTooLarge
+        :code==='COMPANION_STICKER_PACK_INVALID'?copy.stickerPackInvalid
+        :code==='COMPANION_STICKER_PACK_TOO_LARGE'?copy.stickerPackTooLarge
+        :code==='COMPANION_STICKER_PACK_UNSUPPORTED'?copy.stickerPackUnsupported
         :generation?copy.generationFailed:copy.operationFailed;
       ctx.logger.warn('COMPANION_HTTP_FAILED: '+code);
       return send(res,code==='COMPANION_OPERATION_FAILED'?500:/NOT_FOUND/.test(code)?404:/CONFLICT|MANAGED|DRAFT_CLOSED/.test(code)?409:400,{
@@ -242,7 +273,8 @@ export function installCompanions(ctx,bridge) {
       const directory=join(process.env.DSH_HOME,'droy-companions');
       await mkdir(directory,{recursive:true,mode:0o700});
       store=await CompanionStore.open({directory});
-      runtime=new CompanionRuntime({ctx:scope,store,directory,options:{getClock:signal=>bridge.clock(signal),embed:createCompanionEmbedder(bridge),
+      const stickerLibrary=new StickerPackLibrary(join(directory,'sticker-packs'),{builtinCatalog:stickerCatalog});await stickerLibrary.open();
+      runtime=new CompanionRuntime({ctx:scope,store,directory,stickerLibrary,options:{getClock:signal=>bridge.clock(signal),embed:createCompanionEmbedder(bridge),
         requestMemoryPurge:input=>bridge.companionMemory(input)},notify:async value=>{
         const profile=await store.getProfile(value.companionId);
         const clock=await runtime.clock();

@@ -97,13 +97,13 @@ function relatedImpressions(impressions,messages) {
     .map(({item})=>({...item,assertion:'companion_impression'}));
 }
 
-export function sharedContext(state, memories, messages, locale='zh') {
+export function sharedContext(state, memories, messages, locale='zh', stickers) {
   return {summary:state.summary || '',summaryState:state.summaryState??null,
     events:structuredClone(state.events??[]),impressions:relatedImpressions(state.impressions,messages),expressions:state.expressions ?? [],
     jargon:(state.jargon ?? []).filter(item => messages.some(message => message.text?.includes(item.term))),
     memories:memories?.records ?? memories?.items ?? [],messages:messages.map(message => ({
       id:message.id,role:message.role,type:message.type,text:message.text,createdAt:message.createdAt,
-      ...stickerContext(message,locale),
+      ...stickerContext(message,locale,stickers),
       ...(message.replyTo ? {replyTo:message.replyTo}:{}),
       ...(typeof message.quoteReply === 'boolean' ? {quoteReply:message.quoteReply}:{}),
       ...(message.task ? {task:message.task}:{}),

@@ -51,15 +51,15 @@ export function stickerCatalog(locale='zh') {
 }
 
 /** Resolve meaning from the shipped catalog, never from message-supplied metadata. */
-export function stickerContext(message, locale='zh') {
+export function stickerContext(message, locale='zh', catalog=stickerCatalog(locale)) {
   if(typeof message?.stickerId!=='string'||!message.stickerId)return {};
-  const sticker=stickerCatalog(locale).find(item=>item.id===message.stickerId);
+  const sticker=catalog.find(item=>item.id===message.stickerId);
   return {stickerId:message.stickerId,...(sticker?{sticker:{id:sticker.id,label:sticker.label,
     description:sticker.description,tags:sticker.tags}}:{})};
 }
 
-export function stickerText(message, locale='zh') {
-  const {stickerId,sticker}=stickerContext(message,locale);
+export function stickerText(message, locale='zh', catalog=stickerCatalog(locale)) {
+  const {stickerId,sticker}=stickerContext(message,locale,catalog);
   if(!stickerId)return '';
   const known=sticker?`${sticker.label}: ${sticker.description}`
     :locale==='en'?'Meaning unknown; do not infer an emotion.':'含义未知，不要推测情绪。';

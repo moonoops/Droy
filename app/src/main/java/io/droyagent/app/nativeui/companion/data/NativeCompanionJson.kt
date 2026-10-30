@@ -47,6 +47,9 @@ internal object NativeCompanionJson {
     fun user(value: JSONObject) = NativeUserProfile(value.getString("name"), value.getString("avatarUrl"), value.optString("bio", ""))
     fun model(value: JSONObject): NativeModel = NativeModel(value.getString("provider"), value.getString("model"), value.getString("model"),
         reasoningEffort = value.stringOrNull("reasoningEffort"))
+    fun sticker(value: JSONObject) = NativeCompanionSticker(value.getString("id"), value.getString("url"), value.optString("label"),
+        value.optString("packId", "droy-default"))
+    fun stickerPack(value: JSONObject) = NativeCompanionStickerPack(value.getString("id"), value.getString("name"), value.getInt("count"), value.optBoolean("builtin"))
 
     fun profile(value: JSONObject): NativeCompanion {
         val settings = value.getJSONObject("settings")
@@ -61,7 +64,9 @@ internal object NativeCompanionJson {
             modelInherited = value.optBoolean("modelInherited", value.isNull("model")),
             personalityOverride = value.optString("personalityOverride"), settings = NativeCompanionSettings(
                 settings.getBoolean("proactiveEnabled"), settings.getBoolean("memoryEnabled"), settings.getBoolean("allowProfanity"),
-                settings.optJSONObject("quietHours")?.toString()), chatBackgroundJson = value.optJSONObject("chatBackground")?.toString(),
+                settings.optJSONObject("quietHours")?.toString(), settings.optJSONArray("stickerPackIds")?.let { ids ->
+                    (0 until ids.length()).map(ids::getString)
+                }), chatBackgroundJson = value.optJSONObject("chatBackground")?.toString(),
             templateId = value.stringOrNull("templateId"),
             behaviorStyle = value.optString("behaviorStyle"), replyStyle = value.optString("replyStyle"),
             behaviorStyleOverride = value.optString("behaviorStyleOverride"), replyStyleOverride = value.optString("replyStyleOverride"),
@@ -115,7 +120,10 @@ internal object NativeCompanionJson {
         if (value.clearModel) put("model", JSONObject.NULL)
         value.settings?.let { settings -> put("settings", JSONObject().put("proactiveEnabled", settings.proactiveEnabled)
             .put("memoryEnabled", settings.memoryEnabled).put("allowProfanity", settings.allowProfanity)
-            .apply { settings.quietHoursJson?.let { put("quietHours", JSONObject(it)) } }) }
+            .apply {
+                settings.quietHoursJson?.let { put("quietHours", JSONObject(it)) }
+                settings.stickerPackIds?.let { put("stickerPackIds", JSONArray(it)) }
+            }) }
         value.chatBackgroundJson?.let { put("chatBackground", JSONObject(it)) }
     }
 }

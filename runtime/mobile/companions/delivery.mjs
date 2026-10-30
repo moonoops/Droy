@@ -74,7 +74,10 @@ async function publish(input) {
     await checkedDraft(input);
     let saved=await store.getMessage(companionId,message.id);
     if(!saved) {
-      await beforeSend?.({message:structuredClone(message),index,draft:structuredClone(stored)});
+      // A product policy may explicitly omit an obsolete, unpublished part.
+      // Other callback failures still stop delivery and preserve recovery.
+      const allowed=await beforeSend?.({message:structuredClone(message),index,draft:structuredClone(stored)});
+      if(allowed===false)continue;
       await checkedDraft(input);
       saved=await store.appendMessage(companionId,{...message,createdAt:new Date().toISOString()});
       newMessageIds.push(saved.id);

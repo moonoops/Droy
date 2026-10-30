@@ -119,6 +119,9 @@ fun CompanionChatScreen(
     }
     val originals = remember(state.messages) { state.messages.associateBy { it.id } }
     val stickers = remember(state.stickers) { state.stickers.associateBy { it.id } }
+    val enabledStickers = remember(companion.settings.stickerPackIds, state.stickers) {
+        enabledCompanionStickers(companion.settings, state.stickers)
+    }
     val readingCovered by rememberUpdatedState(transcriptText != null || imageUrl != null || sheet != null || deleteId != null ||
         menuId?.let(originals::containsKey) == true || taskId?.let(originals::get)?.task != null)
     val active = state.status.chatExecution?.let { !it.quiescent }
@@ -300,13 +303,14 @@ fun CompanionChatScreen(
             DroyMenuActionRow(R.drawable.native_companion_attach_file, stringResource(R.string.native_share_file),
                 enabled = onChooseAttachments != null && state.runtime.ready,
                 modifier = Modifier.testTag("native-companion-choose-attachments")) { sheet = null; onChooseAttachments?.invoke() }
-            if (state.stickers.isNotEmpty()) {
+            if (enabledStickers.isNotEmpty()) {
                 Text(stringResource(R.string.native_companion_stickers), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(8.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
-                    items(state.stickers, key = { it.id }) { sticker ->
+                    items(enabledStickers, key = { it.id }) { sticker ->
                         FilledTonalButton(onClick = { model.sendSticker(sticker.id); sheet = null },
                             enabled = state.runtime.ready && !state.sending && !state.stopRequested,
-                            contentPadding = PaddingValues(0.dp), shape = MaterialTheme.shapes.medium) {
+                            contentPadding = PaddingValues(0.dp), shape = MaterialTheme.shapes.medium,
+                            modifier = Modifier.testTag("native-companion-send-sticker:${sticker.id}")) {
                             CompanionImage(sticker.url, sticker.label.ifBlank { stringResource(R.string.native_companion_stickers) },
                                 imageLoader, Modifier.size(80.dp)) { loading ->
                                 if (loading) CircularProgressIndicator(Modifier.size(20.dp)) else DroyIcon(R.drawable.native_companion_sentiment_satisfied, null)
@@ -314,6 +318,9 @@ fun CompanionChatScreen(
                         }
                     }
                 }
+            } else {
+                Text(stringResource(R.string.native_companion_sticker_packs_none_enabled),
+                    style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(8.dp))
             }
             if (active || state.stopRequested) DroyMenuActionRow(R.drawable.native_ui_stop,
                 stringResource(if (state.stopRequested) R.string.native_companion_stopping else R.string.native_companion_stop),

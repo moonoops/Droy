@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_companion_sticker_packs">Sticker packs</string>
+    <string name="native_companion_sticker_packs_scope">Choose which packs this companion can use. Packs are shared, while each companion has its own selection.</string>
+    <string name="native_companion_sticker_pack_count">%1$s · %2$d stickers</string>
+    <string name="native_companion_sticker_packs_empty">No sticker packs yet. Import a ZIP to add one.</string>
+    <string name="native_companion_sticker_packs_none_selected">This companion will not send stickers. Existing sticker messages stay available.</string>
+    <string name="native_companion_sticker_packs_none_enabled">No sticker packs are enabled. Choose packs in the companion profile.</string>
+    <string name="native_companion_sticker_packs_import">Import ZIP pack</string>
+    <string name="native_companion_sticker_packs_importing">Importing…</string>
+    <string name="native_companion_sticker_packs_import_scope">Import a dsh-meme pack or a ZIP of static PNG, JPEG or WebP images, up to 20 MB. Import adds it to the shared library and immediately enables it for this companion. Animated images are not supported.</string>
+    <string name="native_companion_sticker_packs_save_before_import">Save your selection before importing a pack.</string>
+    <string name="native_companion_sticker_pack_invalid">This pack could not be imported. Choose a valid dsh-meme pack or a ZIP containing static images.</string>
+    <string name="native_companion_sticker_pack_too_large">This pack exceeds the import limits. Use a ZIP up to 20 MB, with up to 500 images, 8 MB per image and 64 MB after extraction.</string>
+    <string name="native_companion_sticker_pack_unsupported">This pack contains an unsupported image. Use static PNG, JPEG or WebP images.</string>
+</resources>

@@ -44,6 +44,7 @@ data class NativeCompanionMessage(
 data class NativeCompanionSettings(
     val proactiveEnabled: Boolean = false, val memoryEnabled: Boolean = true,
     val allowProfanity: Boolean = true, val quietHoursJson: String? = null,
+    val stickerPackIds: List<String>? = null,
 )
 
 data class NativeCompanion(
@@ -64,7 +65,13 @@ data class NativeCompanion(
 
 )
 
-data class NativeCompanionSticker(val id: String, val url: String, val label: String = "")
+data class NativeCompanionSticker(val id: String, val url: String, val label: String = "", val packId: String = "droy-default")
+data class NativeCompanionStickerPack(val id: String, val name: String, val count: Int, val builtin: Boolean = false)
+
+internal fun enabledCompanionStickers(settings: NativeCompanionSettings, stickers: List<NativeCompanionSticker>): List<NativeCompanionSticker> {
+    val enabled = settings.stickerPackIds?.toSet() ?: setOf("droy-default")
+    return stickers.filter { it.packId in enabled }
+}
 
 data class NativeCompanionDraft(
     val text: String = "", val attachments: List<NativeCompanionAttachment> = emptyList(),
@@ -96,6 +103,8 @@ data class NativeCompanionState(
     val profileSaving: Boolean = false, val models: List<NativeModel> = emptyList(),
     val defaultModel: NativeModel? = null,
     val stickers: List<NativeCompanionSticker> = emptyList(),
+    val stickerPacks: List<NativeCompanionStickerPack> = emptyList(),
+    val stickerPackImporting: Boolean = false,
     val readingAnchor: NativeCompanionReadingAnchor? = null,
     val draftsByCompanion: Map<String, NativeCompanionDraft> = emptyMap(),
 ) {

@@ -49,8 +49,8 @@ const memorySourceIds=(id,records)=>records.flatMap(record=>[
 ]);
 
 export class CompanionRuntime {
-  constructor({ctx,store,directory,options = {},notify = () => {}}) {
-    this.ctx = ctx; this.store = store; this.directory = directory; this.notify = notify;
+  constructor({ctx,store,directory,stickerLibrary,options = {},notify = () => {}}) {
+    this.ctx = ctx; this.store = store; this.directory = directory; this.notify = notify; this.stickerLibrary=stickerLibrary;
     this.options = {historyMessages:80,learningMessages:6,
       proactiveIntervalMs:1800000,proactiveIdleMs:900000,...options};
     this.owners = new Map(); this.live = new Map(); this.memories = new Map(); this.states = new Map();
@@ -62,7 +62,7 @@ export class CompanionRuntime {
     this.contextSources=new Map();this.learningSignals=new Map();this.turnMemories=new Map();this.turnProfiles=new Map();this.plannerRevisions=new WeakMap();
     this.learner=new CompanionLearning({store,memoryFor:id=>this.memory(id),generate:(...args)=>this.generate(...args),
       getProfile:id=>this.profileForUse(id,{requireModel:false}),
-      getLocale:()=>this.locale(),options:{learningUserMessages:this.options.learningMessages,factLearningUserMessages:this.options.factLearningMessages??1}});
+      getLocale:()=>this.locale(),getStickers:()=>this.catalog(),options:{learningUserMessages:this.options.learningMessages,factLearningUserMessages:this.options.factLearningMessages??1}});
     this.maintenance=installCompanionMaintenance(this);
   }
   locale() { return resolveMobileLocale(this.ctx); }
@@ -316,8 +316,8 @@ export class CompanionRuntime {
     }
     const memories={items:profile.settings.memoryEnabled?recalled.items:[]};
     const [clock,userProfile]=await Promise.all([this.clock(signal),this.store.getUserProfile()]);
-    const result={...sharedContext(state,memories,messages,this.locale()),...clock,
-      userProfile:{name:userProfile.name,bio:userProfile.bio??''},availableStickers:stickerCatalog(this.locale())};
+    const result={...sharedContext(state,memories,messages,this.locale(),this.catalog()),...clock,
+      userProfile:{name:userProfile.name,bio:userProfile.bio??''},availableStickers:this.stickers(profile).slice(0,12)};
     if(owner) {
       const sourceContext={contextSourceIds:[...new Set([...messages.map(item=>item.id),...(this.state(id).proactiveIntent?.sourceIds??[]),
         ...(this.contextSources.get(owner.sessionId)?.contextSourceIds??[]).filter(source=>source.startsWith('memory:')),
@@ -520,8 +520,8 @@ export class CompanionRuntime {
       if (owner.kind === 'work') fail('COMPANION_NESTED_WORK');
       return this.startWork(owner.companionId,args);
     });
-    register('companion_stickers','stickersDescription',{},()=>({items:this.stickers()}));
-    register('companion_emoji','emojiDescription',{msg_id:{type:'string'},quoteReply:{type:'boolean'}},async(args,exec)=>{
+    register('companion_stickers','stickersDescription',{query:{type:'string'},tag:{type:'string'}},async args=>({items:this.stickers(await this.store.getProfile(owner.companionId),args)}));
+    register('companion_emoji','emojiDescription',{msg_id:{type:'string'},quoteReply:{type:'boolean'},query:{type:'string'},tag:{type:'string'}},async(args,exec)=>{
       const proactive=!!this.state(owner.companionId).proactiveIntent;
       const result=await this.sendEmoji(owner,args,exec.signal);if(proactive)exec.concludeTurn();return result;
     });
@@ -544,6 +544,7 @@ export class CompanionRuntime {
     const {clientId,text='',attachments=[],voice,replyTo,stickerId} = input;
     if (!text.trim() && !attachments.length && !voice && !stickerId) fail('COMPANION_EMPTY_MESSAGE');
     const state=this.state(id),existing=clientId ? await this.store.getMessage(id,clientId):null;
+    if(stickerId&&!existing&&!this.stickers(profile,{all:true}).some(item=>item.id===stickerId))fail('COMPANION_INVALID_STICKER');
     if(this.memoryManagement.has(id))fail('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS');
     const saved=await this.store.appendMessage(id,{...(clientId?{id:clientId,clientId}:{}),role:'user',
       type:voice?'voice':stickerId?'sticker':attachments[0]?.mediaType?.startsWith('image/')?'image':attachments.length?'file':'text',
@@ -617,7 +618,7 @@ export class CompanionRuntime {
     let agent;
     try {agent=await this.agent(id);}catch(error){if(cancelRevision===state.chatCancelRevision)state.pending.unshift(...pending);throw error;}
     if(this.closed||cancelRevision!==state.chatCancelRevision)return;
-    const content=pending.filter(item=>item.role==='user').map(item=>({id:item.id,text:item.text,type:item.type,voice:item.voice,attachments:item.attachments,replyTo:item.replyTo,...stickerContext(item,this.locale())}));
+    const content=pending.filter(item=>item.role==='user').map(item=>({id:item.id,text:item.text,type:item.type,voice:item.voice,attachments:item.attachments,replyTo:item.replyTo,...stickerContext(item,this.locale(),this.catalog())}));
     const taskResults=pending.filter(item=>item.role==='assistant'&&item.type==='task').map(item=>({taskId:item.id,...item.task}));
     const input=createUserMessage({source:{kind:'user'},content:[
       {type:'text',text:JSON.stringify({userMessages:content.map(item=>({...item,attachments:item.attachments?.map(upload=>({id:upload.id,name:upload.name,mediaType:upload.mediaType}))})),
@@ -660,7 +661,7 @@ export class CompanionRuntime {
       }
     }
     const request=buildReplyerRequest({profile,locale,context,args,expressions:expressions.prompt,kind:owner.kind,
-      options:{...options,enableVisualMessage:visual}});
+      options:{...options,enableVisualMessage:visual,stickerCatalog:this.catalog()}});
     const text=companionReplyText(await this.generate(profile,request.system,null,{messages:request.messages.map(item=>({...item,
       content:typeof item.content==='string'?[{type:'text',text:item.content}]:item.content})),signal:combined,sessionId:owner.sessionId,preparedCall}));
     combined.throwIfAborted();
@@ -681,8 +682,8 @@ export class CompanionRuntime {
       companionId:id,attachmentId,signal:combined})));
     const parts=[{type:'text',text:text.trim(),quoteReply:args.quoteReply===true,
       ...this.contextSources.get(owner.sessionId),...(replyTo?{replyTo}:{})}];
-    const stickerId=args.stickerId??(options.useNewSendLogic&&args.attach_emoji?this.stickers().find(item=>item.emoji_id===args.attach_emoji)?.id:undefined);
-    if(stickerId&&stickerCatalog().some(item=>item.id===stickerId)) {
+    const stickerId=args.stickerId??(options.useNewSendLogic&&args.attach_emoji?this.stickers(profile,{all:true}).find(item=>item.emoji_id===args.attach_emoji)?.id:undefined);
+    if(stickerId&&this.stickers(await this.store.getProfile(id),{all:true}).some(item=>item.id===stickerId)) {
       parts.push({type:'sticker',text:'',stickerId,...this.contextSources.get(owner.sessionId)});
     }
     if(images.length) {
@@ -690,22 +691,51 @@ export class CompanionRuntime {
     }
     const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts,proactive:state.proactiveIntent});
     const delivered=await this.publish(id,draft,combined),ids=delivered.messageIds;
-    if(delivered.suppressed){state.phase='idle';this.emit(id,'status');return {delivered:false,reason:'proactive_no_longer_appropriate'};}
+    if(delivered.suppressed){state.phase='idle';this.emit(id,'status');return {delivered:false,reason:delivered.reason??'proactive_no_longer_appropriate'};}
     state.delivered++;state.turnAction='reply';state.replyAbort=null;state.phase='idle';delete state.error;this.emit(id,'status');
     let notification;
     try {notification=await this.notify({companionId:id,name:localizedProfile(profile,locale).name,text,messageId:ids[0]});}
     catch(error){notification={status:'failed'};this.ctx.logger.warn('COMPANION_NOTICE_FAILED: '+(error.code||error.name));}
-    return {delivered:true,messageIds:ids,text,parts:parts.map((part,index)=>({messageId:ids[index],type:part.type,text:part.text,
+    return {delivered:true,messageIds:ids,text,parts:draft.parts.filter(part=>ids.includes(part.id)).map(part=>({messageId:part.id,type:part.type,text:part.text,
       ...(part.stickerId?{stickerId:part.stickerId}:{})})),notification};
     } finally {finish();}
   }
-  stickers() { return stickerCatalog(this.locale()).map((item,index)=>({emoji_id:index+1,...item})); }
+  catalog() { return this.stickerLibrary?.catalog(this.locale())??stickerCatalog(this.locale()).map(item=>({...item,packId:'droy-default'})); }
+  stickerPacks() { return this.stickerLibrary?.packs(this.locale())??[{id:'droy-default',name:this.copy().defaultStickerPack,count:stickerCatalog().length,builtin:true}]; }
+  stickers(profile,{query='',tag='',all=false}={}) {
+    const packIds=profile?.settings?.stickerPackIds??['droy-default'];
+    const enabled=this.catalog().filter(item=>packIds.includes(item.packId)).map((item,index)=>({emoji_id:index+1,...item}));
+    if(all)return enabled;
+    if(typeof query!=='string'||query.length>2000||typeof tag!=='string'||tag.length>80)fail('COMPANION_INVALID_INPUT');
+    if(this.stickerLibrary&&(query.trim()||tag.trim())) {
+      const matches=new Set(this.stickerLibrary.search(this.locale(),{packIds,query:query.trim(),tag:tag.trim(),limit:12}).map(item=>item.id));
+      return enabled.filter(item=>matches.has(item.id)).slice(0,12);
+    }
+    return enabled.slice(0,12);
+  }
+  async importStickerPack(id,bytes,{name,signal}={}) {
+    return this.maintenance.run('sticker-import',async()=>{
+      if(this.closed)fail('COMPANION_CLOSED');
+      if(!this.stickerLibrary)fail('COMPANION_STICKER_PACK_UNSUPPORTED');
+      const combined=signal?AbortSignal.any([signal,this.lifetime.signal]):this.lifetime.signal;
+      combined.throwIfAborted();await this.store.getProfile(id);
+      const pack=await this.stickerLibrary.importZip(bytes,{name,signal:combined});
+      combined.throwIfAborted();
+      const current=await this.store.getProfile(id);
+      await this.store.updateProfile(id,{settings:{stickerPackIds:[...new Set([...(current.settings.stickerPackIds??['droy-default']),pack.id])]}});
+      this.emit(id,'profile');return pack;
+    },id);
+  }
   async sendEmoji(owner,args,signal) {
     if(owner.kind==='work')fail('COMPANION_TOOL_NOT_ALLOWED');
     const finish=this.beginChat(owner.companionId);
     try {
     const id=owner.companionId,state=this.state(id),revision=state.revision,profile=await this.profileForUse(id),locale=this.locale();
-    const context=await this.context(id,owner,signal),items=this.stickers();
+    const context=await this.context(id,owner,signal);
+    const enabled=this.stickers(profile,{all:true});
+    const query=args.query??(enabled.length>12?context.messages.findLast(item=>item.role==='user'&&item.text?.trim())?.text.slice(0,2000)??'':'');
+    const items=this.stickers(profile,{query,tag:args.tag??''}).map((item,index)=>({...item,emoji_id:index+1}));
+    if(!items.length)return {delivered:false,reason:enabled.length?'no_matching_sticker':'no_available_stickers',message:this.copy().noStickers};
     const target=context.messages.find(item=>item.id===args.msg_id);
     if(args.msg_id&&!target)fail('COMPANION_REPLY_SOURCE_REQUIRED');
     if(args.quoteReply!==undefined&&typeof args.quoteReply!=='boolean')fail('COMPANION_INVALID_INPUT');
@@ -717,11 +747,13 @@ export class CompanionRuntime {
     const selection=JSON.parse(raw.trim().replace(/^```(?:json)?\s*/u,'').replace(/\s*```$/u,''));
     const selected=items.find(item=>item.emoji_id===selection.emoji_index);
     if(!selected)fail('COMPANION_INVALID_STICKER');
+    if(!this.stickers(await this.store.getProfile(id),{all:true}).some(item=>item.id===selected.id))
+      return {delivered:false,reason:'sticker_no_longer_available',message:this.copy().noStickers};
     if(revision!==state.revision)fail('COMPANION_REPLY_SUPERSEDED');
     const parts=[{type:'sticker',text:'',stickerId:selected.id,quoteReply:args.quoteReply===true,...this.contextSources.get(owner.sessionId),...(args.msg_id?{replyTo:args.msg_id}:{})}];
     const draft=await prepareReply({store:this.store,companionId:id,sourceMessageIds:state.inFlightIds??[],parts,proactive:state.proactiveIntent});
     const delivered=await this.publish(id,draft,signal);
-    if(delivered.suppressed){state.phase='idle';this.emit(id,'status');return {delivered:false,reason:'proactive_no_longer_appropriate'};}
+    if(delivered.suppressed){state.phase='idle';this.emit(id,'status');return {delivered:false,reason:delivered.reason??'proactive_no_longer_appropriate'};}
     state.turnAction='emoji';state.delivered++;this.emit(id,'status');
     return {delivered:true,messageIds:delivered.messageIds,stickerId:selected.id,description:selected.description};
     } finally {finish();}
@@ -759,17 +791,22 @@ export class CompanionRuntime {
     try {
       let result;
       try {result=await publishReply({store:this.store,companionId:id,draft,signal,onSent:()=>this.emit(id,'message'),
-        beforeSend:draft.proactive?async()=>{
-          const profile=await this.store.getProfile(id),clock=await this.clock(signal),saved=await this.store.getState(id);
+        beforeSend:async({message})=>{
+          const profile=await this.store.getProfile(id);
+          if(message.stickerId&&!this.stickers(profile,{all:true}).some(item=>item.id===message.stickerId))return false;
+          if(!draft.proactive)return;
+          const clock=await this.clock(signal),saved=await this.store.getState(id);
           if(!profile.settings.proactiveEnabled||isQuietTime(profile.settings.quietHours,new Date(clock.currentTime),clock.timeZone)
             ||this.state(id).pending.length||Date.parse(saved.lastUserAt??'')>Date.parse(draft.createdAt))fail('COMPANION_PROACTIVE_SUPERSEDED');
-        }:undefined});}
+        }});}
       catch(error) {
         if(error.code!=='COMPANION_PROACTIVE_SUPERSEDED')throw error;
         await this.store.completeInputs(id,draft.sourceMessageIds,{draftId:draft.id,memoryRevision:draft.memoryRevision});
         this.state(id).proactiveIntent=null;
         return {messageIds:[],newMessageIds:[],suppressed:true};
       }
+      if(!result.messageIds.length&&draft.parts.some(part=>part.type==='sticker'))
+        return {...result,suppressed:true,reason:'sticker_no_longer_available'};
       if(result.newMessageIds?.length)this.state(id).lastReplyAt=Date.now();
       if(draft.proactive)this.state(id).proactiveIntent=null;
       return result;

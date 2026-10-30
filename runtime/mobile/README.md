@@ -68,3 +68,7 @@ The [capability catalogue](assets/droy-capabilities.json) owns phone tool schema
 - Schedules depend on runtime availability. Third-party native modules must be compatible with Android.
 
 Feature usage: [Android Use](../../android-use/README.md), [voice](../voice/README.md), [media input](../media-input/README.md), [memory](../memory/README.md), [notifications](NOTIFICATIONS.md), [companions](PETS.md).
+
+Native companion chats support a shared static sticker library with per-companion
+pack selection and manual ZIP import. See [sticker packs](companions/STICKERS.md)
+for supported formats, limits and data behavior.

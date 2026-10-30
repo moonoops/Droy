@@ -54,6 +54,7 @@ fun CompanionProfileScreen(
         return
     }
     var name by rememberSaveable(companionId) { mutableStateOf(companion.name) }
+    val profileBusy = state.profileSaving || state.stickerPackImporting
     var nameEdited by rememberSaveable(companionId) { mutableStateOf(false) }
     var avatar by rememberSaveable(companionId) { mutableStateOf(companion.avatarUrl) }
     var avatarEdited by rememberSaveable(companionId) { mutableStateOf(false) }
@@ -68,7 +69,7 @@ fun CompanionProfileScreen(
     val dirty = name.trim() != companion.name || avatar != companion.avatarUrl
     val imeVisible = WindowInsets.isImeVisible
     val focus = LocalFocusManager.current
-    fun requestBack() { if (imeVisible) { focus.clearFocus(); keyboard?.hide() } else if (dirty && !state.profileSaving) discard = true else onBack() }
+    fun requestBack() { if (imeVisible) { focus.clearFocus(); keyboard?.hide() } else if (dirty && !profileBusy) discard = true else onBack() }
     BackHandler { requestBack() }
     LaunchedEffect(companion.name) {
         if (!nameEdited) name = companion.name
@@ -89,20 +90,20 @@ fun CompanionProfileScreen(
         if (submittedSheet != null && !state.profileSaving) {
             if (state.error == null) {
                 sheet = if (submittedSheet == "background") "interaction" else null
-                if (submittedSheet == "interaction") editorStates.removeState("interaction")
+                if (submittedSheet in setOf("interaction", "sticker-packs")) editorStates.removeState(submittedSheet!!)
             }
             submittedSheet = null
         }
     }
     val motion = io.droyagent.app.nativeui.ui.droyNavigationMotion()
-    AnimatedContent(targetState = sheet?.takeIf { it in setOf("personality", "interaction", "background") } ?: "profile",
+    AnimatedContent(targetState = sheet?.takeIf { it in setOf("personality", "interaction", "background", "sticker-packs") } ?: "profile",
         transitionSpec = {
             val forward = targetState != "profile" && !(initialState == "background" && targetState == "interaction")
             ((if (forward) motion.enter else motion.popEnter) togetherWith
                 (if (forward) motion.exit else motion.popExit)).using(null)
         }, label = "companion-profile-pages") { page ->
     if (page == "personality") {
-        CompanionPersonalityPage(companion.personalityOverride, companion.presetPersonality.ifBlank { companion.personality }, state.runtime.ready && !state.profileSaving,
+        CompanionPersonalityPage(companion.personalityOverride, companion.presetPersonality.ifBlank { companion.personality }, state.runtime.ready && !profileBusy,
             { identity, behavior, reply -> submittedSheet = "personality"; model.updateProfile(companionId, NativeCompanionProfilePatch(personalityOverride = identity, behaviorStyleOverride = behavior, replyStyleOverride = reply)) }, { sheet = null },
             errorContent = { CompanionError(state.error, model::dismissError, modifier = Modifier.padding(horizontal = 20.dp)) },
             initialBehavior = companion.behaviorStyleOverride, initialReply = companion.replyStyleOverride,
@@ -110,13 +111,20 @@ fun CompanionProfileScreen(
             customBehavior = companion.customBehavior, customReply = companion.customReply)
     } else if (page == "interaction") {
         editorStates.SaveableStateProvider("interaction") {
-            CompanionInteractionPage(companion.settings, state.runtime.ready && !state.profileSaving,
+            CompanionInteractionPage(companion.settings, state.runtime.ready && !profileBusy,
                 { submittedSheet = "interaction"; model.updateProfile(companionId, NativeCompanionProfilePatch(settings = it)) },
                 { sheet = null; editorStates.removeState("interaction") }, { sheet = "background" },
                 errorContent = { CompanionError(state.error, model::dismissError, modifier = Modifier.padding(horizontal = 20.dp)) })
         }
+    } else if (page == "sticker-packs") {
+        editorStates.SaveableStateProvider("sticker-packs") {
+            CompanionStickerPacksPage(companion, state, model,
+                onSave = { ids -> submittedSheet = "sticker-packs"; model.updateProfile(companionId,
+                    NativeCompanionProfilePatch(settings = companion.settings.copy(stickerPackIds = ids))) },
+                onClose = { sheet = null; editorStates.removeState("sticker-packs") })
+        }
     } else if (page == "background") {
-        CompanionBackgroundPage(companion.chatBackgroundJson, imageLoader, state.runtime.ready && !state.profileSaving,
+        CompanionBackgroundPage(companion.chatBackgroundJson, imageLoader, state.runtime.ready && !profileBusy,
             onChooseBackground?.let { choose -> { selected -> choose(companionId, selected) } },
             { submittedSheet = "background"; model.updateProfile(companionId, NativeCompanionProfilePatch(chatBackgroundJson = it)) }, { sheet = "interaction" },
             incomingSelection = uploadedBackgroundUrl?.let { JSONObject().put("type", "upload").put("url", it).put("position", JSONObject().put("x", 50).put("y", 50)).toString() },
@@ -126,7 +134,7 @@ fun CompanionProfileScreen(
     Scaffold(modifier.fillMaxSize().testTag("native-companion-profile"), containerColor = MaterialTheme.colorScheme.surface,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = { CompanionTopBar(stringResource(R.string.native_companion_profile), ::requestBack) {
-            ProfileSaveBar(state.profileSaving, enabled = state.runtime.ready && dirty && name.isNotBlank() && name.codePointCount(0, name.length) <= 80,
+            ProfileSaveBar(profileBusy, enabled = state.runtime.ready && dirty && name.isNotBlank() && name.codePointCount(0, name.length) <= 80,
                 tag = "native-companion-profile-save") {
                 model.updateProfile(companionId, NativeCompanionProfilePatch(
                     name = name.trim().takeIf { it != companion.name }, avatarUrl = avatar.takeIf { it != companion.avatarUrl }))
@@ -140,16 +148,16 @@ fun CompanionProfileScreen(
                     onClick = { avatarPreview = true },
                     modifier = Modifier.testTag("native-companion-avatar-edit"))
                 FilledTonalButton(onClick = { onChooseAvatar?.invoke(companionId) { avatar = it; avatarEdited = true } },
-                    enabled = !state.profileSaving && onChooseAvatar != null && state.runtime.ready,
+                    enabled = !profileBusy && onChooseAvatar != null && state.runtime.ready,
                     modifier = Modifier.heightIn(min = 48.dp)) {
                     DroyIcon(R.drawable.native_ui_photo_camera, null)
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.native_companion_change_avatar))
                 }
             }
-            ProfileNameField(name, { name = it; nameEdited = true }, state.profileSaving || !state.runtime.ready, nameEdited, "native-companion-name")
+            ProfileNameField(name, { name = it; nameEdited = true }, profileBusy || !state.runtime.ready, nameEdited, "native-companion-name")
             DroySettingsLinkGroup(title = stringResource(R.string.native_companion_settings),
-                enabled = !state.profileSaving && state.runtime.ready, items = listOf(
+                enabled = !profileBusy && state.runtime.ready, items = listOf(
                     DroySettingsLink(stringResource(R.string.native_companion_personality), R.drawable.native_companion_person,
                         "native-companion-personality") { keyboard?.hide(); sheet = "personality" },
                     DroySettingsLink(stringResource(R.string.native_companion_model), R.drawable.native_settings_hub,
@@ -157,8 +165,10 @@ fun CompanionProfileScreen(
                             else companion.model?.name ?: stringResource(R.string.native_companion_default_model)) { keyboard?.hide(); sheet = "model" },
                     DroySettingsLink(stringResource(R.string.native_companion_interaction), R.drawable.native_settings_tune,
                         "native-companion-interaction") { keyboard?.hide(); sheet = "interaction" },
+                    DroySettingsLink(stringResource(R.string.native_companion_sticker_packs), R.drawable.native_companion_sentiment_satisfied,
+                        "native-companion-sticker-packs") { keyboard?.hide(); sheet = "sticker-packs" },
                 ))
-            onDeleteCompanion?.let { delete -> TextButton(onClick = { deleteConfirm = true }, enabled = !state.profileSaving,
+            onDeleteCompanion?.let { delete -> TextButton(onClick = { deleteConfirm = true }, enabled = !profileBusy,
                 modifier = Modifier.fillMaxWidth().testTag("native-companion-delete-profile")) { Text(stringResource(R.string.native_companion_delete_profile), color = MaterialTheme.colorScheme.error) } }
             CompanionError(state.error, model::dismissError)
         }

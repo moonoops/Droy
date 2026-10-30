@@ -80,16 +80,16 @@ function safeText(value, maximum = 16384) {
   if (credential.test(value)) fail('COMPANION_MEMORY_CREDENTIAL');
   return value.trim();
 }
-function project(message,locale='zh') {
-  return { id: message.id, role: message.role, type: message.type, text: message.text || message.transcript || '', createdAt: message.createdAt, ...stickerContext(message,locale),
+function project(message,locale='zh',stickers) {
+  return { id: message.id, role: message.role, type: message.type, text: message.text || message.transcript || '', createdAt: message.createdAt, ...stickerContext(message,locale,stickers),
     ...(message.replyTo ? { replyTo: message.replyTo } : {}), ...(message.task ? { task: message.task } : {}),
     ...(typeof message.quoteReply === 'boolean' ? { quoteReply: message.quoteReply } : {}),
     ...(message.type === 'voice' ? { sourceType: 'voice_transcript' } : {}),
     ...(message.attachments?.length ? { attachments: message.attachments.map(item => ({ id:item.id,name: item.name, mediaType: item.mediaType })) } : {}) };
 }
-function activeMessages(messages, state,locale='zh') {
+function activeMessages(messages, state,locale='zh',stickers) {
   const excluded = new Set(state.forgottenMessageIds ?? []);
-  return messages.filter(message => !message.contextExcluded && !excluded.has(message.id) && message.status !== 'failed').map(message=>project(message,locale));
+  return messages.filter(message => !message.contextExcluded && !excluded.has(message.id) && message.status !== 'failed').map(message=>project(message,locale,stickers));
 }
 function entryId(category, entry) {
   return entry.id ?? 'learned:' + category + ':' + fingerprint(learnedFields[category].map(field => entry[field])).slice(0,32);
@@ -251,10 +251,10 @@ export function rankMemoryCandidates(records,messages,{limit=12}={}) {
 }
 
 export class CompanionLearning {
-  constructor({store,memoryFor,generate,getProfile=id=>store.getProfile(id),getLocale=()=> 'zh',options={}}) {
+  constructor({store,memoryFor,generate,getProfile=id=>store.getProfile(id),getLocale=()=> 'zh',getStickers=()=>undefined,options={}}) {
     if (!store || typeof memoryFor !== 'function' || typeof generate !== 'function' || typeof getProfile !== 'function') fail('COMPANION_LEARNING_CONFIGURATION');
     this.store=store; this.memoryFor=memoryFor; this.generate=generate; this.getLocale=getLocale;
-    this.getProfile=getProfile;
+    this.getProfile=getProfile; this.getStickers=getStickers;
     this.options={...defaults,...options}; this.running=new Map(); this.transientContexts=new Map();
     for (const key of Object.keys(defaults)) if (key!=='semanticRecall'&&(!Number.isSafeInteger(this.options[key]) || this.options[key]<1)) fail('COMPANION_LEARNING_CONFIGURATION');
     if(typeof this.options.semanticRecall!=='boolean')fail('COMPANION_LEARNING_CONFIGURATION');
@@ -461,7 +461,7 @@ export class CompanionLearning {
       for(let batch=0;learn&&batch<this.options.maxBatches;batch++) {
         const state=await this.guard(id,expected,signal),after=baselineCursor(state,state.factLearningCursor ?? state.learningCursor),page=await this.page(id,after);
         if(!page.messages.length)break;
-        const messages=activeMessages(page.messages,state,this.getLocale()),users=messages.filter(message=>message.role==='user'&&message.text.trim());
+        const messages=activeMessages(page.messages,state,this.getLocale(),this.getStickers()),users=messages.filter(message=>message.role==='user'&&message.text.trim());
         if(users.length&&users.length<this.options.factLearningUserMessages&&!force&&!page.hasMore)break;
         if(users.length) {
           const data=await this.extract(id,profile,messages,state,{locale,expected,signal});
@@ -539,7 +539,7 @@ export class CompanionLearning {
         for(let batch=0;learn&&batch<this.options.maxBatches;batch++) {
           const state=await this.guard(id,expected,signal),after=baselineCursor(state,state.learningCursor),page=await this.page(id,after);
           if(!page.messages.length)break;
-          const messages=activeMessages(page.messages,state,this.getLocale()),users=messages.filter(message=>message.role==='user'&&message.text.trim());
+          const messages=activeMessages(page.messages,state,this.getLocale(),this.getStickers()),users=messages.filter(message=>message.role==='user'&&message.text.trim());
           if(users.length&&users.length<this.options.learningUserMessages&&!force&&!page.hasMore)break;
           if(users.length) {
             const data=extracted.get(after+'|'+page.nextAfter) ?? await this.extract(id,profile,messages,state,{locale,expected,signal,scope:'language'});
@@ -572,7 +572,7 @@ export class CompanionLearning {
         let page=await this.page(id,after);
         if(page.messages.length<this.options.compactAfter&&!page.hasMore)break;
         if(!page.hasMore)page=await this.store.listMessages(id,{after,limit:page.messages.length-this.options.retainMessages});
-        const messages=activeMessages(page.messages,state,this.getLocale()),previous=stale?{summary:'',summaryState:null}:state;
+        const messages=activeMessages(page.messages,state,this.getLocale(),this.getStickers()),previous=stale?{summary:'',summaryState:null}:state;
         const summary=messages.length?await this.summarize(profile,messages,previous,{locale,signal}):{summary:previous.summary || '',summaryState:previous.summaryState ?? null};
         await this.guard(id,expected,signal);
         const last=page.messages.at(-1);
@@ -605,7 +605,7 @@ export class CompanionLearning {
       const after=baselineCursor(state,contextState.summaryCursor),page=await this.page(id,after);
       if(!page.hasMore&&page.messages.length<this.options.compactAfter) {
         await this.guard(id,expected,signal,enabled);
-        return {state:contextState,messages:activeMessages(page.messages,state,this.getLocale())};
+        return {state:contextState,messages:activeMessages(page.messages,state,this.getLocale(),this.getStickers())};
       }
       if(enabled) {
         const result=await this.maintain(id,{signal,learn:false});
@@ -615,7 +615,7 @@ export class CompanionLearning {
       } else {
         if(!profile.model)fail('COMPANION_MODEL_REQUIRED');
         const prefix=page.hasMore?page:await this.store.listMessages(id,{after,limit:page.messages.length-this.options.retainMessages});
-        const messages=activeMessages(prefix.messages,state,this.getLocale()),locale=this.getLocale()==='en'?'en':'zh';
+        const messages=activeMessages(prefix.messages,state,this.getLocale(),this.getStickers()),locale=this.getLocale()==='en'?'en':'zh';
         const summary=messages.length?await this.summarize(profile,messages,contextState,{locale,signal}):{summary:contextState.summary || '',summaryState:contextState.summaryState ?? null};
         await this.guard(id,expected,signal,false);
         this.transientContexts.set(id,{revision:expected,baseline:state.forgottenThrough ?? 'seq:0',...summary,summaryCursor:prefix.nextAfter,summaryThrough:prefix.messages.at(-1).id});

@@ -36,6 +36,11 @@ internal class NativeCompanionClient {
         transport.json("$base/${segment(id)}/messages/${segment(messageId)}/transcript", "PATCH", JSONObject().put("text", text)))
     suspend fun cancel(id: String, taskId: String? = null) = transport.json("$base/${segment(id)}/cancel", "POST", JSONObject().apply { taskId?.let { put("taskId", it) } })
     suspend fun updateProfile(id: String, patch: NativeCompanionProfilePatch) = transport.json("$base/${segment(id)}", "PATCH", NativeCompanionJson.patch(patch))
+    suspend fun importStickerPack(id: String, bytes: ByteArray, name: String): NativeCompanionStickerPack = withContext(Dispatchers.IO) {
+        if (bytes.isEmpty() || bytes.size > MAX_STICKER_PACK_BYTES) throw NativeApiException("COMPANION_STICKER_PACK_TOO_LARGE")
+        val payload = JSONObject().put("name", name).put("base64", Base64.encodeToString(bytes, Base64.NO_WRAP))
+        NativeCompanionJson.stickerPack(transport.json("$base/${segment(id)}/sticker-packs", "POST", payload).getJSONObject("pack"))
+    }
     suspend fun updateUser(name: String, avatarUrl: String?, bio: String? = null) = NativeCompanionJson.user(transport.json("$base/user-profile", "PATCH",
         JSONObject().put("name", name).apply { avatarUrl?.let { put("avatarUrl", it) }; bio?.let { put("bio", it) } }))
     suspend fun upload(id: String?, bytes: ByteArray, mediaType: String, name: String): NativeCompanionAttachment = withContext(Dispatchers.IO) {
@@ -50,4 +55,16 @@ internal class NativeCompanionClient {
         if (!path.startsWith("$base/") || path.split('/').any { it == "." || it == ".." }) throw NativeApiException("COMPANION_ATTACHMENT_SCOPE")
         return transport.bytes(url)
     }
+}
+
+internal const val MAX_STICKER_PACK_BYTES = 20 * 1024 * 1024
+
+internal fun readCompanionStickerPack(input: java.io.InputStream): ByteArray {
+    val bytes = try { NativeLocalTransport.boundedBytes(input, MAX_STICKER_PACK_BYTES) }
+    catch (error: NativeApiException) {
+        if (error.code == "response_too_large") throw NativeApiException("COMPANION_STICKER_PACK_TOO_LARGE", error)
+        throw error
+    }
+    if (bytes.isEmpty()) throw NativeApiException("COMPANION_STICKER_PACK_INVALID")
+    return bytes
 }

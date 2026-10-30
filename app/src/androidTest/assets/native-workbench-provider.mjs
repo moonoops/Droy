@@ -93,15 +93,28 @@ export async function apply(ctx) {
         if (reply) companionReplies.set(options.sessionId, signature);
         const reference = latest?.text?.includes('NATIVE_COMPANION_HOLD')
           ? 'NATIVE_COMPANION_REPLY_HOLD' : 'NATIVE_COMPANION_REPLY';
-        const name = reply ? 'companion_reply' : 'companion_quiet';
-        const args = reply ? { msg_id: latest.id, reply_reference: reference,
-          quoteReply: latest.text?.includes('NATIVE_COMPANION_QUOTE') === true } : {};
+        const stickerTurn = reply && latest.text === 'NATIVE_COMPANION_STICKER';
+        const name = stickerTurn ? 'companion_emoji' : reply ? 'companion_reply' : 'companion_quiet';
+        const args = stickerTurn ? { msg_id: latest.id, query: 'Fictional-wave' }
+          : reply ? { msg_id: latest.id, reply_reference: reference,
+            quoteReply: latest.text?.includes('NATIVE_COMPANION_QUOTE') === true } : {};
         await appendFile(join(process.env.DSH_HOME, 'native-fixture-companion.jsonl'), JSON.stringify({
           kind: 'planner', sessionId: options.sessionId, companionId: owner.companionId, name, signature,
         }) + '\n');
         for (const chunk of toolChunks('native-companion:' + ++companionCall, name, args)) {
           options.signal?.throwIfAborted(); yield chunk;
         }
+        return;
+      }
+      let selectionInput;
+      try { selectionInput = JSON.parse(textOf(options.messages.at(-1))); } catch { /* Other fixture calls use ordinary text. */ }
+      if (selectionInput?.candidateFormat && selectionInput.items?.[0]?.emoji_index) {
+        const text = JSON.stringify({emoji_index: selectionInput.items[0].emoji_index});
+        await appendFile(join(process.env.DSH_HOME, 'native-fixture-companion.jsonl'), JSON.stringify({kind:'sticker-selection'})+'\n');
+        for (const chunk of [
+          {type:'block-start',index:0,blockType:'text'}, {type:'text-delta',index:0,text},
+          {type:'block-end',index:0,block:{type:'text',text}}, {type:'finish',reason:{kind:'stop'}},
+        ]) { options.signal?.throwIfAborted(); yield chunk; }
         return;
       }
       const reference = options.messages.map(textOf).find(text => text.startsWith('[Reply Reference]') || text.startsWith('【回复信息参考】'));

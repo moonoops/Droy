@@ -110,7 +110,12 @@ function validateModel(value) {
   return clone(value);
 }
 function validateSettings(value, current) {
-  fields(value, ['proactiveEnabled', 'quietHours', 'allowProfanity', 'memoryEnabled']);
+  fields(value, ['proactiveEnabled', 'quietHours', 'allowProfanity', 'memoryEnabled', 'stickerPackIds']);
+  if (value.stickerPackIds !== undefined) {
+    if (!Array.isArray(value.stickerPackIds) || value.stickerPackIds.length > 100
+      || value.stickerPackIds.some(value => typeof value !== 'string' || !/^[A-Za-z0-9_.:-]{1,160}$/u.test(value))
+      || new Set(value.stickerPackIds).size !== value.stickerPackIds.length) fail('COMPANION_INVALID_INPUT');
+  }
   for (const key of ['proactiveEnabled', 'allowProfanity', 'memoryEnabled']) {
     if (value[key] !== undefined && typeof value[key] !== 'boolean') fail('COMPANION_INVALID_INPUT');
   }
