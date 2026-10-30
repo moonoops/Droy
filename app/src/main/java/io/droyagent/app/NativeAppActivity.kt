@@ -3,8 +3,10 @@ package io.droyagent.app
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.Build
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -90,6 +92,15 @@ class NativeAppActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Moving LAUNCHER onto aliases must preserve Android 12+'s root Back-to-background behavior.
+        // Register before Compose so screen, dialog and navigation handlers retain precedence.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(Build.VERSION.SDK_INT >= 31) {
+            override fun handleOnBackPressed() {
+                if (isTaskRoot && moveTaskToBack(true)) return
+                isEnabled = false
+                try { onBackPressedDispatcher.onBackPressed() } finally { isEnabled = true }
+            }
+        })
         NativeCompanionLocalMaintenance.restoreAdmission(application)
         permissions = NativePermissionCoordinator(this, savedInstanceState)
         window.setDecorFitsSystemWindows(false)

@@ -37,10 +37,25 @@ class PortraitModeContractTest(unittest.TestCase):
                 categories = {item.get(ANDROID + "name") for item in filter_.findall("category")}
                 if "android.intent.category.LAUNCHER" in categories:
                     launchers.append(entry.get(ANDROID + "name"))
-        self.assertEqual([".NativeAppActivity"], launchers)
+        self.assertEqual(9, len(launchers))
+        self.assertEqual(9, len(set(launchers)))
+        self.assertTrue(all(name.startswith(".launcher.") for name in launchers))
         native = next(item for item in application.findall("activity") if item.get(ANDROID + "name") == ".NativeAppActivity")
         self.assertEqual("true", native.get(ANDROID + "exported"))
         self.assertEqual("singleTask", native.get(ANDROID + "launchMode"))
+        self.assertFalse(native.findall("intent-filter"))
+        gateway = next(item for item in application.findall("activity") if item.get(ANDROID + "name") == ".LauncherEntryActivity")
+        self.assertEqual("", gateway.get(ANDROID + "taskAffinity"))
+        self.assertEqual("true", gateway.get(ANDROID + "noHistory"))
+        self.assertEqual("true", gateway.get(ANDROID + "excludeFromRecents"))
+        enabled = []
+        for entry in application.findall("activity-alias"):
+            if entry.get(ANDROID + "name") in launchers:
+                self.assertEqual(".LauncherEntryActivity", entry.get(ANDROID + "targetActivity"))
+                self.assertEqual("true", entry.get(ANDROID + "exported"))
+                if entry.get(ANDROID + "enabled") == "true":
+                    enabled.append(entry.get(ANDROID + "name"))
+        self.assertEqual([".launcher.Closeup"], enabled)
         alias = next(item for item in application.findall("activity-alias") if item.get(ANDROID + "name") == ".MainActivity")
         self.assertEqual(".NativeAppActivity", alias.get(ANDROID + "targetActivity"))
         self.assertFalse(alias.findall("intent-filter"))

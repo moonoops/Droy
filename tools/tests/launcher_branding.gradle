@@ -1,0 +1,56 @@
+// Run with and without -PdroyAppIcon=app/launcher-icons/02-sunglasses.png:
+// ./gradlew -I tools/tests/launcher_branding.gradle :app:testLauncherBranding
+import javax.imageio.ImageIO
+
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    def type = app.tasks.named('generateBrandResources').get().getClass().superclass
+    def fixture = app.tasks.register('generateLauncherBrandingFixture', type)
+    app.tasks.register('testLauncherBranding') {
+        dependsOn app.tasks.named('generateBrandResources')
+        doLast {
+            def android = app.extensions.getByName('android')
+            boolean custom = app.providers.gradleProperty('droyAppIcon').isPresent()
+            String customResource = '@drawable/droy_brand_launcher'
+            assert android.defaultConfig.buildConfigFields.DROY_RANDOM_LAUNCHER_ICONS.value == (custom ? 'false' : 'true')
+            assert android.defaultConfig.manifestPlaceholders.droyLauncherIcon ==
+                (custom ? customResource : '@mipmap/ic_launcher_closeup')
+            [Closeup: 'closeup', Sunglasses: 'sunglasses', Headphones: 'headphones', Programmer: 'programmer',
+             HatScarf: 'hat_scarf', SleepCurled: 'sleep_curled', SleepSide: 'sleep_side',
+             SleepBellyUp: 'sleep_belly_up', SleepSlumped: 'sleep_slumped'].each { alias, resource ->
+                assert android.defaultConfig.manifestPlaceholders["droyLauncher${alias}Icon"] ==
+                    (custom ? customResource : "@mipmap/ic_launcher_${resource}")
+            }
+            File artwork = app.file('launcher-icons/01-closeup.png')
+            assert app.tasks.named('generateBrandResources').get().defaultArtwork.get().asFile == artwork
+            File directory = java.nio.file.Files.createTempDirectory('droy-launcher-branding-').toFile()
+            try {
+                def generator = fixture.get()
+                generator.appName.set('Icon Fixture')
+                generator.defaultArtwork.set(artwork)
+                generator.resourcesDirectory.set(new File(directory, 'res'))
+                generator.assetsDirectory.set(new File(directory, 'assets'))
+                generator.nameResourcesDirectory.set(new File(directory, 'names'))
+                generator.generate()
+                def expected = ImageIO.read(artwork)
+                def actual = ImageIO.read(new File(directory, 'assets/app-brand-logo.png'))
+                assert actual.width == expected.width && actual.height == expected.height
+                assert Arrays.equals(
+                    expected.getRGB(0, 0, expected.width, expected.height, null, 0, expected.width),
+                    actual.getRGB(0, 0, actual.width, actual.height, null, 0, actual.width))
+                File customArtwork = app.file('launcher-icons/02-sunglasses.png')
+                generator.logo.set(customArtwork)
+                generator.generate()
+                assert Arrays.equals(customArtwork.bytes, new File(directory, 'assets/app-brand-logo.png').bytes)
+                File invalid = new File(directory, 'invalid.bin')
+                invalid.text = 'Not a PNG'
+                generator.logo.set(invalid)
+                boolean rejected = false
+                try { generator.generate() }
+                catch (GradleException error) { rejected = error.message.contains('readable PNG') }
+                assert rejected
+                logger.lifecycle('PASS: nine icon bindings, custom-logo rotation policy, default artwork, custom PNG preservation and invalid input rejection')
+            } finally { directory.deleteDir() }
+        }
+    }
+}

@@ -10,6 +10,7 @@ def brandingSpec = new groovy.json.JsonSlurper().parse(file('src/main/assets/bra
 abstract class GenerateBrandResources extends DefaultTask {
     @Input abstract Property<String> getAppName()
     @org.gradle.api.tasks.Optional @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getLogo()
+    @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getDefaultArtwork()
     @OutputDirectory abstract DirectoryProperty getResourcesDirectory()
     @OutputDirectory abstract DirectoryProperty getAssetsDirectory()
     @OutputDirectory abstract DirectoryProperty getNameResourcesDirectory()
@@ -22,7 +23,10 @@ abstract class GenerateBrandResources extends DefaultTask {
             throw new GradleException('droyAppName must contain 1–40 characters of plain single-line text.')
         File imageFile = logo.isPresent() ? logo.get().asFile : null
         java.awt.image.BufferedImage image
-        if (imageFile == null) image = defaultLogo()
+        if (imageFile == null) {
+            image = javax.imageio.ImageIO.read(defaultArtwork.get().asFile)
+            if (image == null) throw new GradleException('The bundled Droy launcher artwork must be a readable PNG.')
+        }
         else {
             if (imageFile.length() > 24 * 1024 * 1024) throw new GradleException('droyAppIcon PNG is too large.')
             def stream = javax.imageio.ImageIO.createImageInputStream(imageFile)
@@ -68,31 +72,12 @@ abstract class GenerateBrandResources extends DefaultTask {
 ''', 'UTF-8')
     }
 
-    // Product identity is independent of pet artwork and host font availability.
-    private static java.awt.image.BufferedImage defaultLogo() {
-        def image = new java.awt.image.BufferedImage(512, 512, java.awt.image.BufferedImage.TYPE_INT_ARGB)
-        def graphics = image.createGraphics()
-        try {
-            graphics.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
-            graphics.color = new java.awt.Color(0x27313D)
-            def mark = new java.awt.geom.Path2D.Double(java.awt.geom.Path2D.WIND_EVEN_ODD)
-            mark.moveTo(112, 80); mark.lineTo(242, 80)
-            mark.curveTo(352, 80, 400, 144, 400, 256)
-            mark.curveTo(400, 368, 352, 432, 242, 432)
-            mark.lineTo(112, 432); mark.closePath()
-            mark.moveTo(192, 152); mark.lineTo(242, 152)
-            mark.curveTo(300, 152, 320, 188, 320, 256)
-            mark.curveTo(320, 324, 300, 360, 242, 360)
-            mark.lineTo(192, 360); mark.closePath()
-            graphics.fill(mark)
-        } finally { graphics.dispose() }
-        return image
-    }
 }
 
 def generateBrandResources = tasks.register('generateBrandResources', GenerateBrandResources) {
     appName.set(providers.gradleProperty('droyAppName').orElse(brandingSpec.name as String))
     logo.set(rootProject.layout.file(providers.gradleProperty('droyAppIcon').map { rootProject.file(it) }))
+    defaultArtwork.set(layout.projectDirectory.file('launcher-icons/01-closeup.png'))
     resourcesDirectory.set(layout.buildDirectory.dir('generated/droyBranding/res'))
     assetsDirectory.set(layout.buildDirectory.dir('generated/droyBranding/assets'))
     nameResourcesDirectory.set(layout.buildDirectory.dir('generated/droyBranding/nameRes'))
@@ -228,14 +213,22 @@ tasks.named('preBuild').configure { dependsOn verifyEmbeddingRuntime }
 android {
     namespace 'io.droyagent.app'
     compileSdk 37
-    buildFeatures { compose true }
+    buildFeatures { compose true; buildConfig true }
     defaultConfig {
         applicationId 'io.droyagent.app'
         minSdk 30
         targetSdk 36
         versionCode releaseSpec.versionCode
         versionName releaseSpec.droyVersion
-        manifestPlaceholders.droyLauncherIcon = '@drawable/droy_brand_launcher'
+        def customLauncher = providers.gradleProperty('droyAppIcon').isPresent()
+        manifestPlaceholders.droyLauncherIcon = customLauncher ? '@drawable/droy_brand_launcher' : '@mipmap/ic_launcher_closeup'
+        [Closeup: 'closeup', Sunglasses: 'sunglasses', Headphones: 'headphones', Programmer: 'programmer',
+         HatScarf: 'hat_scarf', SleepCurled: 'sleep_curled', SleepSide: 'sleep_side',
+         SleepBellyUp: 'sleep_belly_up', SleepSlumped: 'sleep_slumped'].each { name, resource ->
+            manifestPlaceholders["droyLauncher${name}Icon"] = customLauncher
+                ? '@drawable/droy_brand_launcher' : "@mipmap/ic_launcher_${resource}"
+        }
+        buildConfigField 'boolean', 'DROY_RANDOM_LAUNCHER_ICONS', customLauncher ? 'false' : 'true'
         ndk { abiFilters 'arm64-v8a' }
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }

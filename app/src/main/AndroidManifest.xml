@@ -58,7 +58,7 @@
         <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
     </queries>
-    <application android:name=".DroyApplication" android:label="@string/droy_app_name" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:icon="${droyLauncherIcon}"
+    <application android:name=".DroyApplication" android:label="@string/droy_app_name" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:icon="${droyLauncherIcon}" android:roundIcon="${droyLauncherIcon}"
         android:allowBackup="false" android:extractNativeLibs="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:networkSecurityConfig="@xml/network_security_config">
@@ -68,12 +68,47 @@
         <activity android:name=".TestPageActivity" android:screenOrientation="portrait" android:exported="false" />
         <activity android:name=".NativeAppActivity" android:screenOrientation="portrait" android:exported="true" android:launchMode="singleTask"
             android:theme="@style/DroyChatTheme" android:windowSoftInputMode="adjustResize"
-            android:enableOnBackInvokedCallback="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:enableOnBackInvokedCallback="true" />
+        <!-- A transient launcher task keeps disabled icon aliases out of the persistent UI task. -->
+        <activity android:name=".LauncherEntryActivity" android:screenOrientation="portrait" android:exported="false"
+            android:theme="@android:style/Theme.NoDisplay" android:taskAffinity=""
+            android:noHistory="true" android:excludeFromRecents="true" />
+        <activity-alias android:name=".launcher.Closeup" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="true" android:exported="true" android:icon="${droyLauncherCloseupIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.Sunglasses" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSunglassesIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.Headphones" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherHeadphonesIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.Programmer" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherProgrammerIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.HatScarf" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherHatScarfIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.SleepCurled" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSleepCurledIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.SleepSide" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSleepSideIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.SleepBellyUp" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSleepBellyUpIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.SleepSlumped" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSleepSlumpedIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
         <!-- Existing shortcuts and pending intents keep their component, but open the native UI. -->
         <activity-alias android:name=".MainActivity" android:exported="true" android:targetActivity=".NativeAppActivity" />
         <activity android:name=".AudioPermissionActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
