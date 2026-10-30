@@ -784,7 +784,11 @@ fun NativeAppShell(
                 NativeProductSettingsScreen(productHost, ProductSettingsActions(onBack = ::back,
                     onPermissions = { open("permissions") },
                     onOverlayPermission = { open("permissions"); permissionAction(NativePermissionAction.RequestSystem("petOverlay")) },
-                    onStartRuntime = { NativeRuntimeHost.start(context) }, onStopRuntime = { NativeRuntimeHost.stop(context) },
+                    onStartRuntime = {
+                        if (section == ProductSettingsSection.Notifications) NativeRuntimeHost.resumeNotificationManagement(context)
+                        else NativeRuntimeHost.start(context)
+                    }, onStopRuntime = { NativeRuntimeHost.stop(context) },
+                    onModels = { open("settings-models") },
                     onOpenPetStudio = { open("pet-studio") }, onResetPersonalization = { resetter.reset() },
                     resetPersonalizationReady = work.runtime.ready), initialSection = section, presentation = productPresentation,
                     generalPreferences = { NativeGeneralPreferences(settings, settingsModel) },

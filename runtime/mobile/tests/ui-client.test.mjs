@@ -2286,6 +2286,63 @@ test('a late app catalog cannot roll back a newer confirmed exception mode', asy
   controller.dispose();
 });
 
+test('lightweight notification refresh preserves only explicit app selections and defaults missing modes to allow', async () => {
+  const saved = { ...state(), notificationManagement: { appModes: { 'fictional.selected': 'managed', 'fictional.allowed': 'allow' }, exceptions: [] } };
+  const apps = [
+    { packageName: 'fictional.selected', label: 'Selected', mode: 'managed', managed: true },
+    { packageName: 'fictional.allowed', label: 'Allowed', mode: 'allow', managed: false },
+    { packageName: 'fictional.new', label: 'New app', mode: 'allow', managed: false },
+  ];
+  const controller = load().createController({ request(action) {
+    if (action === 'getState') return Promise.resolve(structuredClone(saved));
+    return Promise.resolve({ notificationManagement: { ...structuredClone(saved.notificationManagement), apps } });
+  } });
+  try {
+    await controller.refresh(); await controller.refreshSection('notificationManagement');
+    await controller.refresh();
+    const selected = () => Array.from(controller.getSnapshot().state.notificationManagement.apps,
+      app => ({ packageName: app.packageName, mode: app.mode, managed: app.managed }));
+    assert.deepEqual(selected(), apps.map(({ packageName, mode, managed }) => ({ packageName, mode, managed })));
+    saved.notificationManagement.appModes = {};
+    await controller.refresh();
+    assert.ok(selected().every(app => app.mode === 'allow' && app.managed === false));
+    assert.equal(controller.getSnapshot().state.notificationManagement.apps[0].label, 'Selected');
+  } finally { controller.dispose(); }
+});
+
+test('complete native notification app catalogs retain their authoritative modes', async () => {
+  const saved = { ...state(), notificationManagement: { appModes: { 'fictional.app': 'managed' }, exceptions: [],
+    apps: [{ packageName: 'fictional.app', label: 'Native app', mode: 'allow', managed: false }] } };
+  const controller = load().createController({ request: async () => structuredClone(saved) });
+  try {
+    await controller.refresh();
+    const app = controller.getSnapshot().state.notificationManagement.apps[0];
+    assert.equal(app.mode, 'allow'); assert.equal(app.managed, false);
+  } finally { controller.dispose(); }
+});
+
+test('a late notification catalog uses the latest explicit app modes without reviving deselected apps', async () => {
+  const saved = { ...state(), notificationManagement: { appModes: { 'fictional.app': 'managed' }, exceptions: [] } };
+  let finish;
+  const controller = load().createController({ request(action) {
+    if (action === 'getState') return Promise.resolve(structuredClone(saved));
+    return new Promise(resolve => { finish = resolve; });
+  } });
+  try {
+    await controller.refresh();
+    const catalog = controller.refreshSection('notificationManagement'); await Promise.resolve();
+    saved.notificationManagement.appModes = {};
+    await controller.refresh();
+    finish({ notificationManagement: { appModes: { 'fictional.app': 'managed' }, exceptions: [],
+      apps: [{ packageName: 'fictional.app', label: 'Late app label', mode: 'managed', managed: true }] } });
+    await catalog;
+    const current = controller.getSnapshot().state.notificationManagement;
+    assert.equal(current.apps[0].label, 'Late app label');
+    assert.equal(current.apps[0].mode, 'allow'); assert.equal(current.apps[0].managed, false);
+    assert.equal(Object.keys(current.appModes).length, 0);
+  } finally { controller.dispose(); }
+});
+
 test('native timezone is synchronized on startup and only after a changed device timezone', async () => {
   const saved = { ...state(), timeZone: 'Asia/Shanghai' }, writes = [];
   const fixture = applyFixture(saved, { windowExtra: { fetch: async (url, options) => {

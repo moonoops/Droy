@@ -441,6 +441,11 @@ window.__ModuleLoader__.load({
         for (const listener of listeners) listener();
       };
       const validState = value => value && Array.isArray(value.groups) && Array.isArray(value.fileGrants);
+      const notificationAppModes = (apps, modes) => apps.map(item => {
+        const mode = modes[item.packageName] ?? 'allow';
+        const managed = mode === 'managed';
+        return mode === item.mode && managed === item.managed ? item : { ...item, mode, managed };
+      });
       function accept(incoming, partial = false) {
         if (disposed) return;
         const previous = snapshot.state || {}, next = partial ? { ...previous } : {};
@@ -448,8 +453,10 @@ window.__ModuleLoader__.load({
           let value = supplied;
           if (['notificationManagement', 'proactiveNotifications'].includes(key) && supplied && !Object.hasOwn(supplied, 'apps') && previous[key]?.apps) {
             value = { ...supplied, apps: previous[key].apps };
+            if (key === 'notificationManagement' && supplied.appModes)
+              value.apps = notificationAppModes(value.apps, supplied.appModes);
           }
-          if (key === 'notificationManagement' && value?.apps && value.exceptions) {
+          if (key === 'notificationManagement' && value?.apps && value.exceptions && !Object.hasOwn(value, 'appModes')) {
             const modes = new Map(value.exceptions.map(item => [item.packageName, item.mode]));
             value = { ...value, apps: value.apps.map(item => {
               const mode = modes.get(item.packageName) || 'managed';
@@ -519,8 +526,12 @@ window.__ModuleLoader__.load({
                 || section !== 'audio' && !Array.isArray(result[section].apps))
               throw new Error(droyText("手机设置数据不完整，请重试"));
             if (generation === refreshGeneration) accept(result, true);
-            else if (section !== 'audio' && snapshot.state?.[section])
-              accept({ [section]: { ...snapshot.state[section], apps: result[section].apps } }, true);
+            else if (section !== 'audio' && snapshot.state?.[section]) {
+              const current = snapshot.state[section];
+              const apps = section === 'notificationManagement' && current.appModes
+                ? notificationAppModes(result[section].apps, current.appModes) : result[section].apps;
+              accept({ [section]: { ...current, apps } }, true);
+            }
             return result;
           }).finally(() => {
             if (sectionRequests.get(section) === operation) sectionRequests.delete(section);
@@ -1408,34 +1419,41 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
           return () => observer.disconnect();
         }, []);
         const query = search.trim().toLowerCase();
-        const matches = apps.filter(app => query
-          ? `${app.label} ${app.packageName}`.toLowerCase().includes(query)
-          : app.mode === 'allow' || app.mode === 'block');
-        return h(Modal, { open: true, title: droyText("例外应用"), closeLabel: droyText("返回通知管理"), onClose,
+        const matches = apps.filter(app => !query || `${app.label} ${app.packageName}`.toLowerCase().includes(query));
+        return h(Modal, { open: true, title: droyText("通知应用管理"), closeLabel: droyText("返回通知管理"), onClose,
           className: 'droy-notification-exceptions', contentClassName: 'droy-notification-exceptions-content' },
           h('div', { ref: bodyRef, className: 'droy-notification-exceptions-body', 'data-droy-notification-exceptions': true },
             h(Input, { className: 'droy-input', 'aria-label': droyText("搜索应用"), placeholder: droyText("搜索应用"), value: search,
               onChange: event => setSearch(event.target.value), maxLength: 100 }),
+            h('p', { className: 'droy-description' }, droyText("仅整理选中的应用，新应用不会自动加入。")),
+            h('div', { className: 'droy-actions' },
+              ...[[true, droyText("全部交给 Droy")], [false, droyText("全部交回原应用")]].map(([selected, label]) =>
+                button(label, 'notificationManagement', { operation: 'setApps', enabled: selected,
+                  packageNames: apps.map(app => app.packageName) }, snapshot, true,
+                { disabled: busy(snapshot) || !apps.length, 'data-droy-notification-select-all': selected }))),
             h(Feedback, { snapshot }),
             snapshot.catalogLoading && !apps.length ? h('p', { className: 'droy-description', role: 'status' }, droyText("正在读取通知设置…")) : null,
-            !snapshot.catalogLoading && matches.length === 0 ? h('p', { className: 'droy-notification-empty' }, query ? droyText("没有匹配的应用") : droyText("暂无例外应用")) : null,
+            !snapshot.catalogLoading && matches.length === 0 ? h('p', { className: 'droy-notification-empty' }, query ? droyText("没有匹配的应用") : droyText("暂无可整理的应用")) : null,
             ...matches.map(app => h('div', { className: 'droy-notification-exception', key: app.packageName,
               'data-droy-notification-app': app.packageName },
               h('span', { className: 'droy-row-title' }, app.label),
               h('div', { className: 'droy-notification-modes', role: 'group', 'aria-label': droyText("{0}通知方式", [app.label]) },
-                ...[['managed', droyText("智能管理")], ['allow', droyText("放行")], ['block', droyText("不提醒")]].map(([mode, label]) =>
+                ...[['managed', droyText("交给 Droy 整理")], ['allow', droyText("原应用处理")]].map(([mode, label]) =>
                   button(label, 'notificationManagement', { operation: 'setAppMode', packageName: app.packageName, mode }, snapshot,
-                    true, { 'aria-pressed': (app.mode || 'managed') === mode, 'aria-label': `${app.label}：${label}`,
+                    true, { 'aria-pressed': (app.mode || 'allow') === mode, 'aria-label': `${app.label}：${label}`,
                       'data-droy-notification-mode': mode })))))));
       }
       function NotificationSettings() {
         useDroyLocale();
-        const snapshot = useState(['notificationManagement','notificationManagementEnabled','capabilities','notificationPermissionGranted'], ['notificationManagement','setPreference:notificationManagementEnabled','requestPermission']);
+        watchSection('notificationManagement');
+        const snapshot = useState(['notificationManagement','notificationManagementEnabled','capabilities','notificationPermissionGranted'], ['notificationManagement','requestPermission','resumeOperations']);
         const state = snapshot.state;
         const management = state?.notificationManagement || {};
-        const enabled = state?.notificationManagementEnabled ?? management.enabled ?? true;
-        const apps = management.apps || [], rules = management.rules || [], archive = management.archive || [];
-        const exceptions = management.exceptions || apps.filter(app => app.mode === 'allow' || app.mode === 'block');
+        const enabled = state?.notificationManagementEnabled ?? management.enabled ?? false;
+        const apps = management.apps || [], archive = management.archive || [];
+        const selectedCount = management.selectedAppCount ?? apps.filter(app => app.mode === 'managed').length;
+        const [ruleDraft, setRuleDraft] = React.useState(null);
+        const ruleText = ruleDraft ?? management.ruleText ?? '';
         const [exceptionsOpened, setExceptionsOpened] = React.useState(false);
         const [opened, setOpened] = React.useState(pendingNotificationManagement);
         const [archiveOpened, setArchiveOpened] = React.useState(pendingNotificationManagement);
@@ -1459,30 +1477,60 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         }, []);
         const access = state?.capabilities?.systemPermissions?.notifications;
         const accessStatus = management.access;
-        const actionError = accessStatus?.actionRequired ? accessStatus.message
+        const processing = management.processing;
+        const actionError = processing ? (['limited', 'restoration_required'].includes(processing.state) ? processing.message : '')
+          : accessStatus?.actionRequired ? accessStatus.message
           : management.error || (management.autoSilence?.actionRequired ? management.autoSilence.message : '');
+        const update = values => submit('notificationManagement', { operation: 'configure', ...values });
+        const saveRule = async values => {
+          const result = await update(values);
+          if (result) setRuleDraft(null);
+        };
         return h('div', { className: 'droy-row droy-notification-settings', 'data-droy-general': 'notificationManagementEnabled' },
           h('div', { className: 'droy-notification-header' },
             h('span', { className: 'droy-row-title' }, droyText("通知管理")),
             h(Switch, { label: droyText("通知管理"), className: 'droy-touch-switch', checked: enabled, disabled: busy(snapshot),
-              onChange: value => submit('setPreference', { key: 'notificationManagementEnabled', value }) })),
+              onChange: value => {
+                if (value && management.requiresReview) { setOpened(true); return; }
+                if (!value || target.confirm(droyText("所选应用的通知内容会发送给当前模型进行整理，是否开启？"))) update({ enabled: value });
+              } })),
           h(Feedback, { snapshot }),
           actionError ? h('div', { className: 'droy-error', role: 'alert', 'data-droy-notification-error': true }, droyText(actionError)) : null,
-          enabled && accessStatus?.state === 'connecting' ? h('p', { className: 'droy-description', role: 'status',
+          processing?.message && processing.message !== actionError ? h('p', { className: 'droy-description', role: 'status',
+            'data-droy-notification-processing': processing.state }, droyText(processing.message)) : null,
+          management.lastResult?.atMs ? h('p', { className: 'droy-description', role: management.lastResult.success ? 'status' : 'alert',
+            'data-droy-notification-last-result': true }, droyText("最近处理：{0}", [management.lastResult.message || ''])) : null,
+          enabled && !processing && accessStatus?.state === 'connecting' ? h('p', { className: 'droy-description', role: 'status',
             'data-droy-notification-preparing': true }, droyText(accessStatus.message)) : null,
           enabled && (access?.permissionGranted === false || accessStatus?.action === 'notificationAccess') ? h('div', { className: 'droy-actions' },
             button(droyText(accessStatus?.state === 'listener_unavailable' ? "检查通知读取权限" : "开启通知访问"), 'requestPermission', { name: 'notificationAccess' }, snapshot, false)) : null,
           enabled && (state?.notificationPermissionGranted === false || accessStatus?.action === 'notifications') ? h('div', { className: 'droy-actions' },
             button(droyText("开启提醒权限"), 'requestPermission', { name: 'notifications' }, snapshot, false)) : null,
+          processing?.action === 'apps' ? h('div', { className: 'droy-actions' }, actionButton({ disabled: busy(snapshot),
+            'data-droy-notification-recovery': 'apps', onClick: () => setExceptionsOpened(true) }, droyText("选择整理应用"))) : null,
+          processing?.action === 'resume' ? h('div', { className: 'droy-actions' },
+            button(droyText("恢复整理"), 'resumeOperations', {}, snapshot, true, { 'data-droy-notification-recovery': 'resume' })) : null,
+          processing?.action === 'restore' ? h('div', { className: 'droy-actions' },
+            button(droyText("恢复原应用设置"), 'notificationManagement', { operation: 'configure', silentTakeoverEnabled: false }, snapshot, true,
+              { 'data-droy-notification-recovery': 'restore' })) : null,
+          processing?.action === 'model' ? h('div', { className: 'droy-row-copy' },
+            h('p', { className: 'droy-description' }, droyText("在模型设置中配置默认模型后，重新检查。")),
+            actionButton({ disabled: busy(snapshot), 'data-droy-notification-recovery': 'model', onClick: () => refresh() }, droyText("重新检查"))) : null,
+          processing?.action === 'permissions' || processing?.action === 'restore' ? h('div', { className: 'droy-row-copy' },
+            h('p', { className: 'droy-description' }, droyText("在权限设置中检查通知与 Root 授权，再重新检查。")),
+            actionButton({ disabled: busy(snapshot), 'data-droy-notification-recovery': 'permissions', onClick: () => refresh() }, droyText("重新检查"))) : null,
           h('details', { className: 'droy-notification-details', 'data-droy-notification-details': true,
             open: opened, onToggle: event => { setOpened(event.currentTarget.open); if (event.currentTarget.open) refresh(); } },
             h('summary', null, droyText("通知设置")),
             h('div', { className: 'droy-notification-body' },
+              h('p', { className: 'droy-description' }, droyText("默认保留原应用提醒，使用当前模型清理广告；基础整理不需要 Root。")),
               h('div', { className: 'droy-notification-header' },
-                h('div', { className: 'droy-row-copy' }, h('span', { className: 'droy-row-title' }, droyText("智能分析")),
-                  h('p', { className: 'droy-description' }, droyText("使用当前模型识别广告并清理，保留有用的原通知；自定义规则优先。"))),
-                h(Switch, { label: droyText("智能分析"), className: 'droy-touch-switch', checked: management.cloudAnalysisEnabled !== false, disabled: busy(snapshot),
-                  onChange: value => submit('notificationManagement', { operation: 'configure', cloudAnalysisEnabled: value }) })),
+                h('div', { className: 'droy-row-copy' }, h('span', { className: 'droy-row-title' }, droyText("静默接管")),
+                  h('p', { className: 'droy-description' }, droyText("需要 Root。修改所选应用的提醒方式；模型故障时保留源通知并恢复设置。应用被系统强停时可能无法及时恢复。"))),
+                h(Switch, { label: droyText("静默接管"), className: 'droy-touch-switch', checked: management.silentTakeoverEnabled === true, disabled: busy(snapshot),
+                  onChange: value => {
+                    if (!value || target.confirm(droyText("是否接管所选应用的提醒方式？模型故障时将退出静默接管；系统强停可能使静默设置保留到下次恢复。"))) update({ silentTakeoverEnabled: value });
+                  } })),
               h('div', { className: 'droy-row-copy' },
                 h('span', { className: 'droy-row-title', id: 'droy-notification-reminder-label' }, droyText("重要通知提醒")),
                 h('p', { className: 'droy-description' }, droyText("重要通知保留超过所选时长后提醒一次。亮屏解锁时优先用宠物气泡，否则发送系统通知。")),
@@ -1494,16 +1542,20 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
               actionButton({ className: 'droy-button droy-notification-exception-link',
                 'data-droy-action': 'openNotificationExceptions', disabled: busy(snapshot),
                 onClick: () => { setExceptionsOpened(true); } },
-                h('span', null, droyText("例外应用")), h('span', { className: 'droy-status' }, droyText("{0} 个 ›", [exceptions.length]))),
+                h('span', null, droyText("通知应用管理")), h('span', { className: 'droy-status' }, droyText("已选择 {0} 个 ›", [selectedCount]))),
               enabled ? h('p', { className: 'droy-description', 'data-droy-cleared-ads': true },
                 droyText("最近24小时已清理 {0} 条广告", [management.clearedAdsCount || 0])) : null,
               h('h3', { className: 'droy-notification-group-title' }, droyText("通知规则")),
-              h('p', { className: 'droy-description' }, droyText("在对话中告诉 Droy 如何处理通知。")),
-              rules.length === 0 ? h('p', { className: 'droy-notification-empty' }, droyText("暂无规则")) : null,
-              ...rules.map(rule => h('div', { className: 'droy-notification-rule', key: rule.id },
-                h('span', { className: 'droy-row-title' }, rule.instruction),
-                h('div', { className: 'droy-actions' }, button(droyText("删除规则"), 'notificationManagement', { operation: 'deleteRule', id: rule.id }, snapshot,
-                  true, { 'aria-label': droyText("删除规则：{0}", [rule.instruction]), 'data-droy-notification-rule-delete': rule.id })))),
+              management.requiresReview ? h('p', { className: 'droy-description', role: 'alert' }, droyText("请先检查并保存迁移的整理规则，再开启整理。")) : null,
+              h('div', { className: 'droy-pet-field' }, h('textarea', { className: 'droy-input',
+                'aria-label': droyText("通知规则"), 'data-droy-notification-rule-text': true, rows: 5, maxLength: 24000,
+                value: ruleText, disabled: busy(snapshot), onChange: event => setRuleDraft(event.target.value) })),
+              h('div', { className: 'droy-actions' },
+                actionButton({ disabled: busy(snapshot) || !ruleText.trim() || ruleText === management.ruleText && !management.requiresReview,
+                  'data-droy-notification-rule-save': true, onClick: () => saveRule({ ruleText }) }, droyText("保存整理规则")),
+                actionButton({ disabled: busy(snapshot), 'data-droy-notification-rule-reset': true, onClick: () => {
+                  if (target.confirm(droyText("恢复默认整理规则？未保存的修改将被替换。"))) saveRule({ resetRule: true });
+                } }, droyText("恢复默认规则"))),
               h('details', { className: 'droy-notification-details', 'data-droy-notification-archive': true,
                 open: archiveOpened, onToggle: event => setArchiveOpened(event.currentTarget.open) },
                 h('summary', null, droyText("通知收纳{0}", [archive.length ? ` · ${archive.length}` : ''])),

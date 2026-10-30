@@ -188,11 +188,8 @@ public final class PhoneNotificationRetentionDeviceTest {
             else editor.putString(key, values.getString(key));
         }
         assertTrue("Interrupted fixture preferences were not restored", editor.commit());
+        NotificationTestState.reloadNotificationMemory(context, values.has("notificationManagementData") ? values.getString("notificationManagementData") : null);
         NotificationManagement manager = NotificationManagement.get(context);
-        synchronized (manager) {
-            field("config").set(manager, NotificationManagementRules.configuration(recovery.getJSONObject("config")));
-            field("records").set(manager, recovery.getJSONArray("records"));
-        }
         manager.rescan();
         if (recovery.has("screenOffTimeout")) {
             String timeout = recovery.getString("screenOffTimeout");
@@ -214,16 +211,17 @@ public final class PhoneNotificationRetentionDeviceTest {
             persistRecovery();
             owned = true;
             JSONObject temporary = NotificationManagementRules.configuration(null);
-            temporary.put("revision", originalConfig.optLong("revision", 1) + 1).put("rules", new JSONArray());
+            temporary.put("revision", originalConfig.optLong("revision", 1) + 1);
             JSONObject exceptions = new JSONObject();
             JSONArray apps = management.state().getJSONArray("apps");
             boolean fixtureInstalled = false;
             for (int i = 0; i < apps.length(); i++) {
                 String name = apps.getJSONObject(i).getString("packageName");
-                if (name.equals(SOURCE)) fixtureInstalled = true; else exceptions.put(name, "allow");
+                if (name.equals(SOURCE)) fixtureInstalled = true;
+                exceptions.put(name, name.equals(SOURCE) ? "managed" : "allow");
             }
             assertTrue("The independent fixture package is not manageable", fixtureInstalled);
-            temporary.put("exceptions", exceptions).put("cloudAnalysisEnabled", true).put("reminderMinutes", 5);
+            temporary.put("exceptions", exceptions).put("silentTakeoverEnabled", false).put("reminderMinutes", 5);
             field("config").set(management, temporary);
             field("records").set(management, new JSONArray());
             assertTrue("Could not save the isolated notification policy", preferences.edit()
@@ -445,8 +443,6 @@ public final class PhoneNotificationRetentionDeviceTest {
         management.request(new JSONObject().put("operation", "configure").put("enabled", false));
         awaitWorker();
         synchronized (management) {
-            field("config").set(management, originalConfig);
-            field("records").set(management, originalRecords);
             SharedPreferences.Editor editor = preferences.edit();
             for (String key : KEYS) {
                 Object value = original.get(key);
@@ -455,8 +451,9 @@ public final class PhoneNotificationRetentionDeviceTest {
                 else editor.remove(key);
             }
             assertTrue("Could not restore original notification and companion settings", editor.commit());
-            Method refresh = NotificationManagement.class.getDeclaredMethod("refreshStatusNotification"); refresh.setAccessible(true); refresh.invoke(management);
         }
+        NotificationTestState.reloadNotificationMemory(context, (String) original.get("notificationManagementData"));
+        Method refresh = NotificationManagement.class.getDeclaredMethod("refreshStatusNotification"); refresh.setAccessible(true); refresh.invoke(management);
         NotificationManager notifications = context.getSystemService(NotificationManager.class);
         if (originalManaged != null) for (StatusBarNotification item : originalManaged)
             if (NotificationManagement.TAG.equals(item.getTag())) notifications.notify(item.getTag(), item.getId(), item.getNotification());

@@ -517,6 +517,23 @@ public final class MainActivity extends Activity {
                         });
                         return;
                     }
+                    if (action.equals("configurePermissions") || action.equals("setupUpdate")) {
+                        String mode = action.equals("configurePermissions") ? args.getString("mode") : null;
+                        if (mode != null) permissionSetup.beginConfiguration(mode);
+                        uiStateExecutor.execute(() -> {
+                            try {
+                                SetupManager.update(this, mode == null ? args : new JSONObject().put("mode", mode));
+                                runOnUiThread(() -> {
+                                    try {
+                                        if (mode != null) permissionSetup.finishConfiguration(mode);
+                                        else { PetOverlay.refresh(this); updateDocumentTitle(); }
+                                        enqueueUiState(view, session, sessionPort, response, reply, null);
+                                    } catch (Exception failure) { replyUiFailure(view, session, sessionPort, response, reply, failure); }
+                                });
+                            } catch (Exception failure) { replyUiFailure(view, session, sessionPort, response, reply, failure); }
+                        });
+                        return;
+                    }
                     if (action.equals("notificationManagement") || action.equals("proactiveNotifications") || action.equals("setBrandLogoBackgrounds")
                             || action.equals("setPreference") && java.util.Set.of("backgroundRuntimeEnabled", "notificationManagementEnabled").contains(args.optString("key"))) {
                         uiStateExecutor.execute(() -> {
@@ -723,9 +740,7 @@ public final class MainActivity extends Activity {
                 }
                 return JSONObject.NULL;
             }
-            case "configurePermissions": permissionSetup.configure(args.getString("mode")); return UI_STATE_RESULT;
             case "cancelPermissionSetup": permissionSetup.cancel(); return UI_STATE_RESULT;
-            case "setupUpdate": SetupManager.update(this, args); PetOverlay.refresh(this); updateDocumentTitle(); return UI_STATE_RESULT;
             case "setupDeviceTest": return SetupVerification.start(this);
             case "setupRootTest":
                 if (permissionSetup.active()) throw new IllegalStateException(NativeLocale.text("请先完成或停止当前授权", "Finish or stop the current authorization first"));

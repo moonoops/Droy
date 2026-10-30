@@ -99,6 +99,8 @@ After setup, try:
 | Extensions | Skills, plugins, MCP and automations through DSH. |
 | Languages | Chinese and English. |
 
+Notification organization applies only to apps you select. By default it keeps their existing notification settings, removes advertising, and reminds once after an important notification remains uncleared for 5 or 10 minutes. Optional silent takeover requires explicit confirmation and Root access. If classification fails, Droy keeps the original notification and restores settings it owns; settings show failures and any restoration still required. Android force-stop or loss of Root can prevent immediate restoration.
+
 ### A companion on your screen
 
 When needed, Droy appears on your screen as the character you select. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
@@ -145,7 +147,7 @@ Following DSH's “everything is a plugin” philosophy, mobile adaptation, voic
 
 - Task context, page text, screenshots and attachments may be sent to your selected model. Provider terms and charges apply.
 - Voice recognition runs locally; recognized text goes to the conversation model. Readout uses your selected speech engine.
-- Notification analysis can send notification text to the model; explicit content rules can run locally.
+- Notification organization sends selected notification text and your rules to the default model. Recognized verification-code and redacted notifications stay on the device; viewing or editing rules does not send notification history to the model.
 - Personal memory is off by default. Sources are enabled separately; model processing requires authorization for the endpoint, data category and purpose.
 - Companion memory is private to each companion and uses local MemOS storage/retrieval with on-device multilingual embeddings. Removing a companion retains its memory on the device; request permanent deletion or restoration explicitly in Tasks. Memory records are not exposed as a browsing interface. Cloud synchronization is not enabled.
 

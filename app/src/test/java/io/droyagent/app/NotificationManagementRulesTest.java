@@ -214,4 +214,45 @@ public class NotificationManagementRulesTest {
         assertTrue(summary.endsWith("B".repeat(180) + "…"));
     }
 
+    @Test public void silentTakeoverRequiresAnExplicitSavedChoice() throws Exception {
+        assertFalse(NotificationManagementRules.configuration(null).getBoolean("silentTakeoverEnabled"));
+        assertFalse(NotificationManagementRules.configuration(new JSONObject().put("schemaVersion", 2)
+            .put("exceptions", new JSONObject().put("example.parcel", "managed"))).getBoolean("silentTakeoverEnabled"));
+        assertTrue(NotificationManagementRules.configuration(new JSONObject().put("silentTakeoverEnabled", true)).getBoolean("silentTakeoverEnabled"));
+        for (Object invalid : new Object[]{"true", 1, JSONObject.NULL}) {
+            try {
+                NotificationManagementRules.configuration(new JSONObject().put("silentTakeoverEnabled", invalid));
+                fail("Accepted invalid silent takeover choice");
+            } catch (IllegalArgumentException expected) { assertNotNull(expected.getMessage()); }
+        }
+    }
+
+    @Test public void pendingImportantReminderSurvivesTwoHundredNewHistoryItems() throws Exception {
+        JSONObject pending = new JSONObject().put("key", "pending-important").put("packageName", "example.parcel")
+            .put("revision", 4).put("applied", true).put("action", "retain").put("important", true)
+            .put("reminderAt", 9000).put("savedAtMs", 1000);
+        JSONArray records = new JSONArray().put(pending);
+        for (int i = 0; i < 200; i++) records.put(new JSONObject().put("key", "history-" + i).put("savedAtMs", 2000 + i));
+        JSONArray kept = NotificationManagementRules.trimHistory(records, 0, 4, java.util.Set.of("example.parcel"));
+        assertEquals(201, kept.length());
+        assertEquals("pending-important", kept.getJSONObject(0).getString("key"));
+        assertSame(pending, kept.getJSONObject(0));
+        pending.put("reminderAt", 0).put("reminderAttemptedAt", 9000);
+        assertEquals(200, NotificationManagementRules.trimHistory(records, 0, 4, java.util.Set.of("example.parcel")).length());
+    }
+
+    @Test public void obsoleteDismissedAndUnselectedRemindersDoNotBypassHistoryLimits() throws Exception {
+        JSONObject pending = new JSONObject().put("key", "old-important").put("packageName", "example.parcel")
+            .put("revision", 4).put("applied", true).put("action", "retain").put("important", true)
+            .put("reminderAt", 9000).put("savedAtMs", 1000);
+        JSONArray records = new JSONArray().put(pending);
+        for (int i = 0; i < 205; i++) records.put(new JSONObject().put("key", "history-" + i).put("savedAtMs", 2000 + i));
+        assertEquals(200, NotificationManagementRules.trimHistory(records, 0, 5, java.util.Set.of("example.parcel")).length());
+        assertEquals(200, NotificationManagementRules.trimHistory(records, 0, 4, java.util.Set.of()).length());
+        pending.put("dismissed", true);
+        assertEquals(200, NotificationManagementRules.trimHistory(records, 0, 4, java.util.Set.of("example.parcel")).length());
+        JSONArray dated = new JSONArray().put(new JSONObject().put("savedAtMs", 100)).put(new JSONObject().put("savedAtMs", 500));
+        assertEquals(1, NotificationManagementRules.trimHistory(dated, 300, 4, java.util.Set.of()).length());
+    }
+
 }

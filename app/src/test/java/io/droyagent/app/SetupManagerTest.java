@@ -24,6 +24,19 @@ public final class SetupManagerTest {
         assertEquals("all", SetupManager.validatedUpdate(new JSONObject().put("mode", "all"), CAPABILITIES).getString("mode"));
     }
 
+    @Test public void rootRevocationUsesTheFinalPresetAndExplicitOverride() throws Exception {
+        assertFalse(SetupManager.rootEnabledAfterUpdate(true, new JSONObject().put("mode", "dialogue")));
+        assertFalse(SetupManager.rootEnabledAfterUpdate(true, new JSONObject().put("mode", "assistant")));
+        assertFalse(SetupManager.rootEnabledAfterUpdate(true, new JSONObject().put("mode", "all")
+                .put("capabilities", new JSONObject().put("allowRoot", false))));
+        assertTrue(SetupManager.rootEnabledAfterUpdate(true, new JSONObject().put("mode", "custom")));
+        assertTrue(SetupManager.rootEnabledAfterUpdate(false, new JSONObject().put("mode", "all")));
+        assertTrue(SetupManager.rootEnabledAfterUpdate(false, new JSONObject()
+                .put("capabilities", new JSONObject().put("allowRoot", true))));
+        assertFalse(SetupManager.rootEnabledAfterUpdate(false, new JSONObject()
+                .put("capabilities", new JSONObject().put("allowObserve", true))));
+    }
+
     @Test public void rejectsSecretsUnknownKeysAndForgedReceipts() throws Exception {
         for (String key : new String[]{"apiKey", "token", "completed", "modelVerification", "deviceVerification", "configFingerprint", "modeSelected"}) {
             assertThrows(key, IllegalArgumentException.class, () ->

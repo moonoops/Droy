@@ -26,6 +26,9 @@ final class NotificationManagementRules {
         }
         config.remove("rules"); config.remove("cloudAnalysisEnabled");
         config.put("revision", config.optLong("revision", 1));
+        if (!config.has("silentTakeoverEnabled")) config.put("silentTakeoverEnabled", false);
+        if (!(config.get("silentTakeoverEnabled") instanceof Boolean))
+            throw new IllegalArgumentException(NativeLocale.text("静默接管开关无效", "Invalid silent takeover switch"));
         if (!config.has("reminderMinutes")) config.put("reminderMinutes", 5);
         reminderMinutes(config.get("reminderMinutes"));
         if (!config.has("exceptions")) config.put("exceptions", new JSONObject());
@@ -53,8 +56,8 @@ final class NotificationManagementRules {
     }
 
     static String defaultRule() {
-        return NativeLocale.text("保留有用通知，清除广告和营销推广。需要及时处理的重要事项按提醒间隔提醒；普通信息不打扰。无法确定时保留，不清除。",
-            "Keep useful notifications and remove advertising and promotions. Remind me about important matters requiring timely action at the configured reminder interval; do not interrupt me for ordinary information. When uncertain, keep the notification rather than clearing it.");
+        return NativeLocale.text("保留有用通知及原应用的提醒方式，清除广告和营销推广。需要及时处理的重要事项持续未清理时，按提醒间隔补充提醒一次；普通信息不追加提醒。无法确定时保留，不清除。",
+            "Keep useful notifications and their original app alert settings, and remove advertising and promotions. Add one reminder at the configured interval if an important matter requiring timely action remains uncleared; do not add reminders for ordinary information. When uncertain, keep the notification rather than clearing it.");
     }
 
     static String ruleText(JSONObject config) { return config.optString("ruleText", defaultRule()); }
@@ -199,6 +202,22 @@ final class NotificationManagementRules {
 
     static boolean scheduled(JSONObject receipt, long revision, boolean managed) {
         return managed && !receipt.optBoolean("dismissed") && receipt.optBoolean("applied") && receipt.optLong("revision") == revision;
+    }
+
+    static JSONArray trimHistory(JSONArray source, long earliest, long revision, Set<String> managed) throws Exception {
+        java.util.List<JSONObject> kept = new java.util.ArrayList<>();
+        int history = 0;
+        for (int i = source.length() - 1; i >= 0; i--) {
+            JSONObject record = source.getJSONObject(i);
+            boolean pending = scheduled(record, revision, managed.contains(record.optString("packageName")))
+                && record.optString("action").equals("retain") && record.optBoolean("important")
+                && record.optLong("reminderAt") > 0 && record.optLong("reminderAttemptedAt") == 0;
+            if (pending) kept.add(record);
+            else if (record.optLong("savedAtMs") >= earliest && history < 200) { kept.add(record); history++; }
+        }
+        JSONArray result = new JSONArray();
+        for (int i = kept.size() - 1; i >= 0; i--) result.put(kept.get(i));
+        return result;
     }
 
     static boolean obsoleteAlert(JSONObject previous, String sourceKey, String action, int nextId) {

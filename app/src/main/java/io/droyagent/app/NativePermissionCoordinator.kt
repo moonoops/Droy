@@ -21,6 +21,7 @@ import io.droyagent.app.nativeui.permissions.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -49,6 +50,7 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
     private lateinit var queue: PermissionSetup
     private var polling: Job? = null
     private var refreshing: Job? = null
+    private var rootRevocation: Job? = null
     private var refreshAgain = false
     private var resumed = false
     private var screenVisible = false
@@ -128,6 +130,10 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
     fun onAction(action: NativePermissionAction) {
         if (closed) return
         if (Looper.myLooper() != Looper.getMainLooper()) { main.post { onAction(action) }; return }
+        if (rootRevocation?.isActive == true && action != NativePermissionAction.Refresh && action != NativePermissionAction.DismissError) {
+            _state.update { it.copy(error = "permission_queue_busy") }
+            return
+        }
         try {
             when (action) {
                 NativePermissionAction.Refresh -> { _state.update { it.copy(error = null) }; refresh(); return }
@@ -218,7 +224,8 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
                 }
                 NativePermissionAction.DisableRoot -> {
                     if (queue.active()) queue.cancel()
-                    SetupManager.update(owner, JSONObject().put("capabilities", JSONObject().put("allowRoot", false)))
+                    revokeRoot()
+                    return
                 }
                 NativePermissionAction.ConfirmShizuku -> {
                     requireForeground(); requireIdleQueue()
@@ -277,6 +284,24 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
         refresh()
     }
 
+    private fun revokeRoot() {
+        _state.update { it.copy(fresh = false, loading = true, error = null) }
+        rootRevocation = scope.launch {
+            try {
+                // Restoring owned notification settings may invoke su. Finish the explicit
+                // revocation even if the user leaves this Activity while restoration runs.
+                withContext(NonCancellable + Dispatchers.IO) {
+                    SetupManager.update(owner, JSONObject().put("capabilities", JSONObject().put("allowRoot", false)))
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { _state.update { it.copy(error = "permission_action_failed") } }
+            finally {
+                rootRevocation = null
+                refresh()
+            }
+        }
+    }
+
     fun refresh() {
         if (closed || !::queue.isInitialized) return
         if (Looper.myLooper() != Looper.getMainLooper()) { main.post { refresh() }; return }
@@ -290,7 +315,8 @@ class NativePermissionCoordinator(private val owner: Activity, saved: Bundle?) {
                 val snapshot = withContext(Dispatchers.IO) { snapshot(queueSnapshot) }
                 if (!snapshot.root.running && policy.records()["root"]?.outcome == NativePermissionOutcome.REQUESTING)
                     policy.recordOutcome("root", if (snapshot.root.verified) NativePermissionOutcome.GRANTED else NativePermissionOutcome.NOT_GRANTED)
-                _state.update { snapshot.copy(error = it.error?.takeUnless { error -> error == "permission_state_failed" }, loading = false, fresh = true) }
+                val restoring = rootRevocation?.isActive == true
+                _state.update { snapshot.copy(error = it.error?.takeUnless { error -> error == "permission_state_failed" }, loading = restoring, fresh = !restoring) }
             } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
                 _state.update { it.copy(loading = false, fresh = false, error = "permission_state_failed") }

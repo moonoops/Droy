@@ -79,6 +79,7 @@ fun NativeProductSettingsScreen(
     var catalogError by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var refreshJob by remember { mutableStateOf<Job?>(null) }
+    var refreshPending by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
     var failureMessage by remember { mutableIntStateOf(R.string.nps_error) }
     var editor by remember { mutableStateOf<FieldEditor?>(null) }
@@ -109,24 +110,39 @@ fun NativeProductSettingsScreen(
             catch (_: Exception) { pets = controller.builtInPets(); catalogError = true }
         }
     }
+    fun refreshPage() {
+        refreshPending = true
+        if (busy || refreshJob?.isActive == true) return
+        refreshJob = scope.launch {
+            try {
+                do {
+                    refreshPending = false
+                    refresh()
+                    failed = false
+                } while (refreshPending && !busy)
+            }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { failed = true; failureMessage = personalizationFailure(error) }
+        }
+    }
     fun run(keepEditors: Boolean = false, action: suspend () -> Unit = {}) {
         if (busy) return
         refreshJob?.cancel(); refreshJob = null
         busy = true
         if (!keepEditors || confirmation == null) failed = false
         scope.launch {
-            try { action(); refresh(); if (!keepEditors) { editor = null; confirmation = null } }
+            try {
+                action()
+                refreshPending = false
+                refresh()
+                if (!keepEditors) { editor = null; confirmation = null }
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (error: Exception) { failed = true; failureMessage = personalizationFailure(error) }
-            finally { busy = false }
-        }
-    }
-    fun refreshPage() {
-        if (busy || refreshJob?.isActive == true) return
-        refreshJob = scope.launch {
-            try { refresh(); failed = false }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { failed = true; failureMessage = personalizationFailure(error) }
+            finally {
+                busy = false
+                if (refreshPending) refreshPage()
+            }
         }
     }
     LaunchedEffect(section) { refreshPage() }
@@ -136,6 +152,28 @@ fun NativeProductSettingsScreen(
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) refreshPage() }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
+    }
+    val notificationStateChanged by rememberUpdatedState { scope.launch { refreshPage() } }
+    DisposableEffect(host, lifecycle, section) {
+        var subscription: AutoCloseable? = null
+        fun updateSubscription() {
+            if (section == ProductSettingsSection.Notifications && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                if (subscription == null) {
+                    subscription = host.observeNotificationState { notificationStateChanged() }
+                    notificationStateChanged()
+                }
+            } else {
+                subscription?.close()
+                subscription = null
+            }
+        }
+        val observer = LifecycleEventObserver { _, _ -> updateSubscription() }
+        lifecycle.addObserver(observer)
+        updateSubscription()
+        onDispose {
+            subscription?.close()
+            lifecycle.removeObserver(observer)
+        }
     }
     val back = { if (notificationPage != null) notificationPage = null else actions.onBack() }
     BackHandler(enabled = editor == null && confirmation == null && !textRuleEditor) { back() }
@@ -150,6 +188,20 @@ fun NativeProductSettingsScreen(
                         try { snapshot = controller.snapshot(section).also { presentation.remember(section, it) } }
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) { failed = true; failureMessage = R.string.nps_error; break }
+                    }
+                }
+            }
+        }
+    }
+    val notificationPreparing = state?.optJSONObject("processing")?.optString("state") == "preparing"
+        || state?.optJSONObject("autoSilence")?.optString("state") == "syncing"
+    LaunchedEffect(lifecycle, section, notificationPage, notificationPreparing, state?.optLong("revision")) {
+        if (section == ProductSettingsSection.Notifications && notificationPage == null && notificationPreparing) {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                repeat(40) {
+                    delay(750)
+                    if (!busy && !textRuleEditor && confirmation == null) {
+                        refreshPage()
                     }
                 }
             }
@@ -306,13 +358,51 @@ fun NativeProductSettingsScreen(
                                 }
                                 if (state.optBoolean("requiresReview")) Text(stringResource(R.string.nps_review_rules),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
-                                if (state.optBoolean("enabled") && (!state.optBoolean("permissionGranted") || !state.optBoolean("connected"))) {
-                                    TextButton(onClick = actions.onPermissions) { Text(stringResource(R.string.nps_permissions)) }
+                                Spacer(Modifier.height(12.dp))
+                                val statusAction: (() -> Unit)? = when (state.optJSONObject("processing")?.optString("action")) {
+                                    "apps" -> ({ notificationPage = "apps" })
+                                    "permissions" -> actions.onPermissions
+                                    "model" -> actions.onModels
+                                    "resume" -> ({ run { actions.onStartRuntime() } })
+                                    "restore" -> ({ run { controller.notifications(JSONObject().put("operation", "configure").put("silentTakeoverEnabled", false)) } })
+                                    else -> null
+                                }
+                                NotificationOrganizationStatus(state, busy, statusAction, { run() })
+                                Spacer(Modifier.height(12.dp))
+                                val selectedCount = state.optInt("selectedAppCount", state.optJSONArray("apps").rows().count { it.optString("mode") == "managed" })
+                                DroySettingsLinkGroup(enabled = !busy, items = listOf(
+                                    DroySettingsLink(stringResource(R.string.nps_app_management), R.drawable.native_ui_apps, "native-product-field:nps_app_management",
+                                        stringResource(R.string.nps_selected_apps, selectedCount)) { notificationPage = "apps" },
+                                    DroySettingsLink(stringResource(R.string.nps_rules), R.drawable.native_settings_tune, "native-product-field:nps_rules") { textRuleEditor = true },
+                                ))
+                                Spacer(Modifier.height(12.dp))
+                                Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                        NotificationReminderChoices(state.optInt("reminderMinutes", 5), !busy) { minutes ->
+                                            run { controller.notifications(JSONObject().put("operation", "configure").put("reminderMinutes", minutes)) }
+                                        }
+                                    }
                                 }
                                 Spacer(Modifier.height(12.dp))
+                                DroySettingsToggle(stringResource(R.string.nps_silent_takeover), R.drawable.native_settings_notifications,
+                                    state.optBoolean("silentTakeoverEnabled"), !busy, 0, 1,
+                                    Modifier.testTag("native-product-switch:nps_silent_takeover")) { enabled ->
+                                    if (!enabled) run { controller.notifications(JSONObject().put("operation", "configure").put("silentTakeoverEnabled", false)) }
+                                    else confirmation = Confirmation(R.string.nps_silent_takeover_confirm) {
+                                        controller.notifications(JSONObject().put("operation", "configure").put("silentTakeoverEnabled", true))
+                                    }
+                                }
+                                Text(stringResource(R.string.nps_basic_organization_hint), style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
+                                if (state.optBoolean("silentTakeoverSuspended")) TextButton(onClick = {
+                                    confirmation = Confirmation(R.string.nps_silent_takeover_confirm) {
+                                        controller.notifications(JSONObject().put("operation", "configure").put("silentTakeoverEnabled", true))
+                                    }
+                                }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp).testTag("native-notification-recheck-takeover")) {
+                                    Text(stringResource(R.string.nps_recheck_takeover))
+                                }
+                                Spacer(Modifier.height(4.dp))
                                 DroySettingsLinkGroup(enabled = !busy, items = listOf(
-                                    DroySettingsLink(stringResource(R.string.nps_app_management), R.drawable.native_ui_apps, "native-product-field:nps_app_management") { notificationPage = "apps" },
-                                    DroySettingsLink(stringResource(R.string.nps_rules), R.drawable.native_settings_tune, "native-product-field:nps_rules") { textRuleEditor = true },
                                     DroySettingsLink(stringResource(R.string.nps_archive), R.drawable.native_settings_notifications, "native-product-field:nps_archive") { notificationPage = "history" },
                                 ))
                             }
@@ -479,8 +569,10 @@ fun NativeProductSettingsScreen(
                 if (failed) Text(stringResource(if (dialog.message == R.string.nps_reset_confirm) failureMessage else R.string.nps_error), color = MaterialTheme.colorScheme.error)
             }
         },
-            confirmButton = { TextButton(onClick = { run { dialog.action() } }, enabled = !busy && (dialog.message != R.string.nps_reset_confirm || actions.resetPersonalizationReady)) { Text(stringResource(R.string.nps_continue)) } },
-            dismissButton = { TextButton(onClick = { confirmation = null }, enabled = !busy) { Text(stringResource(R.string.nps_cancel)) } })
+            confirmButton = { TextButton(onClick = { run { dialog.action() } }, enabled = !busy && (dialog.message != R.string.nps_reset_confirm || actions.resetPersonalizationReady),
+                modifier = Modifier.testTag(if (dialog.message == R.string.nps_silent_takeover_confirm) "native-notification-takeover-confirm" else "native-product-confirm")) { Text(stringResource(R.string.nps_continue)) } },
+            dismissButton = { TextButton(onClick = { confirmation = null }, enabled = !busy,
+                modifier = Modifier.testTag(if (dialog.message == R.string.nps_silent_takeover_confirm) "native-notification-takeover-cancel" else "native-product-confirm-cancel")) { Text(stringResource(R.string.nps_cancel)) } })
     }
 }
 

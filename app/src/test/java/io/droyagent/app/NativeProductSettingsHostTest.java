@@ -1,11 +1,60 @@
 package io.droyagent.app;
 
+import android.content.SharedPreferences;
 import org.json.JSONObject;
 import org.junit.Test;
+import java.lang.reflect.Proxy;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.*;
 
 public class NativeProductSettingsHostTest {
+    private SharedPreferences notificationPreferences(AtomicReference<SharedPreferences.OnSharedPreferenceChangeListener> listener,
+            AtomicInteger unregistered) {
+        return (SharedPreferences) Proxy.newProxyInstance(SharedPreferences.class.getClassLoader(),
+            new Class<?>[]{SharedPreferences.class}, (proxy, method, args) -> {
+                if (method.getName().equals("registerOnSharedPreferenceChangeListener")) {
+                    assertNull(listener.getAndSet((SharedPreferences.OnSharedPreferenceChangeListener) args[0]));
+                    return null;
+                }
+                if (method.getName().equals("unregisterOnSharedPreferenceChangeListener")) {
+                    assertSame(listener.get(), args[0]);
+                    unregistered.incrementAndGet();
+                    return null;
+                }
+                throw new AssertionError("Unexpected preference access: " + method.getName());
+            });
+    }
+    @Test public void notificationObservationOnlyPublishesRelevantStateChanges() throws Exception {
+        AtomicReference<SharedPreferences.OnSharedPreferenceChangeListener> listener = new AtomicReference<>();
+        AtomicInteger changes = new AtomicInteger(), unregistered = new AtomicInteger();
+        SharedPreferences preferences = notificationPreferences(listener, unregistered);
+        try (AutoCloseable ignored = NativeProductSettingsHost.observeNotificationState(preferences, changes::incrementAndGet)) {
+            for (String key : new String[]{"notificationManagementData", "notificationManagementEnabled", "allowNotifications",
+                    "allowRoot", "capabilitiesDefaultDeny", "toolsStopped", "backgroundRuntimeEnabled",
+                    "backgroundRuntimeStopped", "languagePreference", null})
+                listener.get().onSharedPreferenceChanged(preferences, key);
+            assertEquals(10, changes.get());
+            for (String key : new String[]{"petId", "assistantName", "browserEncryptedDns", "apiKey", "allowLocationRead"})
+                listener.get().onSharedPreferenceChanged(preferences, key);
+            assertEquals(10, changes.get());
+        }
+        assertEquals(1, unregistered.get());
+    }
+    @Test public void notificationObservationStopsAfterIdempotentCloseIncludingQueuedCallbacks() throws Exception {
+        AtomicReference<SharedPreferences.OnSharedPreferenceChangeListener> listener = new AtomicReference<>();
+        AtomicInteger changes = new AtomicInteger(), unregistered = new AtomicInteger();
+        SharedPreferences preferences = notificationPreferences(listener, unregistered);
+        AutoCloseable subscription = NativeProductSettingsHost.observeNotificationState(preferences, changes::incrementAndGet);
+        listener.get().onSharedPreferenceChanged(preferences, "notificationManagementData");
+        subscription.close();
+        subscription.close();
+        listener.get().onSharedPreferenceChanged(preferences, "notificationManagementData");
+        listener.get().onSharedPreferenceChanged(preferences, null);
+        assertEquals(1, changes.get());
+        assertEquals(1, unregistered.get());
+    }
     @Test public void displayWriterCannotMutatePermissionsCredentialsOrMaintenance() {
         for (String key : new String[]{"allowControl", "backgroundRuntimeEnabled", "notificationManagementEnabled", "apiKey", "resetTheme", "clearHistory", "petId"})
             assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.checkedDisplay(key, true));
@@ -28,49 +77,50 @@ public class NativeProductSettingsHostTest {
             new JSONObject().put("localEnabled", false).put("operation", "send"), Set.of("localEnabled")));
     }
 
-    private JSONObject rule(String id, String pkg) throws Exception {
-        JSONObject rule = new JSONObject().put("packageName", pkg).put("instruction", "Keep delivery updates")
-            .put("defaultAction", "retain").put("repeatMinutes", 10).put("clearAfterHours", 24)
-            .put("entries", new org.json.JSONArray().put(new JSONObject().put("action", "notify")
-                .put("containsAny", new org.json.JSONArray().put("delivery")).put("containsAll", new org.json.JSONArray())));
-        if (id != null) rule.put("id", id);
-        return rule;
+    @Test public void notificationConfigurationPreservesRulesAndExplicitSafetyChoices() throws Exception {
+        JSONObject request = new JSONObject().put("operation", "configure").put("enabled", true)
+            .put("ruleText", "Keep delivery updates\n保留配送进展").put("reminderMinutes", 10)
+            .put("silentTakeoverEnabled", false);
+        String original = request.toString();
+        JSONObject checked = NativeProductSettingsHost.checkedNotificationRequest(request);
+        assertEquals(request.getString("ruleText"), checked.getString("ruleText"));
+        assertEquals(10, checked.getInt("reminderMinutes"));
+        assertFalse(checked.getBoolean("silentTakeoverEnabled"));
+        assertTrue(checked.getBoolean("enabled"));
+        assertEquals(original, request.toString());
+        checked.put("silentTakeoverEnabled", true);
+        assertFalse(request.getBoolean("silentTakeoverEnabled"));
     }
-    private JSONObject request(JSONObject rule, Object revision) throws Exception {
-        return new JSONObject().put("operation", "upsertRule").put("rule", rule).put("expectedRevision", revision);
+    @Test public void notificationConfigurationRejectsInvalidDelaysAndCoercedSwitches() throws Exception {
+        for (Object minutes : new Object[]{0, 6, 10.5, "5", JSONObject.NULL})
+            assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.checkedNotificationRequest(
+                new JSONObject().put("operation", "configure").put("reminderMinutes", minutes)));
+        for (String key : new String[]{"enabled", "resetRule", "silentTakeoverEnabled"})
+            assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.checkedNotificationRequest(
+                new JSONObject().put("operation", "configure").put(key, "false")));
+        assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.checkedNotificationRequest(
+            new JSONObject().put("operation", "configure").put("ruleText", "Keep deliveries").put("resetRule", true)));
     }
-    private JSONObject current(JSONObject... rules) throws Exception {
-        return new JSONObject().put("revision", 7).put("rules", new org.json.JSONArray(java.util.List.of(rules)));
+    @Test public void notificationSettingsRejectRetiredAndInternalOperations() throws Exception {
+        for (String operation : new String[]{"upsertRule", "deleteRule", "classificationContext", "send", "get"})
+            assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.checkedNotificationRequest(
+                new JSONObject().put("operation", operation)));
+        for (String field : new String[]{"cloudAnalysisEnabled", "exceptions", "packages", "allowRoot", "apiKey"})
+            assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.checkedNotificationRequest(
+                new JSONObject().put("operation", "configure").put(field, true)));
     }
-    @Test public void ruleEditPreservesIdentityConditionsAndInput() throws Exception {
-        JSONObject input = rule("existing", "example.shipping"); String before = input.toString();
-        JSONObject checked = NativeProductSettingsHost.prepareRule(request(input, 7), current(input));
-        assertEquals("existing", checked.getString("id"));
-        assertEquals("notify", checked.getJSONArray("entries").getJSONObject(0).getString("action"));
-        assertEquals(before, input.toString());
-        JSONObject created = NativeProductSettingsHost.prepareRule(request(rule(null, "*"), 7), current());
-        assertFalse(created.getString("id").isEmpty());
-    }
-    @Test public void staleDeletedOrSamePackageRulesCannotBeOverwritten() throws Exception {
-        JSONObject existing = rule("existing", "example.shipping");
-        assertThrows(NativeProductSettingsHost.RuleConflictException.class, () -> NativeProductSettingsHost.prepareRule(request(existing, 6), current(existing)));
-        assertThrows(NativeProductSettingsHost.RuleConflictException.class, () -> NativeProductSettingsHost.prepareRule(request(existing, 7), current()));
-        assertThrows(NativeProductSettingsHost.RuleConflictException.class, () -> NativeProductSettingsHost.prepareRule(request(rule(null, "example.shipping"), 7), current(existing)));
-        assertThrows(NativeProductSettingsHost.RuleConflictException.class, () -> NativeProductSettingsHost.prepareRule(request(rule("other", "example.shipping"), 7), current(existing, rule("other", "example.other"))));
-    }
-    @Test public void ruleSchemaUsesActualServiceLimitsAndRejectsSilentCoercion() throws Exception {
-        for (Object revision : new Object[]{"7", 7.5, -1, JSONObject.NULL})
-            assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.prepareRule(request(rule(null, "*"), revision), current()));
-        for (String field : new String[]{"repeatMinutes", "clearAfterHours"}) {
-            JSONObject input = rule(null, "*").put(field, 1441);
-            assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.prepareRule(request(input, 7), current()));
-        }
-        JSONObject empty = rule(null, "*"); empty.getJSONArray("entries").getJSONObject(0).put("containsAny", new org.json.JSONArray());
-        assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.prepareRule(request(empty, 7), current()));
-        JSONObject foreign = rule(null, "*").put("credentials", "fictional-value");
-        assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.prepareRule(request(foreign, 7), current()));
-        JSONObject invalid = rule(null, "*"); invalid.getJSONArray("entries").getJSONObject(0).put("containsAny", "delivery");
-        assertThrows(org.json.JSONException.class, () -> NativeProductSettingsHost.prepareRule(request(invalid, 7), current()));
+    @Test public void appSelectionOnlyAcceptsActualPackageIdentifiersAndSupportedModes() throws Exception {
+        JSONObject selected = new JSONObject().put("operation", "setApps").put("enabled", true)
+            .put("packageNames", new org.json.JSONArray().put("example.shipping").put("example.other"));
+        JSONObject checked = NativeProductSettingsHost.checkedNotificationRequest(selected);
+        assertEquals(selected.toString(), checked.toString());
+        assertEquals("allow", NativeProductSettingsHost.checkedNotificationRequest(new JSONObject()
+            .put("operation", "setAppMode").put("packageName", "example.shipping").put("mode", "allow")).getString("mode"));
+        assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.checkedNotificationRequest(
+            new JSONObject().put("operation", "setAppMode").put("packageName", "example.shipping").put("mode", "block")));
+        assertThrows(IllegalArgumentException.class, () -> NativeProductSettingsHost.checkedNotificationRequest(
+            new JSONObject().put("operation", "setApps").put("enabled", false)
+                .put("packageNames", new org.json.JSONArray().put("not an app"))));
     }
 
     @Test public void diagnosticsOnlyReturnsStructuredFieldsAndKnownCodeCounts() throws Exception {

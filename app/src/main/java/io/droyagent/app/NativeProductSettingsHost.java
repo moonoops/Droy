@@ -9,11 +9,29 @@ import org.json.JSONArray;
 
 /** Product settings service shared by native presenters. Never exposes a generic preference writer. */
 public final class NativeProductSettingsHost {
+    private static final Set<String> NOTIFICATION_STATE_KEYS = Set.of(
+        "notificationManagementData", "notificationManagementEnabled", "allowNotifications", "allowRoot",
+        ProductPermissions.DEFAULT_DENY, ProductPermissions.STOPPED, BackgroundRuntime.ENABLED,
+        BackgroundRuntime.STOPPED, "languagePreference");
     private final Context context;
     private final SharedPreferences preferences;
     public NativeProductSettingsHost(Context context) {
         this.context = context.getApplicationContext();
         preferences = this.context.getSharedPreferences("product", Context.MODE_PRIVATE);
+    }
+    public AutoCloseable observeNotificationState(Runnable changed) {
+        return observeNotificationState(preferences, changed);
+    }
+    static AutoCloseable observeNotificationState(SharedPreferences preferences, Runnable changed) {
+        java.util.concurrent.atomic.AtomicBoolean observing = new java.util.concurrent.atomic.AtomicBoolean(true);
+        SharedPreferences.OnSharedPreferenceChangeListener listener = (saved, key) -> {
+            if (observing.get() && (key == null || NOTIFICATION_STATE_KEYS.contains(key))) changed.run();
+        };
+        preferences.registerOnSharedPreferenceChangeListener(listener);
+        // SharedPreferences keeps a weak listener reference; the close handle owns it until disposal.
+        return () -> {
+            if (observing.compareAndSet(true, false)) preferences.unregisterOnSharedPreferenceChangeListener(listener);
+        };
     }
     public JSONArray builtInPets() throws Exception { return BuiltInPets.catalog(context); }
     public JSONObject snapshot(String section) throws Exception {
@@ -56,60 +74,42 @@ public final class NativeProductSettingsHost {
         for (java.util.Iterator<String> keys = value.keys(); keys.hasNext();)
             if (!allowed.contains(keys.next())) throw new IllegalArgumentException("unsupported_field");
     }
-    public JSONObject notificationManagement(JSONObject request) throws Exception {
+    static JSONObject checkedNotificationRequest(JSONObject request) throws Exception {
         Set<String> allowed = switch (request.getString("operation")) {
-            case "configure" -> Set.of("operation", "enabled", "ruleText", "resetRule");
+            case "configure" -> Set.of("operation", "enabled", "ruleText", "resetRule", "reminderMinutes", "silentTakeoverEnabled");
             case "setApps" -> Set.of("operation", "enabled", "packageNames");
             case "setAppMode" -> Set.of("operation", "packageName", "mode");
-            case "deleteRule" -> Set.of("operation", "id");
-            case "upsertRule" -> Set.of("operation", "rule", "expectedRevision");
             case "archive" -> Set.of("operation");
             default -> throw new IllegalArgumentException("unsupported_operation");
         };
         fields(request, allowed);
-        NotificationManagement service = NotificationManagement.get(context);
-        if (request.getString("operation").equals("upsertRule")) {
-            // The service uses this same monitor for all config mutations, including model-created rules.
-            synchronized (service) {
-                JSONObject checked = prepareRule(request, service.state(false));
-                return service.request(new JSONObject().put("operation", "upsertRule").put("rule", checked), true);
+        JSONObject checked = new JSONObject(request.toString());
+        for (String key : new String[]{"enabled", "resetRule", "silentTakeoverEnabled"}) {
+            if (checked.has(key)) checked.put(key, NativeUiProtocol.booleanArgument(checked, key));
+        }
+        switch (checked.getString("operation")) {
+            case "configure" -> {
+                if (checked.has("reminderMinutes"))
+                    checked.put("reminderMinutes", NotificationManagementRules.reminderMinutes(checked.get("reminderMinutes")));
+                if (checked.has("ruleText")) {
+                    if (checked.optBoolean("resetRule")) throw new IllegalArgumentException("rule_reset_conflict");
+                    checked.put("ruleText", NotificationManagementRules.text(checked.get("ruleText"), 24000, false));
+                }
+            }
+            case "setAppMode" -> {
+                checked.put("packageName", NotificationManagementRules.packageName(checked.get("packageName")));
+                checked.put("mode", NotificationManagementRules.appMode(checked.get("mode")));
+            }
+            case "setApps" -> {
+                NativeUiProtocol.booleanArgument(checked, "enabled");
+                JSONArray names = checked.getJSONArray("packageNames");
+                for (int i = 0; i < names.length(); i++) NotificationManagementRules.packageName(names.get(i));
             }
         }
-        return service.request(request, true);
-    }
-    public static final class RuleConflictException extends IllegalStateException {
-        RuleConflictException() { super("notification_rule_conflict"); }
-    }
-    static JSONObject prepareRule(JSONObject request, JSONObject current) throws Exception {
-        fields(request, Set.of("operation", "rule", "expectedRevision"));
-        Object revision = request.get("expectedRevision");
-        if (!(revision instanceof Number number) || !Double.isFinite(number.doubleValue())
-                || number.doubleValue() != Math.rint(number.doubleValue()) || number.longValue() < 1)
-            throw new IllegalArgumentException("invalid_revision");
-        if (number.longValue() != current.getLong("revision")) throw new RuleConflictException();
-        JSONObject input = request.getJSONObject("rule");
-        fields(input, Set.of("id", "packageName", "instruction", "defaultAction", "repeatMinutes", "clearAfterHours", "entries"));
-        if (input.has("entries")) {
-            org.json.JSONArray entries = input.getJSONArray("entries");
-            for (int i = 0; i < entries.length(); i++) {
-                JSONObject entry = entries.getJSONObject(i);
-                fields(entry, Set.of("action", "containsAny", "containsAll"));
-                if (entry.has("containsAny")) entry.getJSONArray("containsAny");
-                if (entry.has("containsAll")) entry.getJSONArray("containsAll");
-            }
-        }
-        JSONObject checked = NotificationManagementRules.rule(input);
-        org.json.JSONArray rules = current.getJSONArray("rules");
-        boolean foundId = false;
-        for (int i = 0; i < rules.length(); i++) {
-            JSONObject existing = rules.getJSONObject(i);
-            boolean sameId = input.has("id") && existing.getString("id").equals(input.getString("id"));
-            foundId |= sameId;
-            if (existing.getString("packageName").equals(checked.getString("packageName")) && !sameId)
-                throw new RuleConflictException();
-        }
-        if (input.has("id") && !foundId) throw new RuleConflictException();
         return checked;
+    }
+    public JSONObject notificationManagement(JSONObject request) throws Exception {
+        return NotificationManagement.get(context).request(checkedNotificationRequest(request), true);
     }
     public JSONObject configureProactive(JSONObject request) throws Exception {
         fields(request, Set.of("messagesEnabled", "tasksEnabled"));

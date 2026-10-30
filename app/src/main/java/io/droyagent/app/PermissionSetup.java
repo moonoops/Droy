@@ -59,11 +59,19 @@ final class PermissionSetup {
     boolean active() { return !current.isEmpty() || !pending.isEmpty(); }
 
     void configure(String mode) throws Exception {
+        beginConfiguration(mode);
+        SetupManager.update(owner, new JSONObject().put("mode", mode));
+        finishConfiguration(mode);
+    }
+
+    void beginConfiguration(String mode) {
         if (!PermissionSetupPlan.validMode(mode))
             throw new IllegalArgumentException(NativeLocale.text("无效的权限配置", "Invalid permission configuration"));
         if (active() && !mode.equals("dialogue")) throw new IllegalStateException(NativeLocale.text("请先完成或停止当前授权", "Finish or stop the current authorization first"));
         if (mode.equals("dialogue")) cancel();
-        SetupManager.update(owner, new JSONObject().put("mode", mode));
+    }
+
+    void finishConfiguration(String mode) throws Exception {
         NotificationManagement.get(owner).rescan();
         if (mode.equals("dialogue")) { cancel(); return; }
         Set<String> enabled = new LinkedHashSet<>();

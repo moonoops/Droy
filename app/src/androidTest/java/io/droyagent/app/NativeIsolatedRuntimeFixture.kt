@@ -17,7 +17,9 @@ import org.junit.Assume.assumeTrue
 import org.junit.rules.ExternalResource
 
 /** Compose's rule must wrap this rule; the shared marker also blocks legacy fixture overlap. */
-class NativeIsolatedRuntimeFixture(private val destination: String = "workbench", private val allowRoot: Boolean? = null) : ExternalResource() {
+class NativeIsolatedRuntimeFixture(private val destination: String = "workbench", private val allowRoot: Boolean? = null,
+    private val providerAsset: String = "native-workbench-provider.mjs",
+    private val afterPreferencesRestored: (() -> Unit)? = null) : ExternalResource() {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     val context: Context get() = instrumentation.targetContext
     val runtimeTransport = NativeLocalTransport()
@@ -77,7 +79,7 @@ class NativeIsolatedRuntimeFixture(private val destination: String = "workbench"
             ownsHome = true
             val profile = File(home, "profiles/mobile").apply { assertTrue(mkdirs()) }
             val plugin = File(home, "native-fixture.mjs")
-            plugin.writeText(instrumentation.context.assets.open("native-workbench-provider.mjs").bufferedReader().use { it.readText() })
+            plugin.writeText(instrumentation.context.assets.open(providerAsset).bufferedReader().use { it.readText() })
             File(profile, "cordis.patch.yml").writeText(JSONArray()
                 .put(JSONObject().put("id", "agent-default-model").put("config", JSONObject().put("provider", "droy-native-fixture").put("model", "native-local")))
                 .put(JSONObject().put("id", "locale").put("config", JSONObject().put("preference", fixtureLocale)))
@@ -140,6 +142,7 @@ class NativeIsolatedRuntimeFixture(private val destination: String = "workbench"
                 val preferenceRoot = File(context.applicationInfo.dataDir, "shared_prefs")
                 val names = preferenceRoot.listFiles()?.mapNotNull { it.name.takeIf { n -> n.endsWith(".xml") }?.removeSuffix(".xml") }.orEmpty()
                 for (name in (preferences.keys + names).distinct()) restorePreferences(context.getSharedPreferences(name, 0), preferences[name].orEmpty())
+                afterPreferencesRestored?.invoke()
                 preferenceRoot.listFiles()?.filter { it.isFile && (it.name.endsWith(".xml") || it.name.endsWith(".xml.bak")) }?.forEach { current ->
                     if (current.name !in originalPreferenceFiles) assertTrue("Remove only fixture-created preferences", current.delete())
                 }

@@ -571,6 +571,7 @@ public final class RuntimeService extends Service {
         // Android's main thread must remain free while DSH cancels and flushes.
         new Thread(() -> {
             try {
+                NotificationManagement.get(this).restoreBeforeRuntimeStop();
                 if (wasReady && child != null && child.isAlive()) {
                     HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:" + webPort + "/droy/shutdown").openConnection();
                     connection.setRequestMethod("POST");

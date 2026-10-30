@@ -96,6 +96,13 @@ public final class NativeRuntimeHost {
 
     public static void stop(Context context) { RuntimeService.requestStop(context); }
 
+    public static void resumeNotificationManagement(Context context) {
+        BackgroundRuntime.startedByUser(context);
+        RuntimeService.resumeOperations(context);
+        start(context);
+        NotificationManagement.get(context).rescan();
+    }
+
     public static void onStarted(Context context) {
         visible.incrementAndGet();
         SetupManager.initialize(context);

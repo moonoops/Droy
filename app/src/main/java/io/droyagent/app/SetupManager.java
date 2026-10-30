@@ -138,6 +138,13 @@ final class SetupManager {
         return value;
     }
 
+    static boolean rootEnabledAfterUpdate(boolean current, JSONObject value) throws Exception {
+        String mode = value.optString("mode", "custom");
+        boolean next = mode.equals("custom") ? current : mode.equals("all") || mode.equals("assistant") && ASSISTANT.contains("allowRoot");
+        JSONObject capabilities = value.optJSONObject("capabilities");
+        return capabilities != null && capabilities.has("allowRoot") ? capabilities.getBoolean("allowRoot") : next;
+    }
+
     static synchronized JSONObject update(Context context, JSONObject input) throws Exception {
         initialize(context);
         JSONObject value = validatedUpdate(input, capabilityKeys(context));
@@ -181,6 +188,11 @@ final class SetupManager {
         if (value.has("source")) installation.putString("source", value.getString("source"));
         if (value.has("shizukuChoice")) installation.putString("shizukuChoice", value.getString("shizukuChoice"));
         if (choicesChanged) installation.remove("deviceVerification");
+        RuntimeException restorationFailure = null;
+        if (ProductPermissions.allowed(product, "allowRoot") && !rootEnabledAfterUpdate(true, value)) {
+            try { NotificationManagement.get(context).prepareRootRevocation(); }
+            catch (RuntimeException failure) { restorationFailure = failure; }
+        }
         commit(settings);
         commit(installation);
         if (choicesChanged) {
@@ -188,6 +200,9 @@ final class SetupManager {
             RuntimeService.memoryPermissionsChanged(context);
             RuntimeService.applySavedOperationState();
         }
+        if (restorationFailure != null) throw new IllegalStateException(NativeLocale.text(
+                "Root 授权已关闭，但原通知设置未能恢复。请在通知整理中查看并处理。",
+                "Root access is off, but the original notification settings could not be restored. Review them in notification organization."), restorationFailure);
         return status(context);
     }
 

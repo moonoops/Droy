@@ -74,4 +74,5 @@ data class ProductSettingsActions(
     val onSafeHistoryMaintenance: (() -> Unit)? = null,
     val onOpenPetStudio: (() -> Unit)? = null,
     val resetPersonalizationReady: Boolean = false,
+    val onModels: (() -> Unit)? = null,
 )
