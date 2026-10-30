@@ -1191,7 +1191,7 @@ public final class MainActivity extends Activity {
               const install = () => {
                 const root = document.documentElement;
                 if (!root) return false;
-                root.setAttribute('data-droy-mobile', '0.2.1-rc.4');
+                root.setAttribute('data-droy-mobile', '0.2.1-rc.5');
                 let sheet = document.getElementById('droy-mobile-layout');
                 if (!sheet) {
                   sheet = document.createElement('style');

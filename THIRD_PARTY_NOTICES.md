@@ -5,7 +5,7 @@ models, dictionaries and other resources retain their original licenses.
 
 | Component | License and source |
 | --- | --- |
-| DeepSeek Harness (DSH) 0.2.1-rc.4 | MIT, copyright 2026 DeepSeek. [Upstream](https://github.com/deepseek-ai/deepseek-harness). Droy adds Android integration and assembly patches. |
+| DeepSeek Harness (DSH) 0.2.1-rc.5 | MIT, copyright 2026 DeepSeek. [Upstream](https://github.com/deepseek-ai/deepseek-harness). Droy adds Android integration and assembly patches. |
 | DSH npm dependencies | Per-package licenses and notices, retained in the generated runtime archive. Versions are pinned in [package-lock.json](runtime/dsh/package-lock.json). |
 | Android Node, Bash, ripgrep and shared libraries | Multiple licenses; see [runtime notices](runtime/THIRD_PARTY_NODE.md). |
 | Speech libraries, models and dictionaries | Separate code and model licenses; see [speech notices](runtime/voice/THIRD_PARTY.md). |

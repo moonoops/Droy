@@ -246,4 +246,95 @@ class NativeSessionReducerTest {
         assertTrue(reducer.running)
     }
 
+    @Test fun reasoningDisplayStripsOnlyLeadingSignatureAndItsLineBreaks() {
+        val cases = listOf(
+            "Ordinary reasoning" to "Ordinary reasoning",
+            "普通思考正文" to "普通思考正文",
+            "\n  Original text  \n" to "\n  Original text  \n",
+            " \t\r\u00A0\uFEFF" to " \t\r\u00A0\uFEFF",
+            "<note>Original text</note>" to "<note>Original text</note>",
+            "Text <signature>keep</signature>" to "Text <signature>keep</signature>",
+            " <signature>keep</signature>" to " <signature>keep</signature>",
+            "<signature>metadata</signature>\n\r\n\nVisible" to "Visible",
+            "<signature>metadata</signature>  Visible\n" to "  Visible\n",
+            "<signature>metadata</signature>\rVisible" to "\rVisible",
+            "<signature>first</signature><signature>second</signature>" to "<signature>second</signature>",
+        )
+        for ((raw, display) in cases) {
+            val reducer = NativeSessionReducer()
+            val record = reasoningMessage(1, raw)
+            val original = record.toString()
+            assertTrue(reducer.accept(snapshot(1, record)))
+            assertEquals(raw, display, reducer.messages().single().text)
+            assertEquals("Projection must leave the original event intact", original, record.toString())
+        }
+        val literal = "<signature>ordinary answer</signature>"
+        val reducer = NativeSessionReducer()
+        reducer.accept(snapshot(1, message(1, literal, "assistant/message")))
+        assertEquals("Text blocks are not reasoning", literal, reducer.messages().single().text)
+    }
+
+    @Test fun signatureOnlyReasoningNeverCreatesAnEmptyRowOrAnswerSeparator() {
+        val blankTails = listOf("", " ", "\t", "\r", "\u00A0", "\uFEFF", "\r\n\n", " \t\r\u00A0")
+        val hidden = listOf("", "<", "<sig", "<signature>", "<signature>metadata</sign") +
+            blankTails.map { "<signature>metadata</signature>$it" }
+        for (raw in hidden) {
+            val reducer = NativeSessionReducer()
+            reducer.accept(snapshot(1, reasoningMessage(1, raw)))
+            assertTrue("No displayable reasoning: $raw", reducer.messages().isEmpty())
+            reducer.accept(snapshot(1, reasoningMessage(1, raw, "Final answer")))
+            assertEquals("Final answer", reducer.messages().single().text)
+        }
+    }
+
+    @Test fun splitReasoningSignatureStaysHiddenUntilBodyAndCommitKeepsRawEvent() {
+        val reducer = NativeSessionReducer()
+        reducer.accept(snapshot(0))
+        reducer.accept(live(JSONObject().put("type", "start").put("attemptId", "signature-a")
+            .put("turn", 1).put("step", 1).put("startedAfterSeq", 0)))
+        val deltas = listOf("<", "signature>fixture.metadata", "</signature>\r\n", "Visible thought")
+        deltas.forEachIndexed { index, text ->
+            val chunk = live(JSONObject().put("type", "chunk").put("attemptId", "signature-a").put("index", index)
+                .put("chunk", JSONObject().put("type", "reasoning-delta").put("index", 0).put("text", text)))
+            val rawFrame = chunk.toString()
+            assertTrue(reducer.accept(chunk))
+            if (index < 3) assertTrue(reducer.messages().isEmpty())
+            else { assertEquals("Visible thought", reducer.messages().single().text); assertTrue(reducer.messages().single().streaming) }
+            assertEquals(rawFrame, chunk.toString())
+        }
+        val committed = reasoningMessage(1, deltas.joinToString(""), "Final answer")
+        val original = committed.toString()
+        assertTrue(reducer.accept(committed))
+        assertEquals("Visible thought\n\nFinal answer", reducer.messages().single().text)
+        assertFalse(reducer.messages().single().streaming)
+        assertEquals(original, committed.toString())
+        assertTrue(reducer.accept(snapshot(1, committed)))
+        assertEquals("Visible thought\n\nFinal answer", reducer.messages().single().text)
+    }
+
+    @Test fun reconnectReasoningBaselinePreservesSignatureAcrossChunkBoundaries() {
+        val reducer = NativeSessionReducer()
+        val baseline = snapshot(0).put("assistantStream", JSONObject().put("revision", 1).put("activeAttempt", JSONObject()
+            .put("attemptId", "signature-a").put("turn", 1).put("step", 1).put("startedAfterSeq", 0).put("nextIndex", 1)
+            .put("stream", JSONArray().put(JSONObject().put("type", "reasoning-chunks").put("index", 0).put("time0", 100)
+                .put("texts", JSONArray().put("<sig").put("nature>metadata</signature>\n")).put("dt", JSONArray().put(1))))))
+        val original = baseline.toString()
+        assertTrue(reducer.accept(baseline))
+        assertTrue(reducer.messages().isEmpty())
+        assertTrue(reducer.accept(live(JSONObject().put("type", "chunk").put("attemptId", "signature-a").put("index", 1)
+            .put("chunk", JSONObject().put("type", "reasoning-delta").put("index", 0).put("text", "恢复后的思考")))))
+        assertEquals("恢复后的思考", reducer.messages().single().text)
+        assertEquals(original, baseline.toString())
+        assertTrue(reducer.accept(baseline))
+        assertTrue("Reconnection replaces the former live text", reducer.messages().isEmpty())
+    }
+
+    private fun reasoningMessage(seq: Int, reasoning: String, answer: String? = null): JSONObject =
+        message(seq, "", "assistant/message").apply {
+            getJSONObject("event").getJSONObject("data").getJSONObject("message").put("content", JSONArray()
+                .put(JSONObject().put("type", "reasoning").put("text", reasoning)).apply {
+                    if (answer != null) put(JSONObject().put("type", "text").put("text", answer))
+                })
+        }
+
 }

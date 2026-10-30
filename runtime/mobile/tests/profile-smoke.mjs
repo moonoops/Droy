@@ -19,7 +19,7 @@ const home=await mkdtemp(join(tmpdir(),'droy-profile-'));
 const token='fictional-smoke-test-token-1234567890';
 const reservation=createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));const port=reservation.address().port;await new Promise(r=>reservation.close(r));
 const nativeCalls=[];
-const nativeState={pluginActive:false,localEnabled:true,appsEnabled:false,channels:[{id:'system',available:true},{id:'pet',available:false},{id:'app',available:false}]};
+const nativeState={pluginActive:false,messagesEnabled:true,tasksEnabled:true,channels:[{id:'system',available:true},{id:'pet',available:false}]};
 const nativeBridge=createServer(async(req,res)=>{
  assert.equal(req.headers.authorization,`Bearer ${token}`);
  let body='';for await(const chunk of req)body+=chunk;
@@ -76,7 +76,13 @@ try {
  assert.ok(ctx.get('droyCompanions'),'non-Root companion service must activate');
  const defaultPath=await realpath(join(home,'workspace'));
  const initial=ctx.workspaceRegistry.list().filter(workspace=>workspace.path===defaultPath);assert.equal(initial.length,1);
- assert.equal(ctx.workspaceRegistry.list().length,3,'default workspace and the two managed companion workspaces');
+ assert.equal(ctx.workspaceRegistry.list().length,1,'fresh companions do not create workspaces before use');
+ const initialCompanions=await ctx.get('droyCompanions').store.profiles();
+ assert.equal(initialCompanions.length,1,'fresh installations contain one default companion');
+ assert.equal(initialCompanions[0].templateId,'kaka');
+ assert.match(initialCompanions[0].id,/^companion-[0-9a-f-]{36}$/);
+ assert.equal(initialCompanions[0].workspaceId,null);
+ assert.equal(initialCompanions[0].chatSessionId,null);
  assert.equal(initial[0].title,'默认空间');
  assert.equal(ctx.get('droyInitialization').defaultWorkspaceId,initial[0].id,'mobile initialization exposes the durable default identity');
  const same=await ctx.workspaceRegistry.initializeDefault(async()=>{throw new Error('Must reuse existing default');});assert.equal(same.id,initial[0].id);
@@ -182,7 +188,7 @@ try {
    ...(enabled===undefined?{}:{method:'POST',body:JSON.stringify({enabled})})});
   assert.equal(response.status,200);return response.json();
  };
- nativeState.localEnabled=false;
+ nativeState.tasksEnabled=false;
  const disabled=await notificationControl(false);assert.equal(disabled.application,'applied');assert.equal(disabled.enabled,false);
  assert.equal(ctx.get('droyNotifications'),undefined);assert.ok(!ctx.tools.schemas().some(tool=>tool.name==='droy_notify'));
  assert.ok(ctx.tools.schemas().some(tool=>tool.name==='android_observe'),'disabling notification plugin retains Android Use');
@@ -191,7 +197,7 @@ try {
  const disabledBoot=spawnSync(process.execPath,[join(runtime,'mobile/bootstrap.mjs')],{env:process.env});assert.equal(disabledBoot.status,0);
  assert.equal(await readFile(join(home,'profiles/mobile/cordis.patch.yml'),'utf8'),disabledPatch,'bootstrap preserves disabled plugin choice');
  const enabled=await notificationControl(true);assert.equal(enabled.application,'applied');assert.equal(enabled.enabled,true);
- assert.equal((await ctx.get('droyNotifications').channels()).localEnabled,false,'plugin reload preserves Android-owned channel preferences');
+ assert.equal((await ctx.get('droyNotifications').channels()).tasksEnabled,false,'plugin reload preserves Android-owned task notification preferences');
  assert.ok(nativeCalls.some(call=>call.operation==='activate'&&call.enabled===false));
  const page=await fetch(`http://127.0.0.1:${port}/`,{headers:authenticated});assert.equal(page.status,200);
  const html=await page.text();assert.ok(html.includes('dsh-client-ui-chat'));assert.ok(html.includes('dsh-client-ui-attachment'),'reviewed attachment presentation must be in the client roster');assert.ok(html.includes('dsh-client-ui-workspace'));assert.ok(html.includes('dsh-client-ui-sidebar-right'));for(const name of ['plugin-manager','schedule','sidebar-terminal','sidebar-browser','skill','goal','plan','permission-presets','reference','approval'])assert.ok(html.includes(`dsh-client-ui-${name}`),`${name} must be in the client roster`);
