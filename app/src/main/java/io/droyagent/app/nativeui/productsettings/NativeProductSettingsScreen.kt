@@ -38,6 +38,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import io.droyagent.app.NativeProductSettingsHost
+import io.droyagent.app.NativeLocale
 import io.droyagent.app.NativePersonalizationReset
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.ui.DroyIcon
@@ -105,7 +106,7 @@ fun NativeProductSettingsScreen(
         if (section == ProductSettingsSection.Pet) {
             try { pets = controller.pets(); catalogError = false }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { pets = listOf(JSONObject().put("id", "default").put("name", "Droy").put("status", "ready")); catalogError = true }
+            catch (_: Exception) { pets = controller.builtInPets(); catalogError = true }
         }
     }
     fun run(keepEditors: Boolean = false, action: suspend () -> Unit = {}) {
@@ -368,6 +369,12 @@ fun NativeProductSettingsScreen(
                 }
                 item {
                     DroySettingsSectionTitle(stringResource(R.string.nps_artwork))
+                    actions.onOpenPetStudio?.let { open ->
+                        OutlinedButton(onClick = open, enabled = !busy,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("native-product-pet-studio-open")) {
+                            Text(stringResource(R.string.nps_studio))
+                        }
+                    }
                     if (catalogError) {
                         Text(stringResource(R.string.nps_catalog_error))
                         TextButton(onClick = { run() }, enabled = !busy) { Text(stringResource(R.string.nps_retry)) }
@@ -388,7 +395,9 @@ fun NativeProductSettingsScreen(
                             if (selected) key(pet.getString("id")) {
                                 AndroidView(factory = { host.createPetPreview() }, modifier = Modifier.size(56.dp))
                             } else DroyIcon(R.drawable.native_settings_pets, null)
-                            Text(pet.optString("name"), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                            val names = pet.optJSONObject("nameLocales")
+                            val artworkName = if (names != null) NativeLocale.text(names.getString("zh"), names.getString("en")) else pet.optString("name")
+                            Text(artworkName, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                             RadioButton(selected, onClick = null, enabled = enabled)
                         }
                     }

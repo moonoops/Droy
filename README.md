@@ -91,7 +91,7 @@ After setup, try:
 | Conversations | Streaming replies, history, attachments and configurable models. |
 | Phone interaction | Open apps, observe pages, take screenshots, tap, swipe and enter text. |
 | Voice | Hold to talk, local speech recognition, voice conversations and optional readout. |
-| Companion | An animated character with configurable appearance, personality and task updates. |
+| Companion | Built-in pixel-art black cat, marmot and alpaca, with custom artwork and task updates. |
 | Chat companion presets | Choose Kaka, Maimai, Dafeiyu or Lady Claude. A fresh installation starts with one Kaka; add other companions from the preset picker. Each keeps its own persona, conversations and memory, with an independently configurable model. |
 | Companion chat stickers | Import static ZIP packs into a shared local library and choose enabled packs for each companion. [Usage](runtime/mobile/companions/STICKERS.md). |
 | Notifications | Content rules, model-assisted analysis and reminders. |
@@ -99,9 +99,11 @@ After setup, try:
 | Extensions | Skills, plugins, MCP and automations through DSH. |
 | Languages | Chinese and English. |
 
-### A cat companion on your screen
+### A companion on your screen
 
-When needed, Droy appears on your screen as a little cat. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
+When needed, Droy appears on your screen as the character you select. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
+
+Choose the built-in black cat, marmot or alpaca in **Settings → Pet**, without configuring an image model. Tap the on-screen companion and choose **Play actions** in its bubble to play kneading, the marmot's scream, or the alpaca's neck stretch and spit animations. Task answers and approvals take priority. **Pet studio** lets you preview every action before applying a character.
 
 <details>
 <summary><strong>View companion task updates and handoff</strong></summary>

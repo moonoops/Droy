@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.provider.Settings;
 import java.util.Set;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 /** Product settings service shared by native presenters. Never exposes a generic preference writer. */
 public final class NativeProductSettingsHost {
@@ -14,6 +15,7 @@ public final class NativeProductSettingsHost {
         this.context = context.getApplicationContext();
         preferences = this.context.getSharedPreferences("product", Context.MODE_PRIVATE);
     }
+    public JSONArray builtInPets() throws Exception { return BuiltInPets.catalog(context); }
     public JSONObject snapshot(String section) throws Exception {
         return switch (section) {
             case "browser-network" -> new JSONObject()

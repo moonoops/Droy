@@ -11,7 +11,13 @@ internal data class PetCandidate(
     val updatedAt: Long, val completed: Int, val total: Int, val persona: String, val voice: List<String>,
 ) { val generating get() = stage in listOf(PetStage.Persona, PetStage.Reference, PetStage.Actions) }
 internal data class PetCatalog(val available: Boolean, val imageAvailable: Boolean, val provider: String?,
-    val imageModel: String?, val textProvider: String?, val textModel: String?, val pets: List<PetCandidate>)
+    val imageModel: String?, val textProvider: String?, val textModel: String?, val pets: List<PetCandidate>,
+    val builtIns: List<PetBuiltIn> = emptyList())
+internal data class PetLocalizedText(val zh: String, val en: String) {
+    fun text(language: String) = if (language == "en") en else zh
+}
+internal data class PetBuiltIn(val id: String, val name: PetLocalizedText, val description: PetLocalizedText)
+internal data class PetPreviewAction(val id: String, val label: PetLocalizedText)
 internal data class PetDraft(val id: String? = null, val name: String = "", val description: String = "", val personality: String = "") {
     fun body(): JSONObject {
         require(name.trim().isNotEmpty() && name.trim().length <= 40 && description.trim().isNotEmpty() && description.length <= 1000 && personality.length <= 1000)
@@ -27,6 +33,34 @@ internal object PetStudioJson {
     }
     private fun routing(value: Any?): String? = (value as? String)?.takeIf {
         it.matches(Regex("[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}")) && !it.contains("://") && !it.contains("sk-")
+    }
+    private fun localized(row: JSONObject, key: String, limit: Int): PetLocalizedText {
+        val pair = row.getJSONObject(key)
+        return PetLocalizedText(pair.text("zh", limit), pair.text("en", limit))
+    }
+    fun builtIns(rows: JSONArray): List<PetBuiltIn> {
+        require(rows.length() in 1..12)
+        val result = (0 until rows.length()).map { index ->
+            val row = rows.getJSONObject(index)
+            val id = row.text("id", 36)
+            if (id != "default") checkPetId(id)
+            PetBuiltIn(id, localized(row, "nameLocales", 160), localized(row, "descriptionLocales", 4000))
+        }
+        require(result.map { it.id }.distinct().size == result.size)
+        return result
+    }
+    fun actions(rows: JSONArray): List<PetPreviewAction> {
+        require(rows.length() in 1..128)
+        val result = (0 until rows.length()).map { index ->
+            val row = rows.getJSONObject(index)
+            val id = row.text("id", 64)
+            require(id.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,63}")))
+            val label = if (row.optJSONObject("labelLocales") != null) localized(row, "labelLocales", 160)
+                else row.text("label", 160).let { PetLocalizedText(it, it) }
+            PetPreviewAction(id, label)
+        }
+        require(result.map { it.id }.distinct().size == result.size)
+        return result
     }
     fun candidate(row: JSONObject): PetCandidate {
         val id = row.text("id", 36); checkPetId(id)
@@ -54,7 +88,8 @@ internal object PetStudioJson {
         val rows = value.getJSONArray("pets"); require(rows.length() <= 100)
         val pets = (0 until rows.length()).map { candidate(rows.getJSONObject(it)) }; require(pets.map { it.id }.distinct().size == pets.size)
         return PetCatalog(value.getBoolean("available"), value.getBoolean("imageAvailable"), routing(value.opt("provider")),
-            routing(value.opt("model")), routing(value.opt("textProvider")), routing(value.opt("textModel")), pets)
+            routing(value.opt("model")), routing(value.opt("textProvider")), routing(value.opt("textModel")), pets,
+            value.optJSONArray("builtIns")?.let(::builtIns) ?: emptyList())
     }
 }
 

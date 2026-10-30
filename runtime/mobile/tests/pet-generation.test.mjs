@@ -10,6 +10,7 @@ import { PET_ACTION_GROUPS, inspectActionAtlas, actionPrompt, brandLogoPrompt, v
 import { encodePng, decodePng } from '../png.mjs';
 
 const input = { name: '测试猫', description: '纯黑黄色眼睛的小猫，左耳戴一个蓝色耳环', personality: '温柔，话少，有一点傲娇，关心我' };
+const builtInRoot = new URL('../../../app/src/main/assets/pet/', import.meta.url);
 function png(rows = 1, still = false, opaque = false) {
   const width = 256, height = Math.max(256, rows * 64), channels = 4;
   const pixels = Buffer.alloc(width * height * 4);
@@ -47,7 +48,7 @@ async function fixture(t, generator = mockGenerator(), personaGenerator = mockPe
   const home = await mkdtemp(join(tmpdir(), 'droy-pet-generation-'));
   const defaultLogoFile = join(home, 'default-brand-logo.png');
   await writeFile(defaultLogoFile, png());
-  const service = createPetCreationService({ home, generator, personaGenerator, defaultLogoFile });
+  const service = createPetCreationService({ home, generator, personaGenerator, defaultLogoFile, builtInRoot });
   t.after(async () => { service.dispose(); await service.waitForIdle(); await rm(home, { recursive: true, force: true }); });
   return { home, service, generator };
 }
@@ -337,7 +338,7 @@ test('all creation routes require authenticated local session before accessing d
   const home = await mkdtemp(join(tmpdir(), 'droy-pet-routes-')), routes = new Map();
   t.after(() => rm(home, { recursive: true, force: true }));
   const ctx = { webServer: { register(route) { routes.set(route.path, route.handler); } }, effect() {}, logger: { warn() {} } };
-  installPetGeneration(ctx, { home, generator: mockGenerator({ available: false }), personaGenerator: mockPersonaGenerator() });
+  installPetGeneration(ctx, { home, generator: mockGenerator({ available: false }), personaGenerator: mockPersonaGenerator(), builtInRoot });
   for (const [url, handler] of routes) {
     const req = Readable.from([]); Object.assign(req, { url, method: url.endsWith('create') ? 'POST' : 'GET', headers: { host: 'evil.example' } });
     let status, result;
@@ -354,7 +355,7 @@ test('logo route serves only authenticated local PNGs with no-store and rejects 
   const ctx = { webServer: { register(route) { routes.set(route.path, route.handler); } }, effect() {}, logger: { warn() {} } };
   const generator = mockGenerator(), original = generator.generate;
   generator.generate = args => args.prompt.includes('mobile app and in-app brand logo') ? png(2) : original(args);
-  const service = installPetGeneration(ctx, { home, generator, personaGenerator: mockPersonaGenerator(), defaultLogoFile });
+  const service = installPetGeneration(ctx, { home, generator, personaGenerator: mockPersonaGenerator(), defaultLogoFile, builtInRoot });
   t.after(async () => {
     service.dispose(); await service.waitForIdle(); await rm(home, { recursive: true, force: true });
     if (previousToken === undefined) delete process.env.DROY_WEB_TOKEN; else process.env.DROY_WEB_TOKEN = previousToken;

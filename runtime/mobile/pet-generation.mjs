@@ -7,6 +7,7 @@ import { resolveMobileLocale } from './locale.mjs';
 import { translateBackendText, localizePetResponse } from './backend-i18n.mjs';
 import { createPetPersona, petDescription, createDshPetPersonaGenerator, validateGeneratedPersona, PetPersonaError } from './pet-persona.mjs';
 import { PET_ACTION_GROUPS, actionPrompt, referencePrompt, brandLogoPrompt, validatePetPng, validateBrandLogoPng, inspectActionAtlas, createPetManifest } from './pet-generation-assets.mjs';
+import { defaultBuiltInRoot, isBuiltInPet, builtInPetFile, readBuiltInPets } from './built-in-pets.mjs';
 
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const IMAGE_MODELS = new Set(['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-1.5']);
@@ -131,7 +132,8 @@ const personaSourceKey = pet => JSON.stringify({ appearance: pet.description, pe
 
 export function createPetCreationService({ home, generator, personaGenerator, reportError = () => {},
   getLocale = () => process.env.DROY_LOCALE,
-  defaultLogoFile = new URL('./assets/brand-logo.png', import.meta.url) }) {
+  builtInRoot = defaultBuiltInRoot,
+  defaultLogoFile }) {
   const root = home ? join(home, 'pets') : null, jobs = new Map(), pending = new Set();
   let disposed = false;
   let mutation = Promise.resolve();
@@ -152,6 +154,7 @@ export function createPetCreationService({ home, generator, personaGenerator, re
   }
 
   async function directory(id) {
+    if (isBuiltInPet(id)) throw new PetCreationError('BUILT_IN_READ_ONLY', '这份形象方案已完成；修改时请创建新方案，以保留当前形象', 409);
     if (!root) throw new PetCreationError('HOME_REQUIRED', '形象方案保存位置尚未就绪，请重新打开应用', 503);
     if (id !== undefined && !ID.test(id)) throw new PetCreationError('INVALID_ID', '形象方案编号无效');
     await mkdir(root, { recursive: true, mode: 0o700 });
@@ -311,14 +314,15 @@ export function createPetCreationService({ home, generator, personaGenerator, re
 
   const service = {
     async list() {
-      const folder = await directory();
-      const names = (await readdir(folder)).filter(name => ID.test(name));
+      const builtIns = await readBuiltInPets(builtInRoot, readBounded, getLocale());
+      const folder = root ? await directory() : null;
+      const names = folder ? (await readdir(folder)).filter(name => ID.test(name) && !isBuiltInPet(name)) : [];
       const pets = [];
       for (const id of names) {
         try { pets.push(view(await load(id))); }
         catch { reportError('DROY_PET_DRAFT_READ_FAILED'); }
       }
-      return { ...await availability(), pets: pets.sort((a, b) => b.updatedAt - a.updatedAt) };
+      return { ...await availability(), builtIns, pets: pets.sort((a, b) => b.updatedAt - a.updatedAt) };
     },
     async create(input) {
       assertIdle();
@@ -338,7 +342,10 @@ export function createPetCreationService({ home, generator, personaGenerator, re
       await save(pet);
       return start(pet, 'reference');
     },
-    async status(id) { return view(await load(id)); },
+    async status(id) {
+      if (isBuiltInPet(id)) return { ...(await readBuiltInPets(builtInRoot, readBounded, getLocale())).find(pet => pet.id === id), status: 'ready' };
+      return view(await load(id));
+    },
     async generate({ id, group }) {
       assertIdle(id);
       const pet = await load(id);
@@ -367,6 +374,14 @@ export function createPetCreationService({ home, generator, personaGenerator, re
       return start(pet, 'reference');
     },
     async asset(id, file) {
+      if (isBuiltInPet(id)) {
+        const manifest = JSON.parse((await readBounded(builtInPetFile(builtInRoot, id, 'pet.json'), 512 * 1024)).toString('utf8'));
+        const files = new Set(['pet.json', 'reference.png', manifest.branding?.logo,
+          ...Object.values(manifest.atlases).map(atlas => atlas.file)]);
+        if (!files.has(file)) throw new PetCreationError('NOT_FOUND', '素材不存在', 404);
+        return { body: await readBounded(builtInPetFile(builtInRoot, id, file), file === 'pet.json' ? 512 * 1024 : 20 * 1024 * 1024),
+          type: file === 'pet.json' ? 'application/json; charset=utf-8' : 'image/png' };
+      }
       const pet = await load(id);
       if (file === 'pet.json') {
         if (pet.status !== 'ready') throw new PetCreationError('NOT_READY', '形象动作尚未完成', 409);
@@ -380,7 +395,9 @@ export function createPetCreationService({ home, generator, personaGenerator, re
     async brandLogo(id = 'default') {
       if (id !== 'default' && !ID.test(id)) throw new PetCreationError('INVALID_ID', '形象方案编号无效');
       let bytes;
-      if (id !== 'default') {
+      if (isBuiltInPet(id)) bytes = id === 'default' && defaultLogoFile
+        ? await readBounded(defaultLogoFile, 20 * 1024 * 1024) : (await service.asset(id, 'brand-logo.png')).body;
+      else if (id !== 'default') {
         const pet = await load(id);
         if (pet.brandLogoReady && pet.referenceCurrent !== false) {
           bytes = await readBounded(join(await directory(id), 'brand-logo.png'), 20 * 1024 * 1024);
@@ -388,7 +405,8 @@ export function createPetCreationService({ home, generator, personaGenerator, re
       }
       // Earlier complete packages have no brand logo; keep their animation usable
       // and display the built-in Droy mark until a new package is selected.
-      bytes ??= await readBounded(defaultLogoFile, 20 * 1024 * 1024);
+      bytes ??= defaultLogoFile ? await readBounded(defaultLogoFile, 20 * 1024 * 1024)
+        : (await service.asset('default', 'brand-logo.png')).body;
       validateBrandLogoPng(bytes);
       return { body: bytes, type: 'image/png' };
     },
@@ -446,6 +464,7 @@ export function installPetGeneration(ctx, options = {}) {
   const service = createPetCreationService({ home: options.home ?? process.env.DSH_HOME, generator, personaGenerator,
     getLocale: () => resolveMobileLocale(ctx),
     defaultLogoFile: options.defaultLogoFile,
+    builtInRoot: options.builtInRoot,
     reportError: code => ctx.logger.warn(code) });
   ctx.effect(() => () => service.dispose());
   const routes = {

@@ -13,6 +13,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -21,6 +22,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import io.droyagent.app.NativePetStudioHost
+import io.droyagent.app.NativeLocale
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.ui.DroyIconAction
 import kotlinx.coroutines.*
@@ -36,6 +38,7 @@ fun NativePetStudioScreen(host: NativePetStudioHost, onBack: () -> Unit, modifie
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     var catalog by remember { mutableStateOf<PetCatalog?>(null) }
+    var builtIns by remember { mutableStateOf<List<PetBuiltIn>?>(null) }
     var selected by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
@@ -52,8 +55,9 @@ fun NativePetStudioScreen(host: NativePetStudioHost, onBack: () -> Unit, modifie
     var confirmation by remember { mutableStateOf<GenerationRequest?>(null) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     suspend fun read() {
+        val local = withContext(Dispatchers.IO) { PetStudioJson.builtIns(host.builtIns()) to host.selectedId() }
+        builtIns = local.first; selected = local.second
         catalog = client.list()
-        selected = withContext(Dispatchers.IO) { host.selectedId() }
         reviewedSnapshot = true; failure = null
     }
     LaunchedEffect(client, lifecycle, refreshKey) {
@@ -65,7 +69,7 @@ fun NativePetStudioScreen(host: NativePetStudioHost, onBack: () -> Unit, modifie
                     delay(2500)
                 } while (isActive)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { failure = R.string.npss_load_error }
+            catch (_: Exception) { failure = if (builtIns == null) R.string.npss_asset_error else R.string.npss_load_error }
             finally { loading = false }
         }
     }
@@ -107,6 +111,8 @@ fun NativePetStudioScreen(host: NativePetStudioHost, onBack: () -> Unit, modifie
     val generating = catalog?.pets?.any { it.generating } == true
     val enabled = !busy && !generating && !unknown
     val generationAvailable = enabled && !loading && catalog?.available == true
+    val formItemIndex = (if (loading || busy) 1 else 0) + (if (failure != null) 1 else 0) +
+        (if (unknown) 1 else 0) + 1 + (builtIns?.size ?: 0)
     BackHandler { if (previewId != null) previewId = null else onBack() }
     Scaffold(modifier.fillMaxSize().testTag("native-pet-studio"), contentWindowInsets = WindowInsets(0, 0, 0, 0), topBar = {
         Surface {
@@ -127,7 +133,33 @@ fun NativePetStudioScreen(host: NativePetStudioHost, onBack: () -> Unit, modifie
                 OutlinedButton(onClick = { unknown = false; failure = null }, enabled = reviewedSnapshot && !busy, modifier = Modifier.testTag("native-pet-studio-reviewed")) { Text(stringResource(R.string.npss_reviewed)) }
             }
             item {
-                OutlinedCard(Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.npss_builtins), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.npss_builtin_description), style = MaterialTheme.typography.bodySmall)
+            }
+            items(builtIns ?: emptyList(), key = { "builtin:${it.id}" }) { pet ->
+                OutlinedCard(Modifier.fillMaxWidth().testTag("native-pet-studio-builtin:${pet.id}")) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Box(Modifier.size(88.dp)) {
+                                PetStill(host, pet.id, "reference.png", refreshKey.toLong(), R.string.npss_image_alt, Modifier.fillMaxSize(), compact = true)
+                            }
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(pet.name.text(NativeLocale.active()), style = MaterialTheme.typography.titleMedium)
+                                Text(pet.description.text(NativeLocale.active()), style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        if (selected == pet.id) Text(stringResource(R.string.npss_selected), modifier = Modifier.testTag("native-pet-studio-selected:${pet.id}"))
+                        else Button(onClick = { apply(pet.id) }, enabled = !busy, modifier = Modifier.heightIn(min = 48.dp).testTag("native-pet-studio-apply:${pet.id}")) { Text(stringResource(R.string.npss_apply)) }
+                        TextButton(onClick = { previewId = if (previewId == pet.id) null else pet.id }, enabled = !busy,
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("native-pet-studio-preview:${pet.id}")) {
+                            Text(stringResource(if (previewId == pet.id) R.string.npss_close_preview else R.string.npss_preview))
+                        }
+                        if (previewId == pet.id) PetPreview(host, pet.id)
+                    }
+                }
+            }
+            item {
+                OutlinedCard(Modifier.fillMaxWidth().testTag("native-pet-studio-form")) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.npss_name)) }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("native-pet-studio-name"))
                         OutlinedTextField(appearance, { appearance = it }, label = { Text(stringResource(R.string.npss_appearance)) }, minLines = 3, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("native-pet-studio-appearance"))
@@ -150,11 +182,6 @@ fun NativePetStudioScreen(host: NativePetStudioHost, onBack: () -> Unit, modifie
                 }
             }
             item {
-                Text(stringResource(R.string.npss_default), style = MaterialTheme.typography.titleMedium)
-                if (selected == "default") Text(stringResource(R.string.npss_selected))
-                else TextButton(onClick = { apply("default") }, enabled = !busy, modifier = Modifier.testTag("native-pet-studio-apply:default")) { Text(stringResource(R.string.npss_apply)) }
-                TextButton(onClick = { previewId = if (previewId == "default") null else "default" }, enabled = !busy) { Text(stringResource(R.string.npss_preview)) }
-                if (previewId == "default") PetPreview(host, "default")
                 Text(stringResource(R.string.npss_list), style = MaterialTheme.typography.titleMedium)
                 if (catalog?.pets?.isEmpty() == true) Text(stringResource(R.string.npss_empty))
             }
@@ -183,7 +210,7 @@ fun NativePetStudioScreen(host: NativePetStudioHost, onBack: () -> Unit, modifie
                         if (!pet.generating) TextButton(onClick = {
                             editingId = if (pet.stage == PetStage.Ready) null else pet.id
                             name = pet.name; appearance = pet.description; personality = pet.personality
-                            scope.launch { listState.animateScrollToItem(0) }
+                            scope.launch { listState.animateScrollToItem(formItemIndex) }
                         }, enabled = !busy, modifier = Modifier.testTag("native-pet-studio-edit:${pet.id}")) { Text(stringResource(if (pet.stage == PetStage.Ready) R.string.npss_copy else R.string.npss_edit)) }
                         if (!pet.generating && pet.stage != PetStage.Ready && pet.reference && pet.referenceCurrent) Button(onClick = { confirmation = GenerationRequest(generateId = pet.id) }, enabled = generationAvailable, modifier = Modifier.testTag("native-pet-studio-continue:${pet.id}")) {
                             Text(stringResource(if (pet.stage == PetStage.Error) R.string.npss_continue else R.string.npss_generate))
@@ -207,7 +234,8 @@ private fun stageLabel(stage: PetStage): Int = when (stage) {
     PetStage.Actions -> R.string.npss_actions; PetStage.ReferenceReady -> R.string.npss_reference_ready; PetStage.Ready -> R.string.npss_ready; PetStage.Error -> R.string.npss_failed
 }
 
-@Composable private fun PetStill(host: NativePetStudioHost, id: String, file: String, revision: Long, description: Int) {
+@Composable private fun PetStill(host: NativePetStudioHost, id: String, file: String, revision: Long, description: Int,
+    modifier: Modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp), compact: Boolean = false) {
     var image by remember(id, file, revision) { mutableStateOf<Bitmap?>(null) }
     var failed by remember(id, file, revision) { mutableStateOf(false) }
     var retry by remember(id, file, revision) { mutableIntStateOf(0) }
@@ -221,16 +249,20 @@ private fun stageLabel(stage: PetStage): Int = when (stage) {
         catch (_: Exception) { failed = true }
         finally { image = null; loaded?.recycle() }
     }
-    image?.let { Image(it.asImageBitmap(), stringResource(description), Modifier.fillMaxWidth().heightIn(max = 260.dp)) }
+    image?.let { Image(it.asImageBitmap(), stringResource(description), modifier,
+        filterQuality = if (compact) FilterQuality.None else FilterQuality.Low) }
     if (image == null && !failed) LinearProgressIndicator(Modifier.fillMaxWidth())
     if (failed) {
-        Text(stringResource(R.string.npss_asset_error))
-        TextButton(onClick = { retry++ }) { Text(stringResource(R.string.npss_refresh)) }
+        Column {
+            Text(stringResource(R.string.npss_asset_error))
+            if (!compact) TextButton(onClick = { retry++ }) { Text(stringResource(R.string.npss_refresh)) }
+        }
     }
 }
 
 @Composable private fun PetPreview(host: NativePetStudioHost, id: String) {
     var preview by remember(id) { mutableStateOf<NativePetStudioHost.Preview?>(null) }
+    var states by remember(id) { mutableStateOf<List<PetPreviewAction>>(emptyList()) }
     var failed by remember(id) { mutableStateOf(false) }
     var state by remember(id) { mutableStateOf("idle") }
     var left by remember(id) { mutableStateOf(true) }
@@ -239,12 +271,16 @@ private fun stageLabel(stage: PetStage): Int = when (stage) {
     LaunchedEffect(host, id, retry) {
         failed = false
         var loaded: NativePetStudioHost.Preview? = null
+        var loadedStates: List<PetPreviewAction> = emptyList()
         try {
-            runInterruptible(Dispatchers.IO) { loaded = host.loadPreview(id) }
-            preview = loaded; awaitCancellation()
+            runInterruptible(Dispatchers.IO) {
+                loaded = host.loadPreview(id)
+                loadedStates = PetStudioJson.actions(requireNotNull(loaded).actions())
+            }
+            states = loadedStates; preview = loaded; awaitCancellation()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { failed = true }
-        finally { preview = null; loaded?.close() }
+        finally { preview = null; states = emptyList(); loaded?.close() }
     }
     if (preview == null && !failed) LinearProgressIndicator(Modifier.fillMaxWidth())
     if (failed) {
@@ -253,13 +289,15 @@ private fun stageLabel(stage: PetStage): Int = when (stage) {
     }
     preview?.let { assets ->
         val description = stringResource(R.string.npss_preview_alt)
-        key(id, sequence) { AndroidView(factory = { context -> assets.createView(context).apply { contentDescription = description } }, update = { assets.play(it, state, left) }, modifier = Modifier.fillMaxWidth().height(220.dp)) }
+        key(id, sequence) { AndroidView(factory = { context -> assets.createView(context).apply { contentDescription = description } }, update = { assets.play(it, state, left) }, modifier = Modifier.fillMaxWidth().height(220.dp).testTag("native-pet-studio-stage:$id")) }
         var menu by remember { mutableStateOf(false) }
-        val states = listOf("idle" to R.string.npss_idle, "working" to R.string.npss_working, "speaking" to R.string.npss_speaking,
-            "waiting" to R.string.npss_waiting, "tap" to R.string.npss_tap, "success" to R.string.npss_success, "peekLeft" to R.string.npss_peek_left, "peekRight" to R.string.npss_peek_right)
         Box {
-            OutlinedButton(onClick = { menu = true }) { Text(stringResource(states.first { it.first == state }.second)) }
-            DropdownMenu(menu, { menu = false }) { states.forEach { (value, label) -> DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { state = value; menu = false; sequence++ }) } }
+            OutlinedButton(onClick = { menu = true }, modifier = Modifier.heightIn(min = 48.dp).testTag("native-pet-studio-action-picker:$id")) {
+                Text(states.firstOrNull { it.id == state }?.label?.text(NativeLocale.active()) ?: state)
+            }
+            DropdownMenu(menu, { menu = false }) { states.forEach { action -> DropdownMenuItem(
+                text = { Text(action.label.text(NativeLocale.active())) }, modifier = Modifier.testTag("native-pet-studio-action:${action.id}"),
+                onClick = { state = action.id; menu = false; sequence++ }) } }
         }
         Row {
             TextButton(onClick = { left = !left; sequence++ }) { Text(stringResource(if (left) R.string.npss_right else R.string.npss_left)) }

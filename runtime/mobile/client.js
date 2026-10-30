@@ -910,6 +910,17 @@ window.__ModuleLoader__.load({
         mirror: state.mirrorSafe === true && ['left', 'right'].includes(state.facing) && state.facing !== facing };
     }
 
+    function petPreviewActions(manifest) {
+      return Object.entries(manifest.states || {}).filter(([id]) =>
+        /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(id) && !['completed', 'stopped'].includes(id))
+        .map(([id, state]) => ({ id, label: state.label || id, labelLocales: state.labelLocales }));
+    }
+
+    function petLocalizedField(row, field) {
+      const language = droyLocale?.getSnapshot().active === 'en' ? 'en' : 'zh';
+      return row[`${field}Locales`]?.[language] || row[field] || '';
+    }
+
     function createPetPreview(canvas, manifest, images, target) {
       const context = canvas.getContext('2d');
       if (!context) throw new Error(droyText("这个设备无法预览形象动画"));
@@ -930,6 +941,7 @@ window.__ModuleLoader__.load({
           canvas.width = Math.round(width * density); canvas.height = Math.round(height * density);
         }
         context.setTransform(density, 0, 0, density, 0, 0);
+        context.imageSmoothingEnabled = manifest.rendering?.style !== 'pixel';
         context.clearRect(0, 0, width, height);
         const progress = Math.min(1, elapsed / Math.max(1, bodyPose.duration + (peekIntro ? 500 : 0)));
         if (!(exiting && progress === 1)) {
@@ -946,7 +958,7 @@ window.__ModuleLoader__.load({
           const y = height - 24 - (active === 'enterJump' ? Math.sin(progress * Math.PI) * 34 : 0);
           context.save(); context.translate(x, y);
           if (pose.mirror) context.scale(-1, 1);
-          context.shadowColor = 'rgba(180,180,180,.7)'; context.shadowBlur = 1;
+          context.shadowColor = 'rgba(180,180,180,.7)'; context.shadowBlur = manifest.rendering?.style === 'pixel' ? 0 : 1;
           context.drawImage(images[pose.file], sx, sy, sw, sh, -sw * scale / 2, -sh * scale, sw * scale, sh * scale);
           context.restore();
         }
@@ -1012,7 +1024,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
 .droy-touch-switch[role=switch][aria-checked]{width:48px;height:48px;padding:0;background:transparent;border-radius:8px}.droy-touch-switch[role=switch]:before{content:'';position:absolute;left:6px;top:14px;width:36px;height:20px;border-radius:999px;background:var(--dsw-alias-border-l3);pointer-events:none}.droy-touch-switch[role=switch][aria-checked=true]:before{background:var(--dsw-alias-brand-primary)}.droy-touch-switch[role=switch]>span{position:absolute;left:8px;top:16px}
 .droy-notification-exception-link{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;min-height:48px;text-align:left;white-space:normal}.droy-notification-exceptions[role=dialog]{position:fixed;inset:0;box-sizing:border-box;width:100vw;max-width:none;height:100dvh;max-height:none;margin:0;border-radius:0;padding:calc(var(--droy-safe-top,0px) + 8px) calc(var(--droy-safe-right,0px) + 16px) max(var(--droy-safe-bottom,0px),var(--droy-ime-bottom,0px)) calc(var(--droy-safe-left,0px) + 16px);overflow:hidden}.droy-notification-exceptions button[aria-label]{min-width:48px;min-height:48px}.droy-notification-exceptions-content{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}.droy-notification-exceptions-content>div:first-child{flex:none;padding:0 0 8px}.droy-notification-exceptions-content>div:last-child{display:flex;flex:none;min-height:0;margin:0;padding:0}.droy-notification-exceptions-body{display:flex;flex:none;flex-direction:column;gap:16px;min-width:0;min-height:0}.droy-notification-exceptions-body .droy-input{flex:none;min-height:50px;height:50px}.droy-notification-exceptions-body .droy-input>input{box-sizing:border-box;min-height:48px;height:48px;padding:0}.droy-notification-exception{padding:16px 0;border-bottom:.5px solid var(--dsw-alias-border-l2);min-width:0}.droy-notification-exception .droy-row-title{display:block;overflow-wrap:anywhere}.droy-notification-modes{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.droy-notification-modes .droy-button{flex:1 1 80px;min-height:48px;height:auto;padding:8px;white-space:normal;line-height:20px}.droy-notification-modes [aria-pressed=true]{border-color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base));font-weight:600}
 .droy-notification-settings{flex-direction:column;align-items:stretch;gap:12px}.droy-notification-header{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0}.droy-notification-details{min-width:0}.droy-notification-details>summary{display:flex;align-items:center;gap:8px;min-height:48px;cursor:pointer;font-size:14px}.droy-notification-details>summary:before{content:'›';font-size:20px;transform:rotate(0deg)}.droy-notification-details[open]>summary:before{transform:rotate(90deg)}.droy-notification-details>summary:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px}.droy-notification-body{display:flex;flex-direction:column;gap:12px;padding-top:4px;min-width:0}.droy-notification-body .droy-button,.droy-notification-settings>.droy-actions .droy-button{min-height:48px;height:auto;white-space:normal;overflow-wrap:anywhere;line-height:20px;padding:8px 12px}.droy-notification-body .droy-actions{margin-top:0}.droy-notification-list{max-height:320px;overflow-y:auto;overscroll-behavior:contain;min-width:0}.droy-notification-rule,.droy-notification-entry{display:flex;flex-direction:column;gap:6px;padding:12px 0;border-bottom:.5px solid var(--dsw-alias-border-l2);min-width:0;overflow-wrap:anywhere}.droy-notification-rule .droy-actions{justify-content:flex-end}.droy-notification-group-title{margin:4px 0;font-size:14px;font-weight:500}.droy-notification-empty{margin:0;padding:8px 0;color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px}
-.droy-pet-studio{display:flex;flex-direction:column;gap:12px;min-width:0;width:100%}.droy-pet-studio-body{display:flex;flex-direction:column;gap:14px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2)}.droy-pet-form{display:flex;flex-direction:column;gap:12px}.droy-pet-field{display:flex;flex-direction:column;gap:5px;min-width:0}.droy-pet-field textarea{box-sizing:border-box;resize:vertical;min-height:80px;width:100%;max-width:100%;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px}.droy-pet-field textarea:focus-visible,.droy-pet-stage:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,var(--dsw-alias-label-primary));outline-offset:2px}.droy-pet-studio .droy-button{min-height:48px;height:auto;white-space:normal;overflow-wrap:anywhere;line-height:20px;padding:8px 12px}.droy-pet-card{display:flex;flex-direction:column;gap:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:12px;min-width:0}.droy-pet-card .droy-row-title{overflow-wrap:anywhere}.droy-pet-reference{width:144px;max-width:100%;height:144px;object-fit:contain;align-self:center;background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base));border-radius:8px}.droy-pet-voice{margin:0;padding-left:20px;font-size:13px;line-height:22px;overflow-wrap:anywhere}.droy-pet-stage{display:block;box-sizing:border-box;width:100%;height:164px;padding:0;overflow:hidden;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base));touch-action:pan-y;position:relative}.droy-pet-stage canvas{display:block;width:100%;height:100%}.droy-pet-preview{display:flex;flex-direction:column;gap:8px}.droy-pet-preview .droy-actions{gap:6px}.droy-pet-preview .droy-button{flex:1 1 62px;padding:8px}.droy-pet-current{font-size:12px;color:var(--dsw-alias-label-secondary)}
+.droy-pet-studio{display:flex;flex-direction:column;gap:12px;min-width:0;width:100%}.droy-pet-studio-body{display:flex;flex-direction:column;gap:14px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2)}.droy-pet-form{display:flex;flex-direction:column;gap:12px}.droy-pet-field{display:flex;flex-direction:column;gap:5px;min-width:0}.droy-pet-field textarea{box-sizing:border-box;resize:vertical;min-height:80px;width:100%;max-width:100%;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;line-height:22px}.droy-pet-field textarea:focus-visible,.droy-pet-stage:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,var(--dsw-alias-label-primary));outline-offset:2px}.droy-pet-studio .droy-button{min-height:48px;height:auto;white-space:normal;overflow-wrap:anywhere;line-height:20px;padding:8px 12px}.droy-pet-card{display:flex;flex-direction:column;gap:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:12px;min-width:0}.droy-pet-card .droy-row-title{overflow-wrap:anywhere}.droy-pet-reference{width:144px;max-width:100%;height:144px;object-fit:contain;align-self:center;background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base));border-radius:8px}.droy-pet-voice{margin:0;padding-left:20px;font-size:13px;line-height:22px;overflow-wrap:anywhere}.droy-pet-stage{display:block;box-sizing:border-box;width:100%;height:164px;padding:0;overflow:hidden;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-l2,var(--dsw-alias-bg-base));touch-action:pan-y;position:relative}.droy-pet-stage canvas{display:block;width:100%;height:100%}.droy-pet-preview{display:flex;flex-direction:column;gap:8px}.droy-pet-preview select{box-sizing:border-box;max-width:100%;min-height:48px;padding:8px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit}.droy-pet-preview .droy-actions{gap:6px}.droy-pet-preview .droy-button{flex:1 1 62px;padding:8px}.droy-pet-current{font-size:12px;color:var(--dsw-alias-label-secondary)}
 .droy-permissions{color:var(--dsw-alias-label-primary);font-size:14px;line-height:22px}.droy-section-title{font-size:16px;font-weight:500;margin:24px 0 4px}.droy-permissions>.droy-section-title:first-child{margin-top:0}.droy-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.droy-state{padding:12px 0;font-size:13px;line-height:20px}.droy-error{color:var(--dsw-alias-state-danger-primary,var(--dsw-alias-label-primary));font-size:13px;line-height:20px;padding:10px 0}.droy-status{font-size:12px;color:var(--dsw-alias-label-tertiary)}.droy-system-row{align-items:center;gap:16px}.droy-system-row .droy-row-copy{gap:4px}.droy-system-row .droy-button{flex:0 1 45%;font-size:12px}.droy-system-row .droy-button{min-height:var(--droy-touch-target,48px);height:auto;white-space:normal;line-height:18px;padding:8px 10px}.droy-file-row{align-items:flex-start}.droy-advanced{margin-top:24px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:16px}.droy-advanced summary{cursor:pointer;min-height:32px}.droy-inline-error{margin-top:8px}
 .droy-permission-presets .droy-button,.droy-permission-confirm .droy-button{flex:1 1 150px;min-height:48px;height:auto;white-space:normal;line-height:22px;overflow-wrap:anywhere;padding:10px 12px}.droy-permission-confirm[role=dialog]{box-sizing:border-box;width:calc(100vw - 32px);max-width:420px;max-height:calc(100dvh - 32px);overflow:auto}.droy-permission-confirm-content{min-width:0;overflow-wrap:anywhere}.droy-permission-confirm .droy-description{line-height:1.6}.droy-permission-confirm .droy-actions{padding-bottom:4px}
 .droy-audio-settings{flex-direction:column;align-items:stretch;gap:12px}.droy-audio-settings details{min-width:0}.droy-audio-settings summary{display:flex;align-items:center;min-height:48px;cursor:pointer;font-weight:500}.droy-audio-body{display:flex;flex-direction:column;gap:12px;min-width:0;padding-top:8px}.droy-audio-body label{display:flex;flex-direction:column;gap:6px;min-width:0;font-size:14px;line-height:22px}.droy-audio-body select,.droy-audio-body input{box-sizing:border-box;width:100%;max-width:100%;min-height:48px;padding:10px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font:inherit}.droy-audio-body .droy-audio-check{display:flex;flex-direction:row;align-items:center;gap:10px;min-height:48px}.droy-audio-check input{width:22px;min-height:22px;flex:none}.droy-audio-body .droy-button{min-height:48px;height:auto;white-space:normal;line-height:20px;padding:8px 12px}.droy-audio-card{display:flex;flex-direction:column;gap:6px;min-width:0;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:12px;overflow-wrap:anywhere}.droy-audio-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:22px;margin:0}.droy-audio-card .droy-actions{margin-top:4px}.droy-audio-body .droy-actions{margin-top:0}.droy-audio-body progress{width:100%;max-width:100%}
@@ -1551,6 +1563,8 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         const [side, setSide] = React.useState('right');
         const [error, setError] = React.useState('');
         const [loading, setLoading] = React.useState(true);
+        const [actions, setActions] = React.useState([]), [action, setAction] = React.useState('idle');
+        const [pixel, setPixel] = React.useState(false);
         React.useEffect(() => {
           const abort = new target.AbortController(); let alive = true, resizeObserver;
           const images = [];
@@ -1567,6 +1581,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
               image.src = petAssetUrl(pet.id, atlas.file);
             })));
             if (!alive) return;
+            setActions(petPreviewActions(manifest)); setPixel(manifest.rendering?.style === 'pixel'); setAction('idle');
             player.current = createPetPreview(canvas.current, manifest, loaded, target);
             player.current.setSide(side);
             if (target.ResizeObserver) { resizeObserver = new target.ResizeObserver(() => player.current?.resize()); resizeObserver.observe(canvas.current); }
@@ -1596,7 +1611,7 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
             onPointerLeave: cancelPress, onPointerCancel: cancelPress,
             onPointerUp: () => { const current = press.current; cancelPress(); if (current && !current.long) play('tap'); },
             onClick: event => { if (event.detail === 0) play('tap'); }
-          }, h('canvas', { ref: canvas, 'aria-hidden': true })),
+          }, h('canvas', { ref: canvas, 'aria-hidden': true, style: pixel ? { imageRendering: 'pixelated' } : undefined })),
           loading ? h('p', { className: 'droy-description', role: 'status' }, droyText("正在加载动作预览…")) : null,
           error ? h('p', { className: 'droy-error', role: 'alert' }, droyText(error)) : null,
           h('div', { className: 'droy-pet-choices', role: 'group', 'aria-label': droyText("预览所在位置") },
@@ -1606,6 +1621,11 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
           h('div', { className: 'droy-actions' },
             ...[['enter', droyText("入场")], ['tap', droyText("点击")], ['pet', droyText("互动")], ['idle', droyText("待机")], ['working', droyText("工作")], ['exit', droyText("退场")]].map(([kind, label]) =>
               actionButton({ key: kind, disabled: loading || !!error, 'data-droy-preview-action': kind, onClick: () => play(kind) }, label))),
+          h('label', { className: 'droy-pet-field' }, h('span', null, droyText("动作")),
+            h('select', { value: action, disabled: loading || !!error, 'data-droy-preview-action-select': pet.id,
+              onChange: event => { setAction(event.target.value); play(event.target.value); } },
+              ...actions.map(item => h('option', { key: item.id, value: item.id }, petLocalizedField(item, 'label'))))),
+          actionButton({ disabled: loading || !!error, 'data-droy-preview-direct': action, onClick: () => play(action) }, droyText("播放动作")),
           h('p', { className: 'droy-description' }, droyText("连续试玩可查看不同动作。点击形象回应，长按体验互动。")));
       }
 
@@ -1674,11 +1694,19 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         });
         const generating = pet => pet.status?.startsWith('generating_') === true;
         return h('div', { className: 'droy-pet-studio-body', 'data-droy-pet-studio': true },
-          h('div', { className: 'droy-pet-card' },
-            h('span', { className: 'droy-row-title' }, droyText("默认黑猫")),
-            h('p', { className: 'droy-description' }, droyText("黑猫宠物，点击回应、长按互动，可选择悬浮显示。")),
-            (snapshot.state?.petId || 'default') === 'default' ? h('span', { className: 'droy-pet-current' }, droyText("正在使用")) :
-              button(droyText("使用默认黑猫"), 'selectPet', { id: 'default' }, snapshot)),
+          h('span', { className: 'droy-row-title' }, droyText("内置形象")),
+          h('p', { className: 'droy-description' }, droyText("无需配置模型即可选择像素伙伴，试玩不会更改当前选择。")),
+          ...(catalog?.builtIns || []).map(pet => h('div', { className: 'droy-pet-card', key: pet.id, 'data-droy-pet-builtin': pet.id },
+            h('span', { className: 'droy-row-title' }, petLocalizedField(pet, 'name')),
+            h('p', { className: 'droy-description' }, petLocalizedField(pet, 'description')),
+            h('img', { className: 'droy-pet-reference', src: petAssetUrl(pet.id, 'reference.png'), style: { imageRendering: 'pixelated' },
+              alt: petLocalizedField(pet, 'name') }),
+            previewId === pet.id ? h(PetAnimationPreview, { pet }) : null,
+            h('div', { className: 'droy-actions' },
+              actionButton({ disabled, 'data-droy-action': 'previewPetBuiltin', 'data-droy-pet-id': pet.id,
+                onClick: () => setPreviewId(previewId === pet.id ? null : pet.id) }, previewId === pet.id ? droyText("收起试玩") : droyText("试玩动作")),
+              (snapshot.state?.petId || 'default') === pet.id ? h('span', { className: 'droy-pet-current' }, droyText("正在使用")) :
+                button(droyText("应用宠物形象"), 'selectPet', { id: pet.id }, snapshot, true, { disabled })))),
           h('div', { className: 'droy-pet-form' },
             h('span', { className: 'droy-row-title' }, editing ? droyText("调整形象方案") : droyText("设计宠物形象")),
             h('p', { className: 'droy-description' }, droyText("为宠物更换动态形象、界面标志和互动风格，不会修改聊天伙伴的资料、记忆或聊天。完整素材包含参考图、品牌标志及六组动作。")),
@@ -2134,6 +2162,6 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
         bridge.dispose();
       }, 'droy-mobile: native settings bridge');
     }
-    return { apply, inject: ['locale', 'remote', 'slots', 'theme', 'layout', 'configForms', 'sidebarRight', 'sessions', 'workspaces', 'uiWorkspace', 'conversation'], createNativeBridge, createCompanionWorkbench, createBrowserNavigation, createController, brandingSnapshot, logoBackgroundsFromPixels, installBranding, createTouchController, createMicrophoneGuard, permissionRows, createBackHandler, createSettingsOpenHandler, observePanelNavigation, observePetContext, createNotificationPluginApi, createPetApi, petAssetUrl, petPreviewFrame, createPetPreview, setThemeDurably, readThemeBackground, observeUiReady };
+    return { apply, inject: ['locale', 'remote', 'slots', 'theme', 'layout', 'configForms', 'sidebarRight', 'sessions', 'workspaces', 'uiWorkspace', 'conversation'], createNativeBridge, createCompanionWorkbench, createBrowserNavigation, createController, brandingSnapshot, logoBackgroundsFromPixels, installBranding, createTouchController, createMicrophoneGuard, permissionRows, createBackHandler, createSettingsOpenHandler, observePanelNavigation, observePetContext, createNotificationPluginApi, createPetApi, petAssetUrl, petPreviewFrame, petPreviewActions, createPetPreview, setThemeDurably, readThemeBackground, observeUiReady };
   }
 });

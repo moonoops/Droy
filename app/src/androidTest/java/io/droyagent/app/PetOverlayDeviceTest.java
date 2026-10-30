@@ -38,14 +38,14 @@ import static org.junit.Assert.*;
 /** Real overlay windows and Android touch dispatch; no task is sent to a model. */
 @RunWith(AndroidJUnit4.class)
 public final class PetOverlayDeviceTest {
-    private static final String NAME = "测试黑猫";
+    private static final String NAME = "Droy";
     private static final String MESSAGE = "需要你选择接下来打开哪个页面。";
     private static final String[] PREF_KEYS = {"petEnabled", "petExternalDisplay", "petInternalDisplay", "petId", "petName", "petLeft", "petX", "petY", "themeColorScheme", BackgroundRuntime.ENABLED, BackgroundRuntime.STOPPED};
     private Instrumentation instrumentation;
     private UiAutomation automation;
     private Context context;
     private SharedPreferences preferences;
-    private MainActivity activity;
+    private android.app.Activity activity;
     private DeviceUi ui;
     private int originalAccessibilityFlags;
     private boolean accessibilityFlagsChanged, startedRuntime;
@@ -83,10 +83,11 @@ public final class PetOverlayDeviceTest {
             } catch (org.json.JSONException impossible) { throw new AssertionError(impossible); }
         });
         startedRuntime = true;
-        activity = (MainActivity) instrumentation.startActivitySync(new Intent(context, MainActivity.class)
+        activity = instrumentation.startActivitySync(new Intent(context, NativeAppActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
-        ui = new DeviceUi(instrumentation, activity);
-        ui.awaitPage();
+        ui = new DeviceUi(instrumentation, null);
+        DeviceUi.await("The native container did not start its actual runtime", 30000,
+            () -> RuntimeService.ready && NativeRuntimeHost.inspect(context).ready);
         assertTrue("Opening Droy did not start its actual runtime", RuntimeService.hasActiveSession());
         assertTrue(preferences.edit().putBoolean("petEnabled", true).putString("petExternalDisplay", "always").putString("petInternalDisplay", "always").putString("petName", NAME)
             .putBoolean("petLeft", false).putFloat("petX", 1f).putFloat("petY", .4f)
@@ -679,6 +680,123 @@ public final class PetOverlayDeviceTest {
         }
     }
 
+    @Test public void builtinSpecialActionsAreReachableFromTheVisiblePetAndRestoreTheTask() throws Exception {
+        assertTrue("Enable system animations for the actual playback fixture", android.animation.ValueAnimator.areAnimatorsEnabled());
+        String[][] entries = {
+            {"default", "knead", "tailCurl", "sleep"},
+            {"8dd37d0d-b6ed-47c2-9952-8f3be20fa6d0", "waveHands", "scream", "startle"},
+            {"cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2", "neckStretch", "spitForward", "spitScreen"}
+        };
+        for (String[] entry : entries) {
+            PetOverlay.select(context, entry[0]);
+            DeviceUi.await("Built-in selection did not reach the overlay", 5000, () -> {
+                Object view = overlayField("sprite");
+                return view instanceof PetSpriteView value && entry[0].equals(value.packageId()) && !(Boolean)overlayField("entering");
+            });
+            for (int index = 1; index < entry.length; index++) {
+                String state = entry[index];
+                openPlayAction(state);
+                DeviceUi.await("The selected action never played: " + state, 2000,
+                    () -> state.equals(overlayField("interactionState")) && state.equals(((PetSpriteView)overlayField("sprite")).state()));
+                if (state.equals("spitScreen")) {
+                    android.view.View effect = (android.view.View)overlayField("effectWindow"); assertNotNull(effect);
+                    WindowManager.LayoutParams params = (WindowManager.LayoutParams)effect.getLayoutParams();
+                    assertTrue((params.flags & WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) != 0);
+                    assertTrue((params.flags & WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0);
+                    assertTrue(params.alpha <= .6f);
+                    Field drawn = PetScreenEffectView.class.getDeclaredField("lastDrawnFrame"); drawn.setAccessible(true);
+                    int seen = 0; long deadline = SystemClock.uptimeMillis() + 2500;
+                    while (SystemClock.uptimeMillis() < deadline && !(Boolean)onMain(() -> overlayFieldOnMain("interactionState").equals(""))) {
+                        AtomicReference<Integer> frame = new AtomicReference<>();
+                        instrumentation.runOnMainSync(() -> { try { frame.set(drawn.getInt(effect)); } catch (IllegalAccessException failure) { throw new AssertionError(failure); } });
+                        if (frame.get() >= 0) seen |= 1 << frame.get();
+                        SystemClock.sleep(10);
+                    }
+                    assertEquals("The real water layer did not draw all six authored frames", 0b111111, seen);
+                }
+                DeviceUi.await("Interaction did not restore its task state: " + state, 4000,
+                    () -> "".equals(overlayField("interactionState")) && "completed".equals(((PetSpriteView)overlayField("sprite")).state()));
+                assertNull("A finished interaction leaked a water window", overlayField("effectWindow"));
+                if (state.equals("spitScreen")) {
+                    // Evidence replay is separate so screenshot encoding cannot skip
+                    // frames in the six-frame presentation assertion above.
+                    openPlayAction(state);
+                    Field drawn = PetScreenEffectView.class.getDeclaredField("lastDrawnFrame"); drawn.setAccessible(true);
+                    DeviceUi.await("The evidence replay did not show its water splash", 2500, () -> {
+                        android.view.View effect = (android.view.View)overlayField("effectWindow");
+                        if (effect == null) return false;
+                        int frame = onMain(() -> drawn.getInt(effect));
+                        return frame == 2 || frame == 3;
+                    });
+                    capture("builtin-screen-spit-visible");
+                    DeviceUi.await("The evidence replay leaked its water window", 4000,
+                        () -> "".equals(overlayField("interactionState")) && overlayField("effectWindow") == null);
+                }
+            }
+        }
+    }
+
+    @Test public void screenSpitClearsForCaptureDragSelectionAndPendingTaskControls() throws Exception {
+        assertTrue(android.animation.ValueAnimator.areAnimatorsEnabled());
+        String alpaca = "cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2";
+        PetOverlay.select(context, alpaca);
+        DeviceUi.await("Alpaca did not appear", 5000, () -> selectedSprite(alpaca));
+        openPlayAction("spitScreen");
+        CompletableFuture<Void> ready = onMain(() -> PetOverlay.get(context).prepare(new Rect(), true)); ready.get(3, TimeUnit.SECONDS);
+        assertEquals("", overlayField("interactionState")); assertNull(overlayField("effectWindow"));
+        instrumentation.runOnMainSync(() -> PetOverlay.get(context).finish());
+        DeviceUi.await("Capture did not restore the visible alpaca", 3000, this::petVisible);
+
+        openPlayAction("spitScreen");
+        Rect from = petBounds(); ui.swipe(from.centerX(), from.centerY(), from.centerX() - dp(40), from.centerY(), 180);
+        assertEquals("", overlayField("interactionState")); assertNull(overlayField("effectWindow"));
+
+        openPlayAction("spitScreen"); PetOverlay.select(context, "default");
+        DeviceUi.await("Selection did not cancel the old effect", 4000, () -> overlayField("effectWindow") == null && "".equals(overlayField("interactionState"))
+            && selectedSprite("default"));
+
+        PetOverlay.select(context, alpaca);
+        DeviceUi.await("Alpaca did not reappear", 5000, () -> selectedSprite(alpaca));
+        openPlayAction("spitScreen");
+        JSONObject pending = new JSONObject().put("requestId", "pet-builtins-pending")
+            .put("title", NativeLocale.text("需要你回应", "Your response is needed")).put("message", MESSAGE).put("inline", true)
+            .put("options", new JSONArray().put(new JSONObject().put("id", "later").put("label", NativeLocale.text("稍后", "Later"))));
+        instrumentation.runOnMainSync(() -> {
+            ToolProgress.update("pet-builtins-question", "thinking", true);
+            try { ToolProgress.updateFromEngine(new JSONObject().put("taskId", "pet-builtins-question").put("phase", "waiting")
+                .put("active", true).put("summary", MESSAGE).put("pending", pending)); }
+            catch (org.json.JSONException failure) { throw new AssertionError(failure); }
+        });
+        PetOverlay.refresh(context);
+        DeviceUi.await("Question did not interrupt the play action", 3000, () -> "".equals(overlayField("interactionState")) && overlayField("effectWindow") == null && bubbleVisible());
+        assertNull("Play menu displaced the live question", nativeBounds(NativeLocale.text("互动动作", "Play actions"), false));
+        assertNotNull(nativeBounds(NativeLocale.text("稍后", "Later"), false));
+        capture("builtin-pending-preempts-play");
+    }
+
+    private void openPlayAction(String state) throws Exception {
+        tap(petBounds());
+        if (state.equals("knead")) {
+            assertTrue("The visible status lost the Droy identity", cachedMessage().startsWith("Droy"));
+            capture("builtin-Droy-status");
+        }
+        tap(awaitText(NativeLocale.text("互动动作", "Play actions")));
+        if (state.equals("knead")) capture("builtin-interaction-menu");
+        AtomicReference<String> label = new AtomicReference<>();
+        instrumentation.runOnMainSync(() -> label.set(((PetSpriteView)overlayFieldOnMain("sprite")).interactionLabel(state)));
+        tap(awaitText(label.get()));
+    }
+    private boolean selectedSprite(String id) {
+        Object value = overlayField("sprite");
+        return value instanceof PetSpriteView view && id.equals(view.packageId()) && !(Boolean)overlayField("entering");
+    }
+
+    private <T> T onMain(java.util.concurrent.Callable<T> callable) throws Exception {
+        AtomicReference<T> result = new AtomicReference<>(); AtomicReference<Exception> failure = new AtomicReference<>();
+        instrumentation.runOnMainSync(() -> { try { result.set(callable.call()); } catch (Exception error) { failure.set(error); } });
+        if (failure.get() != null) throw failure.get(); return result.get();
+    }
+
     @Test public void customPackageSelectionLoadsVoiceAndRejectsBrokenCandidateWithoutReplacingIt() throws Exception {
         String id = java.util.UUID.randomUUID().toString(), brokenId = java.util.UUID.randomUUID().toString();
         File directory = new File(context.getFilesDir(), "dsh-home/pets/" + id);
@@ -703,15 +821,15 @@ public final class PetOverlayDeviceTest {
                 Object sprite = overlayField("sprite"); return sprite instanceof PetSpriteView view && id.equals(view.packageId()) && !(Boolean)overlayField("entering");
             });
             assertEquals(id, preferences.getString("petId", ""));
-            assertEquals("安静测试角色", preferences.getString("petName", ""));
+            assertEquals(NAME, preferences.getString("petName", ""));
             tap(petBounds());
             DeviceUi.await("Selected character voice was not used by the pet", 3000,
-                () -> cachedMessage().equals("安静测试角色：我在这里。") || cachedMessage().equals("安静测试角色：有事叫我。"));
+                () -> cachedMessage().equals("Droy：我在这里。") || cachedMessage().equals("Droy：有事叫我。"));
             capture("18-custom-package-loading-fixture");
             assertThrows(Exception.class, () -> PetOverlay.select(context, brokenId));
             assertEquals("A broken candidate replaced the saved pet", id, preferences.getString("petId", ""));
             assertEquals("A broken candidate replaced the visible pet", id, ((PetSpriteView)overlayField("sprite")).packageId());
-            assertEquals("安静测试角色", preferences.getString("petName", ""));
+            assertEquals(NAME, preferences.getString("petName", ""));
         } finally {
             PetOverlay.select(context, "default");
             preferences.edit().putString("petName", NAME).commit();
@@ -815,10 +933,10 @@ public final class PetOverlayDeviceTest {
         instrumentation.runOnMainSync(() -> bounds.set(PetOverlay.get(context).petBounds()));
         return bounds.get();
     }
-    private boolean petVisible() { return nativeBounds(NAME + NativeLocale.text("，Droy 伙伴，点击查看任务，拖动调整位置", ", Droy companion. Tap to view the task; drag to move"), true) != null; }
+    private boolean petVisible() { return nativeBounds(NAME + NativeLocale.text("，Droy 宠物，点击查看任务，拖动调整位置", ", Droy pet. Tap to view the task; drag to move"), true) != null; }
     private String windowVisibilityDiagnostics() {
         StringBuilder result = new StringBuilder();
-        String catDescription = NAME + NativeLocale.text("，Droy 伙伴，点击查看任务，拖动调整位置", ", Droy companion. Tap to view the task; drag to move");
+        String catDescription = NAME + NativeLocale.text("，Droy 宠物，点击查看任务，拖动调整位置", ", Droy pet. Tap to view the task; drag to move");
         result.append("retrieveInteractive=")
             .append((automation.getServiceInfo().flags & AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS) != 0);
         for (AccessibilityWindowInfo window : automation.getWindows()) {
@@ -898,7 +1016,7 @@ public final class PetOverlayDeviceTest {
         DeviceUi.await("Registered overlay did not attach for its screenshot", 3000, () -> {
             AtomicReference<Boolean> attached = new AtomicReference<>(true);
             instrumentation.runOnMainSync(() -> {
-                for (String field : new String[]{"pet", "bubbleWindow"}) {
+                for (String field : new String[]{"pet", "bubbleWindow", "effectWindow"}) {
                     android.view.View window = (android.view.View)overlayFieldOnMain(field);
                     if (window != null && window.getParent() != null && window.getVisibility() == android.view.View.VISIBLE
                             && window.getAlpha() > 0f && !window.isAttachedToWindow()) attached.set(false);
@@ -908,7 +1026,7 @@ public final class PetOverlayDeviceTest {
         });
         java.util.List<CompletableFuture<Void>> submitted = new java.util.ArrayList<>();
         instrumentation.runOnMainSync(() -> {
-            for (String field : new String[]{"pet", "bubbleWindow"}) {
+            for (String field : new String[]{"pet", "bubbleWindow", "effectWindow"}) {
                 android.view.View window = (android.view.View)overlayFieldOnMain(field);
                 if (window == null || !window.isAttachedToWindow() || !window.isShown() || window.getAlpha() == 0f) continue;
                 CompletableFuture<Void> frame = new CompletableFuture<>(); submitted.add(frame);

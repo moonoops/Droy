@@ -1,0 +1,47 @@
+{
+  "formatVersion": 1,
+  "pets": [
+    {
+      "id": "default",
+      "directory": "",
+      "nameLocales": {
+        "zh": "黑猫",
+        "en": "Black cat"
+      },
+      "descriptionLocales": {
+        "zh": "黑色黄眼睛的像素猫，会踩奶、摆尾和打盹。",
+        "en": "A black pixel cat with yellow eyes, kneading paws, a swishing tail and sleepy curls."
+      },
+      "name": "Black cat",
+      "description": "A black pixel cat with yellow eyes, kneading paws, a swishing tail and sleepy curls."
+    },
+    {
+      "id": "8dd37d0d-b6ed-47c2-9952-8f3be20fa6d0",
+      "directory": "marmot",
+      "nameLocales": {
+        "zh": "土拨鼠",
+        "en": "Marmot"
+      },
+      "descriptionLocales": {
+        "zh": "圆滚滚的像素土拨鼠，会挥动短手、抬头张嘴“啊”。",
+        "en": "A round pixel marmot that waves its tiny paws and lifts its head for a comic scream."
+      },
+      "name": "Marmot",
+      "description": "A round pixel marmot that waves its tiny paws and lifts its head for a comic scream."
+    },
+    {
+      "id": "cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2",
+      "directory": "alpaca",
+      "nameLocales": {
+        "zh": "羊驼",
+        "en": "Alpaca"
+      },
+      "descriptionLocales": {
+        "zh": "白粉色的像素羊驼，会伸脖子、侧向吐水和朝屏幕吐水。",
+        "en": "A white-and-pink pixel alpaca that stretches its neck and spits sideways or toward the screen."
+      },
+      "name": "Alpaca",
+      "description": "A white-and-pink pixel alpaca that stretches its neck and spits sideways or toward the screen."
+    }
+  ]
+}

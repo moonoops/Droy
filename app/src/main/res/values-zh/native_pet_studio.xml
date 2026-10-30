@@ -18,6 +18,8 @@
     <string name="npss_preview">试玩动作</string>
     <string name="npss_close_preview">收起试玩</string>
     <string name="npss_default">默认黑猫</string>
+    <string name="npss_builtins">内置形象</string>
+    <string name="npss_builtin_description">无需配置模型即可选择像素伙伴，试玩不会更改当前选择。</string>
     <string name="npss_list">形象方案</string>
     <string name="npss_empty">还没有形象方案。</string>
     <string name="npss_cost">外观、性格发送至文本模型，描述、参考图发送至图片服务，按各服务计费。</string>
@@ -25,7 +27,7 @@
     <string name="npss_image_model">图片服务：%1$s / %2$s</string>
     <string name="npss_unavailable">未配置</string>
     <string name="npss_setup">生成服务未就绪，请检查文本模型和图片服务配置。</string>
-    <string name="npss_load_error">无法读取工作室，请检查引擎后重试。</string>
+    <string name="npss_load_error">无法读取生成方案，内置形象仍可使用。请检查引擎后重试。</string>
     <string name="npss_unknown">请求结果尚未确认。请刷新并核对已有方案，避免重复生成。</string>
     <string name="npss_reviewed">已核对方案，继续操作</string>
     <string name="npss_error">操作未完成，请重试。</string>

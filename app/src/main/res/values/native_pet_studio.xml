@@ -18,6 +18,8 @@
     <string name="npss_preview">Try animations</string>
     <string name="npss_close_preview">Close preview</string>
     <string name="npss_default">Default black cat</string>
+    <string name="npss_builtins">Built-in artwork</string>
+    <string name="npss_builtin_description">Choose a pixel companion without configuring a model. Previewing does not change your current selection.</string>
     <string name="npss_list">Artwork drafts</string>
     <string name="npss_empty">No artwork drafts yet.</string>
     <string name="npss_cost">Appearance and personality go to the text model; descriptions and reference images go to the image service. Provider charges apply.</string>
@@ -25,7 +27,7 @@
     <string name="npss_image_model">Image service: %1$s / %2$s</string>
     <string name="npss_unavailable">Not configured</string>
     <string name="npss_setup">Generation is unavailable. Check the text model and image service configuration.</string>
-    <string name="npss_load_error">Could not load the studio. Check the engine and retry.</string>
+    <string name="npss_load_error">Could not load generated drafts. Built-in artwork is still available. Check the engine and retry.</string>
     <string name="npss_unknown">The request outcome is unconfirmed. Refresh and review existing drafts to avoid duplicate generation.</string>
     <string name="npss_reviewed">I reviewed the drafts; continue</string>
     <string name="npss_error">Could not complete the action. Please retry.</string>

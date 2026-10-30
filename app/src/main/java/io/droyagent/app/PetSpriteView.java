@@ -44,7 +44,8 @@ final class PetSpriteView extends View {
     PetSpriteView(Context context) {
         super(context);
         assets = PetPackage.selected(context.getApplicationContext()); previousVariants = assets.previousVariants;
-        rimWidth = .65f * getResources().getDisplayMetrics().density;
+        rimWidth = assets.spec.pixelArt ? 0f : .65f * getResources().getDisplayMetrics().density;
+        bitmapPaint.setFilterBitmap(!assets.spec.pixelArt); bitmapPaint.setAntiAlias(!assets.spec.pixelArt);
         rimPaint.setColorFilter(new PorterDuffColorFilter(Color.argb(105, 255, 255, 255), PorterDuff.Mode.SRC_IN));
         animation = assets.spec.animations.get("idle");
     }
@@ -53,6 +54,16 @@ final class PetSpriteView extends View {
     boolean hasState(String name) { return assets.spec.animations.containsKey(name); }
     String state() { return state; }
     long duration(String name) { return assets.spec.animations.get(name).durationMs; }
+    java.util.List<String> interactions() { return PetInteractionActions.available(this::hasState); }
+    String interactionLabel(String name) {
+        PetSpriteSpec.Label label = assets.spec.labels.get(name);
+        return label == null ? PetInteractionActions.fallbackLabel(name) : label.localized();
+    }
+    PetSpriteSpec.Effect effect(String name) { return assets.spec.effects.get(name); }
+    View effectView(String name) { return new PetScreenEffectView(getContext(), assets, assets.spec.effects.get(name)); }
+    void cancelPlayback() {
+        removeCallbacks(advance); playing = animateOnAttach = false; completion = null;
+    }
     void setFacingLeft(boolean value) {
         if (facingLeft == value) return;
         facingLeft = value; animation = directional(state); frame = Math.min(frame, animation.frames.length - 1); invalidate();
@@ -125,8 +136,10 @@ final class PetSpriteView extends View {
         canvas.save();
         boolean mirror = animation.mirrored(facingLeft);
         if (mirror) canvas.scale(-1, 1, getWidth() / 2f, getHeight() / 2f);
-        drawRim(canvas, bitmap, -rimWidth, 0); drawRim(canvas, bitmap, rimWidth, 0);
-        drawRim(canvas, bitmap, 0, -rimWidth); drawRim(canvas, bitmap, 0, rimWidth);
+        if (rimWidth > 0) {
+            drawRim(canvas, bitmap, -rimWidth, 0); drawRim(canvas, bitmap, rimWidth, 0);
+            drawRim(canvas, bitmap, 0, -rimWidth); drawRim(canvas, bitmap, 0, rimWidth);
+        }
         canvas.drawBitmap(bitmap, source, destination, bitmapPaint); canvas.restore();
     }
     private void drawRim(Canvas canvas, Bitmap bitmap, float x, float y) {

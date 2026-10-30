@@ -10,11 +10,13 @@ import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 /** Native preview uses the published sprite contract without selecting the candidate or executing package content. */
 public final class NativePetStudioHost {
     private final Context context;
     public NativePetStudioHost(Context context) { this.context = context.getApplicationContext(); }
+    public JSONArray builtIns() throws Exception { return BuiltInPets.catalog(context); }
     public String selectedId() { return context.getSharedPreferences("product", Context.MODE_PRIVATE).getString("petId", "default"); }
     public void select(String id) throws Exception { checkId(id); PetOverlay.select(context, id); }
     static void checkId(String id) {
@@ -28,8 +30,9 @@ public final class NativePetStudioHost {
     private byte[] read(String id, String file, int limit) throws Exception {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("pet_preview_cancelled");
         String path = assetPath(id, file);
-        if (id.equals("default")) {
-            try (InputStream input = context.getAssets().open("pet/" + file)) { return bounded(input, limit); }
+        String assetDirectory = BuiltInPets.directory(id);
+        if (assetDirectory != null) {
+            try (InputStream input = context.getAssets().open(assetDirectory + file)) { return bounded(input, limit); }
         }
         NativeRuntimeHost.Endpoint endpoint = NativeRuntimeHost.connection();
         if (endpoint == null) throw new IOException("runtime_unavailable");
@@ -73,7 +76,7 @@ public final class NativePetStudioHost {
                 PetSpriteSpec.Atlas atlas = row.getValue();
                 images.put(row.getKey(), decode(read(id, atlas.file, 24 * 1024 * 1024), sample, atlas.width, atlas.height));
             }
-            return new Preview(spec, images, sample);
+            return new Preview(spec, images, sample, manifest);
         } catch (Exception failure) { for (Bitmap image : images.values()) image.recycle(); throw failure; }
     }
     /** Invoke on IO; one still at a time, no disk cache or selected-package mutation. */
@@ -99,7 +102,23 @@ public final class NativePetStudioHost {
         private final PetSpriteSpec spec;
         private final Map<String, Bitmap> images;
         private final int sample;
-        private Preview(PetSpriteSpec spec, Map<String, Bitmap> images, int sample) { this.spec = spec; this.images = images; this.sample = sample; }
+        private final boolean pixel;
+        private final JSONArray actions;
+        private Preview(PetSpriteSpec spec, Map<String, Bitmap> images, int sample, JSONObject manifest) throws Exception {
+            this.spec = spec; this.images = images; this.sample = sample; this.actions = new JSONArray();
+            JSONObject rendering = manifest.optJSONObject("rendering");
+            this.pixel = rendering != null && "pixel".equals(rendering.optString("style"));
+            JSONObject states = manifest.getJSONObject("states");
+            for (Iterator<String> keys = states.keys(); keys.hasNext();) {
+                String key = keys.next();
+                if (Set.of("completed", "stopped").contains(key)) continue;
+                JSONObject state = states.getJSONObject(key), locales = state.optJSONObject("labelLocales");
+                String fallback = state.optString("label", key);
+                if (locales == null) locales = new JSONObject().put("zh", fallback).put("en", fallback);
+                actions.put(new JSONObject().put("id", key).put("label", fallback).put("labelLocales", locales));
+            }
+        }
+        public JSONArray actions() { try { return new JSONArray(actions.toString()); } catch (Exception error) { throw new IllegalStateException(error); } }
         public void close() { for (Bitmap image : images.values()) if (!image.isRecycled()) image.recycle(); }
         public View createView(Context context) { return new PreviewView(context, this); }
         public void play(View view, String state, boolean left) { ((PreviewView)view).play(state, left); }
@@ -118,7 +137,7 @@ public final class NativePetStudioHost {
                     postDelayed(this, Math.max(16, animation.nextFrameDelay(elapsed)));
             }
         };
-        PreviewView(Context context, Preview preview) { super(context); this.preview = preview; play("idle", true); }
+        PreviewView(Context context, Preview preview) { super(context); this.preview = preview; paint.setFilterBitmap(!preview.pixel); play("idle", true); }
         void play(String state, boolean left) {
             if (!preview.spec.animations.containsKey(state)) return;
             this.left = left;

@@ -45,6 +45,7 @@ const mobileClient = composeMobileClient(
 for (const destination of [join(staging, 'mobile'), join(staging, 'node_modules/@droyagent/mobile')]) {
   await rm(destination, { recursive: true, force: true });
   await cp(join(root, 'runtime/mobile'), destination, { recursive: true, filter: path => path.split('/').pop() !== 'tests' });
+  await cp(join(root, 'app/src/main/assets/pet'), join(destination, 'assets/pets'), { recursive: true });
   await writeFile(join(destination, 'client.js'), mobileClient);
 }
 const nodeModules = join(staging, 'node_modules');

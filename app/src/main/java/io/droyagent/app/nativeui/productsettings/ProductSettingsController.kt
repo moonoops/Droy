@@ -52,8 +52,14 @@ internal class ProductSettingsController(private val host: NativeProductSettings
     }
     suspend fun selectPet(id: String) = withContext(Dispatchers.IO) { host.selectPet(id) }
     suspend fun preview() = withContext(Dispatchers.Main.immediate) { host.previewPet() }
-    suspend fun pets(): List<JSONObject> = listOf(JSONObject().put("id", "default").put("name", "Droy").put("status", "ready")) +
-        NativeLocalTransport().json("/droy/pets").getJSONArray("pets").rows()
+    suspend fun builtInPets(): List<JSONObject> = withContext(Dispatchers.IO) {
+        host.builtInPets().rows().map { JSONObject(it.toString()).put("status", "ready") }
+    }
+    suspend fun pets(): List<JSONObject> {
+        val builtIns = builtInPets()
+        val builtInIds = builtIns.map { it.getString("id") }.toSet()
+        return builtIns + NativeLocalTransport().json("/droy/pets").getJSONArray("pets").rows().filter { it.optString("id") !in builtInIds }
+    }
 }
 internal fun JSONArray?.rows(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }
 

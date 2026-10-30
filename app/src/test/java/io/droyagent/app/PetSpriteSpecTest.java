@@ -21,10 +21,15 @@ public class PetSpriteSpecTest {
         assertEquals(3, spec.variants.get("tap").length);
         assertEquals(2, spec.variants.get("pet").length);
         assertEquals(3, spec.variants.get("idle").length);
+        assertTrue("Built-in artwork must use crisp pixel rendering", spec.pixelArt);
+        for (String state : new String[]{"knead", "tailCurl", "sleep"}) {
+            assertTrue(PetInteractionActions.available(spec.animations::containsKey).contains(state));
+            assertNotNull(spec.labels.get(state));
+        }
         assertTrue("Left-authored body must turn into the screen on the left edge", spec.animations.get("idle").mirrored(false));
         assertFalse(spec.animations.get("idle").mirrored(true));
         PetSpriteSpec.Animation blink = spec.animations.get("peekLeft").withTotalDuration(500);
-        assertEquals(1, blink.frameAt(220));
+        assertEquals(2, blink.frameAt(220));
         assertEquals(500, blink.durationMs);
         int frameCount = 0;
         for (PetSpriteSpec.Atlas atlas : spec.atlases.values()) {
@@ -43,7 +48,7 @@ public class PetSpriteSpecTest {
                 frameCount++;
             }
         }
-        assertEquals(76, frameCount);
+        assertEquals(102, frameCount);
     }
 
     private JSONObject fixture() throws Exception {
@@ -122,5 +127,26 @@ public class PetSpriteSpecTest {
         document.remove("variants");
         document.getJSONObject("atlases").getJSONObject("actions").put("width", 1000000);
         assertThrows(IllegalArgumentException.class, () -> PetSpriteSpec.parse(document));
+    }
+
+    @Test public void pairedLabelsAndDelayedEffectsKeepTheirBoundedContract() throws Exception {
+        JSONObject document = fixture().put("formatVersion", 2).put("rendering", new JSONObject().put("style", "pixel"));
+        document.getJSONObject("states").getJSONObject("tap").put("labelLocales", new JSONObject().put("zh", "轻触").put("en", "Tap"));
+        JSONObject effect = new JSONObject().put("atlas", "actions").put("frames", new JSONArray(new int[]{0, 1, 2}))
+            .put("durationsMs", new JSONArray(new int[]{100, 100, 200})).put("delayMs", 640);
+        document.put("effects", new JSONObject().put("tap", effect));
+        PetSpriteSpec spec = PetSpriteSpec.parse(document);
+        assertTrue(spec.pixelArt);
+        assertEquals("轻触", spec.labels.get("tap").zh); assertEquals("Tap", spec.labels.get("tap").en);
+        assertEquals(1040, spec.effects.get("tap").durationMs());
+        assertEquals(1, spec.effects.get("tap").animation.frameAt(100));
+        assertEquals(2, spec.effects.get("tap").animation.frameAt(200));
+        effect.put("delayMs", -1);
+        assertThrows(IllegalArgumentException.class, () -> PetSpriteSpec.parse(document));
+        effect.put("delayMs", 640).put("frames", new JSONArray(new int[]{99})).put("durationsMs", new JSONArray(new int[]{100}));
+        assertThrows(IllegalArgumentException.class, () -> PetSpriteSpec.parse(document));
+        effect.put("frames", new JSONArray(new int[]{0})).put("durationsMs", new JSONArray(new int[]{100}));
+        document.getJSONObject("states").getJSONObject("tap").getJSONObject("labelLocales").remove("en");
+        assertThrows(org.json.JSONException.class, () -> PetSpriteSpec.parse(document));
     }
 }

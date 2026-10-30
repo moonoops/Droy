@@ -1544,6 +1544,28 @@ test('pet sprite preview animates real frames, holds an exited pet hidden, and d
   player.dispose(); assert.equal(callbacks.size, 0);
 });
 
+test('pet preview exposes manifest signature actions and keeps pixel art unsmoothed', () => {
+  const client = load(), callbacks = new Map(), draws = []; let next = 0;
+  const action = { atlas: 'body', frames: [0, 1], durationsMs: [100, 100], facing: 'front', mirrorSafe: false };
+  const manifest = { rendering: { style: 'pixel' }, atlases: { body: { file: 'body.png', frames: [
+    { sourceRect: [0, 0, 40, 50] }, { sourceRect: [40, 0, 40, 50] }
+  ] } }, states: Object.fromEntries(['idle', 'neckStretch', 'spitForward', 'spitScreen', 'completed', 'stopped', '../private']
+    .map(id => [id, { ...action, label: id, labelLocales: { zh: '动作', en: 'Action' } }])) };
+  assert.deepEqual(Array.from(client.petPreviewActions(manifest), item => item.id), ['idle', 'neckStretch', 'spitForward', 'spitScreen']);
+  const context = { imageSmoothingEnabled: true, shadowBlur: 3, setTransform() {}, clearRect() {}, save() {}, restore() {},
+    translate() {}, scale() {}, drawImage(...args) { draws.push(args); } };
+  const target = { performance: { now: () => 0 }, requestAnimationFrame(callback) { callbacks.set(++next, callback); return next; },
+    cancelAnimationFrame(id) { callbacks.delete(id); }, matchMedia: () => ({ matches: false }) };
+  const canvas = { getContext: () => context, getBoundingClientRect: () => ({ width: 260, height: 164 }) };
+  const player = client.createPetPreview(canvas, manifest, { 'body.png': {} }, target);
+  player.play('spitScreen');
+  const [id, draw] = callbacks.entries().next().value; callbacks.delete(id); draw(150);
+  assert.equal(draws.at(-1)[1], 40, 'The chosen signature must play its actual second frame');
+  assert.equal(context.imageSmoothingEnabled, false);
+  assert.equal(context.shadowBlur, 0);
+  player.dispose();
+});
+
 function hookFixture() {
   const components = new Map(); let active, cursor;
   const slot = () => { const index = cursor++; return [index, active.slots[index]]; };
@@ -1617,6 +1639,55 @@ test('pet creation saves editable personality drafts without a configured provid
   assert.equal(nativeState.petId, 'draft-1');
   assert.equal(nativeState.petName, 'Droy', 'Applying an appearance must preserve the pet name');
   assert.equal(calls.filter(call => call.url.endsWith('/create')).length, 1);
+  hooks.dispose(); fixture.dispose();
+});
+
+test('three built-in pets remain selectable without image generation and preview does not select them', async () => {
+  const hooks = hookFixture(), calls = [];
+  const ids = ['default', '8dd37d0d-b6ed-47c2-9952-8f3be20fa6d0', 'cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2'];
+  const names = [['黑猫', 'Black cat'], ['土拨鼠', 'Marmot'], ['羊驼', 'Alpaca']];
+  const catalog = { available: false, imageAvailable: false, pets: [], builtIns: ids.map((id, index) => ({
+    id, name: names[index][0], nameLocales: { zh: names[index][0], en: names[index][1] },
+    description: '像素伙伴', descriptionLocales: { zh: '像素伙伴', en: 'Pixel companion' },
+    referenceUrl: `/droy/pets/asset?id=${id}&file=reference.png`, manifestUrl: `/droy/pets/asset?id=${id}&file=pet.json`
+  })) };
+  const nativeState = { ...state(), petId: 'retained-custom', petName: 'Droy', petExternalDisplay: 'off', petInternalDisplay: 'off' };
+  let failSelect = false;
+  const fixture = applyFixture(nativeState, { reactHooks: hooks.hooks,
+    windowExtra: { AbortController, fetch: async (url, options) => {
+      calls.push({ url, method: options.method }); return { ok: true, json: async () => structuredClone(catalog) };
+    } }, onNativeRequest(request, saved) {
+      if (request.action === 'selectPet') {
+        if (failSelect) throw new Error('Selection not saved');
+        saved.petId = request.args.id;
+      }
+    } });
+  await flush();
+  const settings = hooks.render(fixture.registrations.find(item => item.options.id === 'droy-pet').component);
+  const studio = nodes(settings).find(node => node.type?.name === 'PetStudio');
+  nodes(hooks.render(studio.type, studio.props)).find(node => node.props['data-droy-action'] === 'openPetStudio').props.onClick();
+  const body = nodes(hooks.render(studio.type, studio.props)).find(node => node.type?.name === 'PetStudioBody');
+  const render = () => nodes(hooks.render(body.type, body.props));
+  render(); await flush(); let tree = render();
+  const cards = tree.filter(node => node.props['data-droy-pet-builtin']);
+  assert.deepEqual(cards.map(card => card.props['data-droy-pet-builtin']), ids);
+  assert.deepEqual(cards.map(card => nodes(card).find(node => node.props.className === 'droy-row-title').children[0]), names.map(pair => pair[0]));
+  assert.equal(nativeState.petId, 'retained-custom', 'Reading built-ins must preserve an existing custom selection');
+  const marmot = cards[1];
+  nodes(marmot).find(node => node.props['data-droy-action'] === 'previewPetBuiltin').props.onClick();
+  tree = render();
+  assert.equal(tree.find(node => node.type?.name === 'PetAnimationPreview').props.pet.id, ids[1]);
+  assert.equal(fixture.requests.some(request => request.action === 'selectPet'), false);
+  assert.ok(calls.filter(call => call.url.startsWith('/droy/pets')).every(call => (call.method || 'GET') === 'GET'),
+    'Preview/list must not start paid generation');
+  let use = nodes(tree.find(node => node.props['data-droy-pet-builtin'] === ids[1])).find(node => node.props['data-droy-action'] === 'selectPet');
+  await use.props.onClick(); await flush(); tree = render();
+  assert.equal(nativeState.petId, ids[1]);
+  assert.equal(nativeState.petName, 'Droy');
+  failSelect = true;
+  use = nodes(tree.find(node => node.props['data-droy-pet-builtin'] === ids[2])).find(node => node.props['data-droy-action'] === 'selectPet');
+  await use.props.onClick(); await flush();
+  assert.equal(nativeState.petId, ids[1], 'A rejected selection must not replace the current built-in');
   hooks.dispose(); fixture.dispose();
 });
 

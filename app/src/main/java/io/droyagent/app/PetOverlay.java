@@ -43,6 +43,14 @@ final class PetOverlay implements OverlayInteraction.Listener {
     private TextView pendingMarker;
     private LinearLayout bubble;
     private ScrollView bubbleWindow;
+    private View effectWindow;
+    private int effectWindowId = -1;
+    private boolean interactionMenu;
+    private String interactionState = "";
+    private String interactionTask = "";
+    private boolean interactionTaskActive;
+    private long interactionSequence;
+    private Runnable finishInteraction;
     private PetBubbleDrawable bubbleBackground;
     private int bubbleMaxWidth;
     private WindowManager.LayoutParams petLayout, bubbleLayout;
@@ -196,7 +204,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
         PetPackage.use(candidate);
         MAIN.post(() -> { PetOverlay overlay = get(context); overlay.removeWindows(); overlay.displayedMessageKey = ""; overlay.refreshNow(); });
     }
-    static String name(Context context) { return NativeLocale.text("宠物", "Pet"); }
+    static String name(Context context) { return PetMessages.identity(); }
     private Activity activity() {
         Activity activity = foregroundActivity.get();
         return appVisible && activity != null && !activity.isFinishing() && !activity.isDestroyed()
@@ -221,13 +229,14 @@ final class PetOverlay implements OverlayInteraction.Listener {
     };
     private final ComponentCallbacks configuration = new ComponentCallbacks() {
         @Override public void onConfigurationChanged(android.content.res.Configuration c) {
+            cancelInteraction(true);
             updateScreen(); if (pet != null) { applySavedPosition(); if (bubble != null) positionBubble(); }
         }
         @Override public void onLowMemory() {}
     };
     private final Runnable refreshDisplay = this::refreshNow;
     private final Runnable hideMessage = () -> { if (pending() == null) collapse(); };
-    private final Runnable dock = () -> { if (pet != null && !dragging && !holding && !entering && !exiting && bubble == null) dockNow(); };
+    private final Runnable dock = () -> { if (pet != null && !dragging && !holding && !entering && !exiting && bubble == null && interactionState.isEmpty()) dockNow(); };
     private final Runnable delayedAnnouncement = this::refreshNow;
     private final Runnable restore = () -> {
         if (clearanceDepth != 0) return;
@@ -240,7 +249,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
     private final Runnable blink = new Runnable() {
         @Override public void run() {
             if (pet == null) return;
-            if (!dragging && !holding && !entering && !exiting && !petHidden && bubble == null) {
+            if (!dragging && !holding && !entering && !exiting && !petHidden && bubble == null && interactionState.isEmpty()) {
                 if (docked && !snapshot.optBoolean("active") && ++idlePulse % 3 == 0) {
                     setDocked(false); sprite.showState(sprite.variant("idle", "idle"), true,
                         () -> { if (pet != null && !holding && !dragging && bubble == null) MAIN.postDelayed(dock, 1200); });
@@ -311,6 +320,11 @@ final class PetOverlay implements OverlayInteraction.Listener {
         pet.setContentDescription(name(context) + NativeLocale.text("，Droy 宠物，点击查看任务，拖动调整位置", ", Droy pet. Tap to view the task; drag to move"));
         pendingMarker.setVisibility(pending() != null ? View.VISIBLE : View.GONE);
         pendingMarker.setContentDescription(NativeLocale.text("有问题等你回应", "A question needs your response"));
+        if (!interactionState.isEmpty()) {
+            if (PetInteractionActions.interrupted(interactionTaskActive, interactionTask, snapshot.optString("taskId"),
+                    snapshot.optString("phase"), pending() != null)) cancelInteraction(true);
+            else return;
+        }
         if (busy || dragging || holding || clearanceDepth > 0 || petHidden || bubbleHidden) return;
         // Commit a buffered stage only when its window can be presented. Capture,
         // dragging, and a slow answer request must not consume an unseen message.
@@ -331,7 +345,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
             appearance = nextAppearance;
             if (bubble != null) showBubble(manualBubble);
         }
-        if (bubble != null && manualBubble && !bubbleContent.equals(displayedSummary()) && (pending != null || stage.isEmpty())) showBubble(true);
+        if (bubble != null && manualBubble && !interactionMenu && !bubbleContent.equals(displayedSummary()) && (pending != null || stage.isEmpty())) showBubble(true);
         if (stage.isEmpty() && stageBubble && pending == null) {
             if (summary().isBlank()) collapse(); else showBubble(true);
         }
@@ -392,6 +406,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
             @Override public boolean onTouch(View view, android.view.MotionEvent event) {
                 switch (event.getActionMasked()) {
                     case android.view.MotionEvent.ACTION_DOWN:
+                        cancelInteraction(true);
                         downX = event.getRawX(); downY = event.getRawY(); originX = petLayout.x; originY = petLayout.y;
                         dragging = holding = false; MAIN.removeCallbacks(dock); stopTransition(true); cancelMovement();
                         originX = petLayout.x; originY = petLayout.y;
@@ -555,6 +570,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
         playExit(sprite.variant("exit", "idle"));
     }
     private void playExit(String state) {
+        cancelInteraction(false);
         stopTransition(true); removeBubble(); MAIN.removeCallbacks(dock);
         setDocked(false); sprite.setFacingLeft(onLeft); sprite.showState(state, true);
         transitionTargetX = petLayout.x; transitionTargetY = petLayout.y;
@@ -627,18 +643,12 @@ final class PetOverlay implements OverlayInteraction.Listener {
         return displayedMessage;
     }
     private String animation() {
-        if (pending() != null) return "waiting";
-        return switch (snapshot.optString("phase")) {
-            case "waiting" -> "waiting";
-            case "completed" -> sprite != null && sprite.hasState("completed") ? "completed" : "idle";
-            case "blocked" -> sprite != null && sprite.hasState("blocked") ? "blocked" : "waiting";
-            case "interrupted" -> sprite != null && sprite.hasState("stopped") ? "stopped" : "idle";
-            case "executing", "verifying", "thinking" -> "working";
-            default -> "idle";
-        };
+        return PetInteractionActions.restingState(snapshot.optString("phase"), pending() != null,
+            state -> sprite != null && sprite.hasState(state));
     }
     private void showBubble(boolean manual) {
         if (pet == null) return;
+        cancelInteraction(false);
         removeBubble(); emerge(); manualBubble = manual;
         JSONObject p = pending();
         bubble = new LinearLayout(context); bubble.setOrientation(LinearLayout.VERTICAL); bubble.setPadding(dp(11), dp(8), dp(11), dp(8));
@@ -676,6 +686,11 @@ final class PetOverlay implements OverlayInteraction.Listener {
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1); lp.leftMargin = dp(6); actions.addView(stop, lp);
             }
             bubble.addView(actions);
+            if (manual && p == null && !busy && !sprite.interactions().isEmpty()) {
+                Button play = button(NativeLocale.text("互动动作", "Play actions"), this::showInteractions);
+                play.setContentDescription(NativeLocale.text("选择宠物互动动作", "Choose a companion play action"));
+                bubble.addView(play);
+            }
         } else {
             bubble.setOnClickListener(v -> { bounce(); showBubble(true); }); bubble.setContentDescription(message + NativeLocale.text("，点击展开任务操作", ". Tap to expand task actions"));
         }
@@ -897,10 +912,100 @@ final class PetOverlay implements OverlayInteraction.Listener {
         else MainActivity.revealTask(context, task);
         collapse();
     }
+    private void showInteractions() {
+        snapshot = ToolProgress.current(context);
+        if (pet == null || sprite == null || busy || pending() != null || clearanceDepth > 0) { refreshNow(); return; }
+        String packageId = sprite.packageId();
+        showBubble(true);
+        bubble.removeAllViews(); interactionMenu = true;
+        previewUntil = Math.max(previewUntil, SystemClock.elapsedRealtime() + 30000);
+        TextView heading = text(NativeLocale.text("Droy · 互动动作", "Droy · Play actions"), 13, Color.WHITE);
+        heading.setPadding(0, 0, 0, dp(6)); bubble.addView(heading);
+        for (String state : sprite.interactions()) {
+            Button play = button(sprite.interactionLabel(state), () -> {
+                if (sprite != null && packageId.equals(sprite.packageId())) playInteraction(state);
+            });
+            play.setTag("droy-pet-interaction:" + state);
+            bubble.addView(play);
+        }
+        bubble.addView(button(NativeLocale.text("返回任务", "Back to task"), () -> showBubble(true)));
+        String task = snapshot.optString("taskId");
+        if (snapshot.optBoolean("active") && !task.isEmpty())
+            bubble.addView(button(NativeLocale.text("停止任务", "Stop task"), () -> action(task, "cancel", null, null)));
+        MAIN.removeCallbacks(hideMessage); positionBubble();
+    }
+
+    private void playInteraction(String state) {
+        snapshot = ToolProgress.current(context);
+        if (pet == null || sprite == null || busy || pending() != null || dragging || clearanceDepth > 0
+                || !sprite.interactions().contains(state)) { refreshNow(); return; }
+        cancelInteraction(false); removeBubble(); manualBubble = false; emerge();
+        MAIN.removeCallbacks(blink);
+        interactionState = state; interactionTask = snapshot.optString("taskId"); interactionTaskActive = snapshot.optBoolean("active");
+        long sequence = ++interactionSequence;
+        PetSpriteSpec.Effect effect = sprite.effect(state);
+        long duration = PetInteractionActions.duration(sprite.duration(state), effect == null ? 0 : effect.durationMs(), ValueAnimator.areAnimatorsEnabled());
+        previewUntil = Math.max(previewUntil, SystemClock.elapsedRealtime() + duration + 1500);
+        sprite.showState(state, duration > 0);
+        if (duration > 0 && effect != null) {
+            try { showEffect(state); }
+            catch (WindowManager.BadTokenException | SecurityException unavailable) {
+                cancelInteraction(true);
+                Toast.makeText(context, NativeLocale.text("无法显示水滴特效，请重新打开 Droy 后重试", "Unable to show the droplet effect. Reopen Droy and try again"), Toast.LENGTH_LONG).show();
+                refreshNow(); return;
+            }
+        }
+        finishInteraction = () -> {
+            if (sequence != interactionSequence || pet == null || sprite == null) return;
+            finishInteraction = null; interactionState = ""; interactionTask = ""; interactionTaskActive = false; removeEffect();
+            snapshot = ToolProgress.current(context); sprite.showState(animation(), false); refreshNow();
+            if (pet != null) {
+                MAIN.postDelayed(blink, 11000);
+                if (bubble == null) MAIN.postDelayed(dock, 4000);
+            }
+        };
+        MAIN.postDelayed(finishInteraction, duration);
+    }
+
+    private void showEffect(String state) {
+        int size = Math.min(dp(264), Math.min(safe.width(), usableBottom() - safe.top));
+        if (size <= 0) return;
+        effectWindow = sprite.effectView(state);
+        WindowManager.LayoutParams params = layout(size, size, "Droy droplet effect");
+        params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        // Android 12 limits pass-through touch beneath untrusted overlay windows.
+        // Stay below the device limit instead of blocking another app's input.
+        params.alpha = Build.VERSION.SDK_INT >= 31
+            ? Math.min(.6f, context.getSystemService(android.hardware.input.InputManager.class).getMaximumObscuringOpacityForTouch() * .75f) : .6f;
+        params.x = safe.left + (safe.width() - size) / 2;
+        params.y = safe.top + (usableBottom() - safe.top - size) / 2;
+        windows.addView(effectWindow, params);
+        effectWindowId = windowId(effectWindow); OverlayInteraction.registerWindow(effectWindowId);
+        effectWindow.post(() -> {
+            if (effectWindow != null) { effectWindowId = windowId(effectWindow); OverlayInteraction.registerWindow(effectWindowId); }
+        });
+    }
+    private void removeEffect() {
+        OverlayInteraction.unregisterWindow(effectWindowId);
+        if (effectWindow != null && effectWindow.getParent() != null) windows.removeViewImmediate(effectWindow);
+        effectWindow = null; effectWindowId = -1;
+    }
+    private void cancelInteraction(boolean restoreState) {
+        boolean wasPlaying = !interactionState.isEmpty();
+        interactionSequence++; interactionState = ""; interactionTask = ""; interactionTaskActive = false;
+        if (finishInteraction != null) { MAIN.removeCallbacks(finishInteraction); finishInteraction = null; }
+        removeEffect();
+        if (wasPlaying && sprite != null) {
+            sprite.cancelPlayback();
+            if (restoreState && pet != null) sprite.showState(docked ? (onLeft ? "peekLeft" : "peekRight") : animation(), false);
+            MAIN.removeCallbacks(blink); MAIN.postDelayed(blink, 11000);
+        }
+    }
+
     private void collapse() { removeBubble(); manualBubble = false; if (pet != null) MAIN.postDelayed(dock, 1200); }
     private void removeBubble() {
         MAIN.removeCallbacks(hideMessage);
-        stageBubble = false;
+        stageBubble = false; interactionMenu = false;
         releaseAnswerFocus();
         if (bubbleWindow != null) { OverlayInteraction.unregisterWindow(bubbleWindowId);
             if (bubbleWindow.getParent() != null) windows.removeViewImmediate(bubbleWindow);
@@ -908,6 +1013,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
     }
 
     @Override public CompletableFuture<Void> prepare(Rect area, boolean capture) {
+        cancelInteraction(true);
         stopTransition(true); cancelMovement(); MAIN.removeCallbacks(dock);
         restoreSequence++;
         clearanceDepth++;
@@ -995,6 +1101,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
     }
     @Override public void onKeyboardBounds(Rect bounds) {
         if (keyboard.equals(bounds)) return;
+        if (!bounds.isEmpty()) cancelInteraction(true);
         keyboard.set(bounds);
         if (pet != null && !dragging) { applySavedPosition(); if (bubble != null) positionBubble(); }
     }
@@ -1013,6 +1120,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
     Rect petBounds() { return pet == null ? new Rect() : new Rect(petLayout.x, petLayout.y, petLayout.x + petLayout.width, petLayout.y + petLayout.height); }
     private Rect bubbleBounds() { return bubbleWindow == null ? new Rect() : new Rect(bubbleLayout.x, bubbleLayout.y, bubbleLayout.x + bubbleLayout.width, bubbleLayout.y + bubbleLayout.height); }
     private void removeWindows() {
+        cancelInteraction(false);
         stopTransition(false); removeBubble(); cancelMovement(); MAIN.removeCallbacks(blink); MAIN.removeCallbacks(dock);
         holding = dragging = false;
         if (pet != null) { OverlayInteraction.unregisterWindow(petWindowId);
@@ -1027,9 +1135,12 @@ final class PetOverlay implements OverlayInteraction.Listener {
     }
     private void registerWindowIds() {
         OverlayInteraction.unregisterWindow(petWindowId); OverlayInteraction.unregisterWindow(bubbleWindowId);
+        OverlayInteraction.unregisterWindow(effectWindowId);
         petWindowId = pet == null ? -1 : windowId(pet);
         bubbleWindowId = bubbleWindow == null ? -1 : windowId(bubbleWindow);
+        effectWindowId = effectWindow == null ? -1 : windowId(effectWindow);
         OverlayInteraction.registerWindow(petWindowId); OverlayInteraction.registerWindow(bubbleWindowId);
+        OverlayInteraction.registerWindow(effectWindowId);
     }
     private void close() {
         removeWindows(); MAIN.removeCallbacks(restore); MAIN.removeCallbacks(delayedAnnouncement); MAIN.removeCallbacks(refreshDisplay);
