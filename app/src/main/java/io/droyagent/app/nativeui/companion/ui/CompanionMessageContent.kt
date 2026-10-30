@@ -17,7 +17,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -145,8 +144,9 @@ internal fun CompanionMessageRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (user && message.status == "failed") IconButton(onClick = onRetry, enabled = !sending,
                     modifier = Modifier.testTag("native-companion-retry-send")) {
-                    Text("!", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.semantics { contentDescription = retryLabel })
+                    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.error) {
+                        DroyIcon(R.drawable.native_ui_warning, retryLabel)
+                    }
                 }
             }
             }

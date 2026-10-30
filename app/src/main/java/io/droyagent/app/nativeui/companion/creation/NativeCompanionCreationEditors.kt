@@ -66,7 +66,7 @@ internal fun CreationEditor(state: NativeCreationState, model: NativeCompanionCr
         DroySettingsLinkGroup(title = stringResource(R.string.native_companion_settings), enabled = state.canEdit, items = listOf(
             DroySettingsLink(stringResource(R.string.native_companion_personality), R.drawable.native_companion_person,
                 "native-creation-personality") { model.page(NativeCreationPage.PERSONALITY) },
-            DroySettingsLink(stringResource(R.string.native_companion_model), R.drawable.native_settings_hub,
+            DroySettingsLink(stringResource(R.string.native_companion_model), R.drawable.native_ui_model,
                 "native-creation-model", supporting = editor.model?.name ?: stringResource(R.string.native_companion_default_model)) { model.page(NativeCreationPage.MODEL) },
             DroySettingsLink(stringResource(R.string.native_companion_interaction), R.drawable.native_settings_tune,
                 "native-creation-interaction") { model.page(NativeCreationPage.INTERACTION) },

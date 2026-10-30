@@ -43,7 +43,7 @@ internal fun VoiceMessageContent(
             }
         }
         Spacer(Modifier.width(8.dp))
-        if (failed) DroyIcon(R.drawable.native_settings_info, stringResource(R.string.native_work_audio_failed), Modifier.size(18.dp))
+        if (failed) DroyIcon(R.drawable.native_ui_warning, stringResource(R.string.native_work_audio_failed), Modifier.size(18.dp))
         else Text(labelDurationMs?.takeIf { it > 0 }?.let {
             stringResource(R.string.native_companion_voice_seconds, ((it + 999) / 1000).toInt())
         } ?: "—", style = MaterialTheme.typography.bodyMedium, maxLines = 1)

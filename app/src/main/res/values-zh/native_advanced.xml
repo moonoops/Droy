@@ -5,7 +5,7 @@
     <string name="native_advanced_plugins">插件</string>
     <string name="native_advanced_account">DeepSeek 账号</string>
     <string name="native_advanced_title">高级功能</string>
-    <string name="native_advanced_runtime">引擎尚未就绪，请返回工作页启动。</string>
+    <string name="native_advanced_runtime">引擎尚未就绪，请返回任务页启动。</string>
     <string name="native_advanced_conflict">设置已变化，草稿已保留。请重新载入，核对后再保存。</string>
     <string name="native_advanced_account_tasks">此账号仍有运行中的任务，请先停止或等待完成后退出。</string>
     <string name="native_advanced_invalid">输入格式无效，请检查后重试。</string>

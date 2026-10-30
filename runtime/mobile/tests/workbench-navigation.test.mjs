@@ -44,15 +44,16 @@ test('work header exposes direct mode plus ordered conversation, resource and gl
     const doc={activeElement:{blur:()=>actions.push('blur')}};
     const target={CustomEvent:class {constructor(type,init){this.type=type;this.detail=init?.detail;}},dispatchEvent:event=>events.push(event)};
     const start=client.indexOf('      function WorkModeSwitch()'),end=client.indexOf("      ctx.slots.inject('shell.overlay'",start);
-    const render=new Function('React','ctx','doc','target','bridge','controller','h','companionUi','DROY_COMPANION_COPY','IconNewChatOutlineRegular','IconPanelLeftOutlineRegular','IconSettingsOutlineMedium',
+    const render=new Function('React','ctx','doc','target','bridge','controller','h','companionUi','DROY_COMPANION_COPY',
       `${client.slice(start,end)};return WorkModeSwitch;`)(
         {useSyncExternalStore:(_subscribe,snapshot)=>snapshot()},ctx,doc,target,{request:async action=>actions.push(action)},{report:error=>{throw error;}},jsx,
-        {WorkModeSwitch:'mode'}, {zh:{conversationsSpaces:'对话与空间',resourcePanel:'资源面板',settings:'设置'},en:{conversationsSpaces:'Conversations and spaces',resourcePanel:'Resources',settings:'Settings'}},'chat-icon','panel-icon','settings-icon');
+        {WorkModeSwitch:'mode',Icon:'droy-icon'}, {zh:{conversationsSpaces:'对话与空间',resourcePanel:'资源面板',settings:'设置'},en:{conversationsSpaces:'Conversations and spaces',resourcePanel:'Resources',settings:'Settings'}});
     const tree=render(),buttons=nodes(tree).filter(node=>node.type==='button');
     assert.equal(tree.props.className,'droy-work-header');
     assert.equal(buttons.length,3);
     assert.deepEqual(buttons.map(button=>Object.keys(button.props).find(key=>key.startsWith('data-droy-'))), ['data-droy-menu','data-droy-resource-toggle','data-droy-global-settings']);
     assert.ok(buttons.every(button=>button.props['aria-label']));
+    assert.deepEqual(buttons.map(button=>nodes(button).find(node=>node.type==='droy-icon')?.props.name),['conversations','resources','settings']);
     for(const button of buttons)button.props.onClick();
     await Promise.resolve();
     assert.deepEqual(actions,['blur','hideKeyboard','conversations','blur','hideKeyboard','resources','blur','hideKeyboard']);
@@ -67,6 +68,6 @@ test('mobile conversation browser replaces sidebar chrome with its own back page
   assert.match(sidebar,/"data-droy-drawer-close":true/);
   assert.match(sidebar,/children: renderSlot\("sidebar.settings"/);
   assert.doesNotMatch(sidebar,/children: mobile \? null : renderSlot\("sidebar.settings"/);
-  assert.match(sidebar,/title:"对话与空间",back:"返回工作台"/);
-  assert.match(sidebar,/title:"Conversations and spaces",back:"Back to workspace"/);
+  assert.match(sidebar,/title:"对话与空间",back:"返回任务"/);
+  assert.match(sidebar,/title:"Conversations and spaces",back:"Back to Tasks"/);
 });

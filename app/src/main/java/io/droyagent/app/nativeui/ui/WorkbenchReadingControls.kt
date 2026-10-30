@@ -123,9 +123,9 @@ internal class WorkbenchReadingSize(private val preferences: SharedPreferences) 
     onUsage: () -> Unit, onSchedules: () -> Unit, onVoice: (() -> Unit)?) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())) {
-            DroyMenuActionRow(R.drawable.native_settings_hub, stringResource(R.string.native_task_type), onClick = onTaskType)
+            DroyMenuActionRow(R.drawable.native_ui_task_type, stringResource(R.string.native_task_type), onClick = onTaskType)
             DroyMenuActionRow(R.drawable.native_ui_folder, stringResource(R.string.native_spaces_chats), onClick = onSpaces)
-            DroyMenuActionRow(R.drawable.native_ui_description, stringResource(R.string.native_workbench_font), onClick = onFont)
+            DroyMenuActionRow(R.drawable.native_ui_font, stringResource(R.string.native_workbench_font), onClick = onFont)
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             DroyMenuActionRow(R.drawable.native_ui_bar_chart, stringResource(R.string.native_usage), onClick = onUsage)
             DroyMenuActionRow(R.drawable.native_schedule_calendar_month, stringResource(R.string.native_schedule_title), onClick = onSchedules)
@@ -160,7 +160,7 @@ internal class WorkbenchReadingSize(private val preferences: SharedPreferences) 
     IconButton(onClick = onClick, modifier = Modifier.size(48.dp).testTag("native-context-control").semantics { contentDescription = label },
         colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)) {
         Canvas(Modifier.size(24.dp)) {
-            val stroke = 3.dp.toPx()
+            val stroke = 2.dp.toPx()
             drawCircle(track, radius = (size.minDimension - stroke) / 2, style = Stroke(stroke))
             if (ratio != null) drawArc(foreground, -90f, 360f * ratio, false,
                 topLeft = Offset(stroke / 2, stroke / 2), size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke),

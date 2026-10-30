@@ -374,22 +374,38 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
     }, [open]);
   }
   function boot() { return initialized ||= state.initialize().catch(() => { initialized = null; }); }
+  // Tabler Icons outline, MIT; pinned source and license: tools/icons/tabler/.
   const paths = {
-    switch: 'M4 7h15l-4-4m4 14H4l4 4M19 7l-4 4M4 17l4-4', pin: 'm8 3 8 0-1 6 4 4H5l4-4-1-6M12 13v8',
-    back: 'm15 5-7 7 7 7', down: 'm6 9 6 6 6-6', plus: 'M12 5v14M5 12h14', close: 'm6 6 12 12M18 6 6 18',
-    more: 'M4 6h16M4 12h16M4 18h16', mic: 'M8 5a4 4 0 0 1 8 0v7a4 4 0 0 1-8 0ZM5 10v2a7 7 0 0 0 14 0v-2M12 19v4M8 23h8',
-    keyboard: 'M3 5h18v14H3ZM6 9h1m3 0h1m3 0h1m3 0h1M6 12h1m3 0h1m3 0h1m3 0h1M7 16h10',
-    smile: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM8 9v1m8-1v1M8 14q4 5 8 0',
-    photo: 'M3 3h18v18H3Zm0 14 5-5 5 5 3-3 5 5M8 7h.01', camera: 'M8 6 10 3h4l2 3h5v14H3V6ZM16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
-    file: 'M5 3h9l5 5v13H5ZM14 3v6h5', send: 'm4 12 16-8-5 16-3-8-8 0Zm8 0 8-8',
-    play: 'm9 5 10 7-10 7Z', pause: 'M8 5v14M16 5v14', text: 'M4 6h16M12 6v14M8 20h8',
-    quote: 'M8 7H4v6h5v4M19 7h-4v6h5v4', memory: 'M4 4h7a4 4 0 0 1 4 4v13a4 4 0 0 0-4-4H4ZM15 8a4 4 0 0 1 4-4h1v13h-1a4 4 0 0 0-4 4',
-    check: 'm5 12 4 4L19 6', stop: 'M6 6h12v12H6Z', settings: 'M4 7h16M4 17h16M8 4v6M16 14v6',
-    user: 'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM4 21v-2a8 8 0 0 1 16 0v2',
+    switch: ["M16 3l4 4l-4 4", "M10 7l10 0", "M8 13l-4 4l4 4", "M4 17l9 0"],
+    pin: ["M15 4.5l-4 4l-4 1.5l-1.5 1.5l7 7l1.5 -1.5l1.5 -4l4 -4", "M9 15l-4.5 4.5", "M14.5 4l5.5 5.5"],
+    back: ["M5 12l14 0", "M5 12l6 6", "M5 12l6 -6"],
+    down: ["M6 9l6 6l6 -6"],
+    plus: ["M12 5l0 14", "M5 12l14 0"],
+    close: ["M18 6l-12 12", "M6 6l12 12"],
+    more: ["M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0", "M11 19a1 1 0 1 0 2 0a1 1 0 1 0 -2 0", "M11 5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"],
+    mic: ["M9 5a3 3 0 0 1 3 -3a3 3 0 0 1 3 3v5a3 3 0 0 1 -3 3a3 3 0 0 1 -3 -3l0 -5", "M5 10a7 7 0 0 0 14 0", "M8 21l8 0", "M12 17l0 4"],
+    keyboard: ["M2 8a2 2 0 0 1 2 -2h16a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2l0 -8", "M6 10l0 .01", "M10 10l0 .01", "M14 10l0 .01", "M18 10l0 .01", "M6 14l0 .01", "M18 14l0 .01", "M10 14l4 .01"],
+    smile: ["M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0", "M9 10l.01 0", "M15 10l.01 0", "M9.5 15a3.5 3.5 0 0 0 5 0"],
+    photo: ["M15 8h.01", "M3 6a3 3 0 0 1 3 -3h12a3 3 0 0 1 3 3v12a3 3 0 0 1 -3 3h-12a3 3 0 0 1 -3 -3v-12", "M3 16l5 -5c.928 -.893 2.072 -.893 3 0l5 5", "M14 14l1 -1c.928 -.893 2.072 -.893 3 0l3 3"],
+    camera: ["M5 7h1a2 2 0 0 0 2 -2a1 1 0 0 1 1 -1h6a1 1 0 0 1 1 1a2 2 0 0 0 2 2h1a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-9a2 2 0 0 1 2 -2", "M9 13a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"],
+    file: ["M14 3v4a1 1 0 0 0 1 1h4", "M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2", "M9 17h6", "M9 13h6"],
+    send: ["M12 5l0 14", "M18 11l-6 -6", "M6 11l6 -6"],
+    play: ["M7 4v16l13 -8l-13 -8"],
+    pause: ["M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12", "M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1l0 -12"],
+    text: ["M4 20l3 0", "M14 20l7 0", "M6.9 15l6.9 0", "M10.2 6.3l5.8 13.7", "M5 20l6 -16l2 0l7 16"],
+    quote: ["M10 11h-4a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1h3a1 1 0 0 1 1 1v6c0 2.667 -1.333 4.333 -4 5", "M19 11h-4a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1h3a1 1 0 0 1 1 1v6c0 2.667 -1.333 4.333 -4 5"],
+    memory: ["M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0", "M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0", "M3 6l0 13", "M12 6l0 13", "M21 6l0 13"],
+    check: ["M5 12l5 5l10 -10"],
+    stop: ["M5 7a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2l0 -10"],
+    settings: ["M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065", "M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"],
+    user: ["M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0", "M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"],
+    conversations: ["M21 14l-3 -3h-7a1 1 0 0 1 -1 -1v-6a1 1 0 0 1 1 -1h9a1 1 0 0 1 1 1v10", "M14 15v2a1 1 0 0 1 -1 1h-7l-3 3v-10a1 1 0 0 1 1 -1h2"],
+    resources: ["M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2l0 -12", "M15 4l0 16"],
   };
   function Icon({ name, size = 24 }) {
-    return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7,
-      strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false }, h('path', { d: paths[name] || paths.more }));
+    return h('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2,
+      strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true, focusable: false },
+      (paths[name] || paths.more).map((d, key) => h('path', { d, key })));
   }
   function iconButton(name, label, onClick, extra = {}) {
     return h('button', { type: 'button', className: 'droy-im-icon', 'aria-label': t(label), title: t(label), onClick, ...extra }, h(Icon, { name }));
@@ -1078,7 +1094,7 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
     profileLocale = next;
     if (!target.__DSH_LOCALE__) refreshProfileLocale();
   }));
-  return { Panel, WorkModeSwitch, DefaultModeSetting, state,
+  return { Panel, WorkModeSwitch, DefaultModeSetting, Icon, state,
     initialize: boot, open: id => { state.open(id); ctx.layout.selectPanel('droy-companions'); },
     back() { if (captureBack() || localBack()) return true; if (state.getSnapshot().screen === 'list') return false; state.back(); return true; },
     refresh: state.refresh, dispose() { disposed = true; activeAudio?.pause(); state.dispose(); for (const dispose of disposers) dispose(); } };

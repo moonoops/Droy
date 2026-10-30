@@ -2,7 +2,7 @@
     <string name="native_discard_work_draft">Discard this draft?</string>
     <string name="native_work_photos">Photos</string>
     <string name="native_work_camera">Camera</string>
-    <string name="native_workbench">Workbench</string>
+    <string name="native_workbench">Tasks</string>
     <string name="native_default_space">Default space</string>
     <string name="native_workspace_resolving">Loading spaces…</string>
     <string name="native_default_workspace_draft_conflict">Default space has a draft. This draft stays in Ungrouped.</string>

@@ -2,7 +2,7 @@ window.__ModuleLoader__.load({
   id: '@droyagent/mobile',
   factory: require => {
     const React = require('react');
-    const { Button, Switch, Input, Modal, closeTopModal, modalSelector, IconNewChatOutlineRegular, IconPanelLeftOutlineRegular, IconSettingsOutlineMedium } = require('@deepseek-ai/dsh-client-ui-primitives');
+    const { Button, Switch, Input, Modal, closeTopModal, modalSelector } = require('@deepseek-ai/dsh-client-ui-primitives');
     const h = React.createElement;
 
     /* DROY_UI_COPY_MODULE */
@@ -1995,12 +1995,12 @@ body [data-droy-brand-preview=dark] .droy-brand-mark{background-color:var(--droy
           operation();
         };
         const button=(marker,label,icon,onClick,extra={})=>h('button',{type:'button',className:'droy-work-header-button',[marker]:true,
-          'aria-label':label,title:label,onClick:()=>navigate(onClick),...extra},h(icon,{size:24,'aria-hidden':true}));
+          'aria-label':label,title:label,onClick:()=>navigate(onClick),...extra},h(companionUi.Icon,{name:icon,size:24}));
         return h('header',{className:'droy-work-header'},h('div',{className:'droy-work-mode-switch'},h(companionUi.WorkModeSwitch)),
           h('div',{className:'droy-work-header-actions'},
-            button('data-droy-menu',copy.conversationsSpaces,IconNewChatOutlineRegular,()=>ctx.layout.toggleSidebar()),
-            button('data-droy-resource-toggle',copy.resourcePanel,IconPanelLeftOutlineRegular,()=>ctx.sidebarRight.toggleExpanded(),{className:'droy-work-header-button droy-work-resource-button'}),
-            button('data-droy-global-settings',copy.settings,IconSettingsOutlineMedium,()=>target.dispatchEvent(new target.CustomEvent('droy-mobile-open-settings',{detail:{section:'general'}})))));
+            button('data-droy-menu',copy.conversationsSpaces,'conversations',()=>ctx.layout.toggleSidebar()),
+            button('data-droy-resource-toggle',copy.resourcePanel,'resources',()=>ctx.sidebarRight.toggleExpanded(),{className:'droy-work-header-button droy-work-resource-button'}),
+            button('data-droy-global-settings',copy.settings,'settings',()=>target.dispatchEvent(new target.CustomEvent('droy-mobile-open-settings',{detail:{section:'general'}})))));
       }
       ctx.slots.inject('shell.overlay',()=>ctx.slots.register({name:'shell.overlay',id:'droy-work-mode-switch',order:1},WorkModeSwitch));
       const updateCompanionPanel=()=>{

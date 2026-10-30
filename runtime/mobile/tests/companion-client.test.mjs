@@ -425,6 +425,25 @@ function companionUiFixture(handler, language = 'en', { recording, media, native
 const treeNodes = tree => tree && typeof tree === 'object' ? [tree, ...(tree.children || []).flatMap(treeNodes)] : [];
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('shared outline icons preserve multi-path details and remain decorative within labelled controls', () => {
+  const f = companionUiFixture(() => root());
+  const smile = f.ui.Icon({ name: 'smile', size: 20 });
+  assert.equal(smile.type, 'svg');
+  assert.equal(smile.props.width, 20); assert.equal(smile.props.height, 20);
+  assert.equal(smile.props.viewBox, '0 0 24 24');
+  assert.equal(smile.props.strokeWidth, 2);
+  assert.equal(smile.props.strokeLinecap, 'round'); assert.equal(smile.props.strokeLinejoin, 'round');
+  assert.equal(smile.props.stroke, 'currentColor'); assert.equal(smile.props.fill, 'none');
+  assert.equal(smile.props['aria-hidden'], true); assert.equal(smile.props.focusable, false);
+  assert.equal(smile.children.length, 4, 'the face, both eyes and mouth must all be rendered');
+  assert.ok(smile.children.every(child => child.type === 'path' && typeof child.props.d === 'string' && child.props.d.length));
+  for (const name of ['conversations', 'resources', 'settings']) {
+    const icon = f.ui.Icon({ name });
+    assert.ok(icon.children.length > 1, `${name} retains its complete geometry`);
+  }
+  f.ui.state.dispose();
+});
+
 test('queued voice gesture updates survive preparation failure, cancellation and completion in both languages', async () => {
   for (const language of ['zh', 'en']) for (const terminal of ['failure', 'cancel', 'finish']) {
     const pending = deferred(); let cancelled = 0, finished = 0;

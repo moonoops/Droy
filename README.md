@@ -145,7 +145,7 @@ Following DSH's “everything is a plugin” philosophy, mobile adaptation, voic
 - Voice recognition runs locally; recognized text goes to the conversation model. Readout uses your selected speech engine.
 - Notification analysis can send notification text to the model; explicit content rules can run locally.
 - Personal memory is off by default. Sources are enabled separately; model processing requires authorization for the endpoint, data category and purpose.
-- Companion memory is private to each companion and uses local MemOS storage/retrieval with on-device multilingual embeddings. Removing a companion retains its memory on the device; request permanent deletion or restoration explicitly in the workbench. Memory records are not exposed as a browsing interface. Cloud synchronization is not enabled.
+- Companion memory is private to each companion and uses local MemOS storage/retrieval with on-device multilingual embeddings. Removing a companion retains its memory on the device; request permanent deletion or restoration explicitly in Tasks. Memory records are not exposed as a browsing interface. Cloud synchronization is not enabled.
 
 You can stop tasks and change capabilities in settings. Background work depends on Android process availability. Before uninstalling, turn off notification management normally so it can restore settings it changed.
 

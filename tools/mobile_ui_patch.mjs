@@ -689,7 +689,7 @@ export function patchSidebar(source) {
   if (source.includes('data-droy-drawer-close')) throw new Error('Mobile UI patch anchor: sidebar already adapted');
   source = replaceFunction(source, 'SidebarRoot', text => {
     text = replaceOnce(text, 'const panels = usePanels((snapshot) => snapshot);', `const mobile = document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined";
-            const droyCopy = {zh:{title:"对话与空间",back:"返回工作台"},en:{title:"Conversations and spaces",back:"Back to workspace"}}[(document.documentElement.lang || "zh").startsWith("zh") ? "zh" : "en"];
+            const droyCopy = {zh:{title:"对话与空间",back:"返回任务"},en:{title:"Conversations and spaces",back:"Back to Tasks"}}[(document.documentElement.lang || "zh").startsWith("zh") ? "zh" : "en"];
             const panels = usePanels((snapshot) => snapshot);`);
     text = replaceOnce(text, 'darwinDesktop && (0, react_jsx_runtime.jsx)("div", {', '!mobile && darwinDesktop && (0, react_jsx_runtime.jsx)("div", {');
     text = replaceOnce(text, '(0, react_jsx_runtime.jsxs)("div", {\n\t\t\t\t\t\tclassName: SidebarRoot_module_css_default.logoRow,', `mobile ? (0, react_jsx_runtime.jsxs)("header", {

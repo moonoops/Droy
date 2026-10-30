@@ -2,7 +2,7 @@
     <string name="native_discard_work_draft">放弃当前草稿？</string>
     <string name="native_work_photos">相册</string>
     <string name="native_work_camera">拍照</string>
-    <string name="native_workbench">工作台</string>
+    <string name="native_workbench">任务</string>
     <string name="native_default_space">默认空间</string>
     <string name="native_workspace_resolving">正在加载空间…</string>
     <string name="native_default_workspace_draft_conflict">默认空间已有草稿，当前草稿保留在未分组。</string>

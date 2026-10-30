@@ -200,7 +200,7 @@ fun NativeProductSettingsScreen(
                                             }
                                         }
                                     }
-                                    DroySettingsToggle(stringResource(R.string.nps_task_notifications), R.drawable.native_ui_edit_square,
+                                    DroySettingsToggle(stringResource(R.string.nps_task_notifications), R.drawable.native_ui_workbench,
                                         delivery.optBoolean("tasksEnabled"), !busy && !deliveryFailed, 1, 2,
                                         Modifier.testTag("native-product-switch:nps_task_notifications")) {
                                         run {
@@ -310,7 +310,7 @@ fun NativeProductSettingsScreen(
                                 }
                                 Spacer(Modifier.height(12.dp))
                                 DroySettingsLinkGroup(enabled = !busy, items = listOf(
-                                    DroySettingsLink(stringResource(R.string.nps_app_management), R.drawable.native_settings_hub, "native-product-field:nps_app_management") { notificationPage = "apps" },
+                                    DroySettingsLink(stringResource(R.string.nps_app_management), R.drawable.native_ui_apps, "native-product-field:nps_app_management") { notificationPage = "apps" },
                                     DroySettingsLink(stringResource(R.string.nps_rules), R.drawable.native_settings_tune, "native-product-field:nps_rules") { textRuleEditor = true },
                                     DroySettingsLink(stringResource(R.string.nps_archive), R.drawable.native_settings_notifications, "native-product-field:nps_archive") { notificationPage = "history" },
                                 ))

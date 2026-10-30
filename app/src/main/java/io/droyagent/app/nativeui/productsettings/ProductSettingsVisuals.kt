@@ -34,7 +34,7 @@ internal fun InstalledApplicationIcon(packageName: String, size: Dp = 40.dp) {
     }
     val image = bitmap
     if (image != null) Image(image, contentDescription = null, modifier = Modifier.size(size))
-    else DroyIcon(R.drawable.native_settings_hub, null, modifier = Modifier.size(size))
+    else DroyIcon(R.drawable.native_ui_apps, null, modifier = Modifier.size(size))
 }
 
 /** Rounded filled fields use a complete focus outline instead of the default bottom indicator. */

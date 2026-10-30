@@ -27,7 +27,7 @@
     <string name="native_share_text_too_long">Shared text supports up to 100,000 characters</string>
     <string name="native_share_title">Send preview</string>
     <string name="native_share_destination">Send to</string>
-    <string name="native_share_workbench">Workbench</string>
+    <string name="native_share_workbench">Tasks</string>
     <string name="native_share_message">Message</string>
     <string name="native_share_send">Send</string>
     <string name="native_share_sent">Sent</string>

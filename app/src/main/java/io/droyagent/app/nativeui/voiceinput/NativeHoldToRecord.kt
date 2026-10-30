@@ -117,10 +117,10 @@ fun NativeVoiceInputStatus(
                         val y = size.height / 2f + sin(i / 100f * Math.PI * 8).toFloat() * amplitude
                         if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
                     }
-                    drawPath(path, color, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
+                    drawPath(path, color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
                 } else {
                     if (state.source != null) IconButton(onClick = onPreview ?: { onAction(NativeVoiceInputAction.TogglePreview) }) {
-                        DroyIcon(if (previewing) R.drawable.native_ui_stop else R.drawable.native_companion_play_arrow,
+                        DroyIcon(if (previewing) R.drawable.native_ui_stop else R.drawable.native_audio_play,
                             stringResource(if (previewing) R.string.native_voice_stop_preview else R.string.native_voice_preview))
                     }
                     Text(stringResource(when (state.phase) {

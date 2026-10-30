@@ -101,7 +101,7 @@ fun NativeVoiceScreen(state: NativeVoiceState, onAction: (NativeVoiceAction) -> 
                         }
                     } }
                     item { DroySettingsLinkGroup(stringResource(R.string.native_voice_sound_wake), listOf(
-                        DroySettingsLink(stringResource(R.string.native_voice_readout), R.drawable.native_companion_play_arrow,
+                        DroySettingsLink(stringResource(R.string.native_voice_readout), R.drawable.native_audio_play,
                             "native-voice-open-readout", state.snapshot?.tts?.provider?.let { stringResource(providerLabel(it)) }
                                 ?: stringResource(R.string.native_voice_unknown)) { onAction(NativeVoiceAction.Open(NativeVoicePage.READOUT)) },
                         DroySettingsLink(stringResource(R.string.native_voice_wake), R.drawable.native_companion_mic,
@@ -200,7 +200,7 @@ private fun PreviewButton(state: NativeVoiceState, enabled: Boolean, onAction: (
     FilledTonalIconButton(onClick = { onAction(if (state.ownPreview) NativeVoiceAction.StopPreview else NativeVoiceAction.Preview) },
         enabled = state.runtime.ready && !state.saving && (state.ownPreview || enabled && state.ttsReady && state.snapshot?.previewAvailable == true),
         modifier = Modifier.padding(start = 8.dp).size(48.dp).testTag("native-voice-preview")) {
-        DroyIcon(if (state.ownPreview) R.drawable.native_ui_stop else R.drawable.native_companion_play_arrow,
+        DroyIcon(if (state.ownPreview) R.drawable.native_ui_stop else R.drawable.native_audio_play,
             stringResource(if (state.ownPreview) R.string.native_voice_stop_preview else R.string.native_voice_preview))
     }
 }

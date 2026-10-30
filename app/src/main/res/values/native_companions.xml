@@ -86,7 +86,7 @@
     <string name="native_companion_task_needs_input">Needs your input</string>
     <string name="native_companion_task_cancelling">Cancelling…</string>
     <string name="native_companion_cancel_task">Cancel task</string>
-    <string name="native_companion_open_workbench">Open in workbench</string>
+    <string name="native_companion_open_workbench">Open in Tasks</string>
     <string name="native_companion_goal">Goal</string>
     <string name="native_companion_result">Result</string>
     <string name="native_companion_close">Close</string>
@@ -121,7 +121,7 @@
     <string name="native_companion_background_sample_out">Nice to meet you</string>
     <string name="native_companion_delete_profile">Delete companion</string>
     <string name="native_companion_delete_profile_title">Delete %1$s?</string>
-    <string name="native_companion_delete_profile_scope">Chats and linked tasks will be deleted. Memory stays on this device until you explicitly request its deletion in the workbench.</string>
+    <string name="native_companion_delete_profile_scope">Chats and linked tasks will be deleted. Memory stays on this device until you explicitly request its deletion in Tasks.</string>
     <string name="native_companion_configure_model">Set up a model in Settings to start chatting</string>
     <string name="native_companion_user_bio">About me</string>
     <string name="native_companion_user_bio_too_long">Use 2,000 characters or fewer</string>

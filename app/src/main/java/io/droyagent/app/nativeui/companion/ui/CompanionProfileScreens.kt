@@ -160,7 +160,7 @@ fun CompanionProfileScreen(
                 enabled = !profileBusy && state.runtime.ready, items = listOf(
                     DroySettingsLink(stringResource(R.string.native_companion_personality), R.drawable.native_companion_person,
                         "native-companion-personality") { keyboard?.hide(); sheet = "personality" },
-                    DroySettingsLink(stringResource(R.string.native_companion_model), R.drawable.native_settings_hub,
+                    DroySettingsLink(stringResource(R.string.native_companion_model), R.drawable.native_ui_model,
                         "native-companion-model", supporting = if (companion.modelInherited) stringResource(R.string.native_companion_default_model)
                             else companion.model?.name ?: stringResource(R.string.native_companion_default_model)) { keyboard?.hide(); sheet = "model" },
                     DroySettingsLink(stringResource(R.string.native_companion_interaction), R.drawable.native_settings_tune,

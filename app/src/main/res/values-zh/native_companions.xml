@@ -86,7 +86,7 @@
     <string name="native_companion_task_needs_input">待处理</string>
     <string name="native_companion_task_cancelling">取消中…</string>
     <string name="native_companion_cancel_task">取消任务</string>
-    <string name="native_companion_open_workbench">在工作台打开</string>
+    <string name="native_companion_open_workbench">在任务中打开</string>
     <string name="native_companion_goal">目标</string>
     <string name="native_companion_result">结果</string>
     <string name="native_companion_close">关闭</string>
@@ -121,7 +121,7 @@
     <string name="native_companion_background_sample_out">很高兴认识你</string>
     <string name="native_companion_delete_profile">删除伙伴</string>
     <string name="native_companion_delete_profile_title">删除“%1$s”？</string>
-    <string name="native_companion_delete_profile_scope">聊天和关联任务将删除。记忆仍保留在本机，直到你在工作台明确要求删除记忆。</string>
+    <string name="native_companion_delete_profile_scope">聊天和关联任务将删除。记忆仍保留在本机，直到你在“任务”页面明确要求删除记忆。</string>
     <string name="native_companion_configure_model">请先在设置中配置模型，再开始聊天</string>
     <string name="native_companion_user_bio">简介</string>
     <string name="native_companion_user_bio_too_long">简介不能超过2000个字</string>

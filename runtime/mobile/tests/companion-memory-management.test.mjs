@@ -195,13 +195,13 @@ test('scope arguments are captured before asynchronous authorization', async () 
 
 test('tool schemas, scope confirmation and receipts follow the current saved language', async () => {
   const f = fixture();
-  assert.match(f.registered[0].description, /only in the workbench/);
+  assert.match(f.registered[0].description, /only in Tasks/);
   const run = f.hooks.get('system-prompt/assemble');
   f.setLanguage('zh-CN');
   const assembly = await run({}, {}, async () => ({ tools: [f.registered[0]], sections: [{ name: 'tools:sdk', text: f.registered[0].description }] }));
-  assert.match(assembly.tools[0].description, /仅在工作台/);
+  assert.match(assembly.tools[0].description, /仅在“任务”页面/);
   assert.match(assembly.tools[0].parameters.properties.memorySpaceId.description, /不是名称或路径/);
-  assert.match(assembly.sections[0].text, /仅在工作台/);
+  assert.match(assembly.sections[0].text, /仅在“任务”页面/);
   const result = await f.registered[0].execute({ operation: 'purge', memorySpaceId: 'space-0', expectedRevision: 1 }, f.exec);
   assert.match(f.questions[0].questions[0].question, /永久删除/);
   assert.equal(result.message, '已删除所选空间的本地记忆。');

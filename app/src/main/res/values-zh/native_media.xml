@@ -27,7 +27,7 @@
     <string name="native_share_text_too_long">分享文字最多支持 100000 个字符</string>
     <string name="native_share_title">发送预览</string>
     <string name="native_share_destination">发送到</string>
-    <string name="native_share_workbench">工作台</string>
+    <string name="native_share_workbench">任务</string>
     <string name="native_share_message">消息</string>
     <string name="native_share_send">发送</string>
     <string name="native_share_sent">已发送</string>

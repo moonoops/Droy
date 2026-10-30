@@ -1,9 +1,7 @@
-# Schedule icons
+# Native clear round-line icons
 
-`native_schedule_*.xml` preserves the original Google Material Symbols Rounded
-geometry, licensed under Apache 2.0. Source template:
+The `native_*` UI vectors use Tabler Icons outline on a 24 × 24 grid, with
+2-unit strokes and round caps and joins. Resource names are retained for callers;
+semantic variants are mapped centrally.
 
-`https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsrounded/{name}/default/24px.svg`
-
-Names: arrow_back, add, calendar_month, delete. The Android vectors translate
-the source y origin by 960; their display color comes from the shared theme.
+See the [shared source, license and regeneration instructions](../../../../../../../../../tools/icons/README.md).

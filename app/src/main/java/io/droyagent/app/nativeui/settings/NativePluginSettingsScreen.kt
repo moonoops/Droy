@@ -28,7 +28,7 @@ internal fun NativePluginSettingsScreen(onBack: () -> Unit, onOpen: (String) -> 
             val groups = listOf(
                 R.string.native_plugins_search to listOf(Triple("web-search", R.string.native_settings_web_search, R.drawable.native_settings_search)),
                 R.string.native_plugins_agents to listOf(
-                    Triple("subtask-models", R.string.native_settings_subtask_models, R.drawable.native_settings_neurology),
+                    Triple("subtask-models", R.string.native_settings_subtask_models, R.drawable.native_ui_model),
                     Triple("agent-loop", R.string.native_advanced_loop, R.drawable.native_settings_repeat),
                     Triple("agent-team", R.string.native_advanced_team, R.drawable.native_settings_groups)),
                 R.string.native_plugins_tools to listOf(

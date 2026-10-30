@@ -13,10 +13,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
+import io.droyagent.app.nativeui.ui.DroyIcon
 import io.droyagent.app.nativeui.ui.DroyIconAction
 import kotlinx.coroutines.delay
 import androidx.lifecycle.Lifecycle
@@ -215,7 +218,16 @@ private fun AdvancedFieldEditor(field: AdvancedField, value: String, reset: Bool
         if (reset) Text(stringResource(R.string.native_advanced_reset_pending))
         when (field.kind) {
             "boolean" -> Row { Text(stringResource(R.string.native_advanced_enabled), Modifier.weight(1f)); Switch(value == "true", { onEdit(it.toString()) }, enabled = enabled) }
-            "enum" -> field.options.forEach { option -> OutlinedButton(onClick = { onEdit(option) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text((if (option == value) "✓ " else "") + option) } }
+            "enum" -> field.options.forEach { option ->
+                OutlinedButton(onClick = { onEdit(option) }, enabled = enabled,
+                    modifier = Modifier.fillMaxWidth().semantics { selected = option == value }) {
+                    if (option == value) {
+                        DroyIcon(R.drawable.native_ui_check, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text(option)
+                }
+            }
             "number", "string", "array" -> { OutlinedTextField(value, onEdit, enabled = enabled, modifier = Modifier.fillMaxWidth().testTag("native-advanced-field:${field.path.joinToString(".")}"), shape = MaterialTheme.shapes.medium, keyboardOptions = KeyboardOptions(keyboardType = if (field.kind == "number") KeyboardType.Number else KeyboardType.Text), singleLine = field.kind != "array"); if (field.kind == "array") Text(stringResource(R.string.native_advanced_array_hint), style = MaterialTheme.typography.bodySmall) }
             "secret" -> if (inline == null) Text(stringResource(R.string.native_advanced_secret_unsupported)) else {
                 Text(stringResource(if (inline.configured) R.string.native_advanced_inline_priority else R.string.native_advanced_credential_empty))

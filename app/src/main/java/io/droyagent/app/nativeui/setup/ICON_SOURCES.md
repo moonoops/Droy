@@ -1,9 +1,7 @@
-# Setup icons
+# Native clear round-line icons
 
-`native_setup_*.xml` preserves Google Material Symbols Rounded geometry,
-licensed under Apache 2.0. Source URL template:
+The `native_*` UI vectors use Tabler Icons outline on a 24 × 24 grid, with
+2-unit strokes and round caps and joins. Resource names are retained for callers;
+semantic variants are mapped centrally.
 
-`https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsrounded/{name}/default/24px.svg`
-
-Names: arrow_back, waving_hand, person. Source view boxes are translated by
-960 on the y axis; display colors come from the shared Material theme.
+See the [shared source, license and regeneration instructions](../../../../../../../../../tools/icons/README.md).

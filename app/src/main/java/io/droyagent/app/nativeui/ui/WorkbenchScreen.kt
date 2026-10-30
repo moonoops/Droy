@@ -244,9 +244,9 @@ fun WorkbenchScreen(state: NativeWorkbenchState, model: NativeWorkbenchViewModel
             }
             if (engineModel != null) {
                 HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                DroyMenuActionRow(R.drawable.native_ui_description, stringResource(R.string.native_engine_compact),
+                DroyMenuActionRow(R.drawable.native_ui_compact, stringResource(R.string.native_engine_compact),
                     enabled = engineTargetMatches && state.selectedSessionId != null && !state.readOnly) { sheet = "compact" }
-                DroyMenuActionRow(R.drawable.native_settings_hub, stringResource(R.string.native_goal_title),
+                DroyMenuActionRow(R.drawable.native_ui_goal, stringResource(R.string.native_goal_title),
                     enabled = engineTargetMatches && state.runtime.ready && state.workspaceResolved && !state.readOnly && !state.sending && !preparingGoal) {
                         preparingGoal = true
                         scope.launch {
@@ -362,7 +362,7 @@ private fun WorkbenchComposer(state: NativeWorkbenchState, onDraft: (String) -> 
                 TextButton(onClick = onModel, enabled = state.runtime.ready && !state.modelChanging && !state.readOnly,
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                     contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.weight(1f).height(32.dp).testTag("native-model")) {
-                    DroyIcon(R.drawable.native_settings_hub, null, Modifier.size(18.dp))
+                    DroyIcon(R.drawable.native_ui_model, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(state.selectedModel?.name ?: stringResource(R.string.native_choose_model), maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -104,7 +104,7 @@ private fun CompanionModelRow(name: String, detail: String?, selected: Boolean, 
     SegmentedListItem(selected = selected, onClick = onClick, enabled = enabled,
         shapes = shapes,
         colors = ListItemDefaults.segmentedColors(),
-        leadingContent = { DroyIcon(R.drawable.native_settings_hub, null) },
+        leadingContent = { DroyIcon(R.drawable.native_ui_model, null) },
         supportingContent = detail?.let { { Text(it) } },
         trailingContent = { RadioButton(selected, null, enabled = enabled) },
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
@@ -183,7 +183,7 @@ internal fun CompanionInteractionPage(initial: NativeCompanionSettings, enabled:
                 DroySettingsSectionTitle(stringResource(R.string.native_companion_communication))
                 DroySettingsToggle(stringResource(R.string.native_companion_proactive), R.drawable.native_settings_notifications,
                     proactive, enabled, 0, 3, Modifier.testTag("native-companion-proactive")) { proactive = it }
-                DroySettingsToggle(stringResource(R.string.native_companion_memory), R.drawable.native_settings_neurology,
+                DroySettingsToggle(stringResource(R.string.native_companion_memory), R.drawable.native_settings_auto_stories,
                     memory, enabled, 1, 3, Modifier.testTag("native-companion-memory")) { memory = it }
                 DroySettingsToggle(stringResource(R.string.native_companion_civil_language), R.drawable.native_settings_person,
                     civil, enabled, 2, 3, Modifier.testTag("native-companion-civil")) { civil = it }

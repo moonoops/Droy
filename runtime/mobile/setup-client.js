@@ -312,7 +312,7 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
       h('h1', { tabIndex: -1, 'data-droy-setup-title': true }, droyText("认识伙伴")),
       h('p', null, droyText("首次安装自带咔咔。可从咔咔、麦麦、大肥鱼和 Claude 大小姐四个预设模板添加伙伴，聊天和记忆各自独立。")),
       h('p', { className: 'droy-setup-description' }, droyText("首次聊天会使用你在前面配置的模型；之后可在各自资料页更换。")),
-      h('p', { className: 'droy-setup-description' }, droyText("聊天与记忆无需 Root。手机操作从工作台发起，权限可按需开启。")),
+      h('p', { className: 'droy-setup-description' }, droyText("聊天与记忆无需 Root。手机操作从任务发起，权限可按需开启。")),
       h(Identity, { snapshot, onDraft: setIdentityDraft, onSaved: () => navigate(5) }),
       h('details', null, h('summary', null, droyText("选择或定制宠物形象（可选）")),
         h('p', { className: 'droy-setup-description' }, droyText("宠物是可选的动态形象，可悬浮显示；这里的设置不会修改聊天伙伴。")), h(PetStudio, { snapshot })));
@@ -339,7 +339,7 @@ function installSetupClient({ ctx, React, h, Input, target, doc, bridge, control
       h('div', { 'aria-live': 'polite' }, ...checkList));
     if (step === 6) body = h(React.Fragment, null,
       h(BrandMark, { size: 88 }), h('h1', { tabIndex: -1, 'data-droy-setup-title': true }, droyText("{0}欢迎使用 {1}", [setup.identity?.userAddress ? `${setup.identity.userAddress}${droyLocale?.getSnapshot().active === 'en' ? ', ' : '，'}` : '', 'Droy'])),
-      h('p', null, droyText("配置完成，可以在消息里找咔咔聊天、添加其他伙伴，也可以进入工作台。")),
+      h('p', null, droyText("配置完成，可以在消息里找咔咔聊天、添加其他伙伴，也可以进入任务。")),
       h('p', { className: 'droy-setup-description' }, setup.mode === 'dialogue'
         ? droyText("手机操作尚未开启。需要时，可在“设置 → 权限设置”中开启并完成授权。")
         : droyText("已开启的能力和系统权限，可随时在“设置 → 权限设置”中调整。")));

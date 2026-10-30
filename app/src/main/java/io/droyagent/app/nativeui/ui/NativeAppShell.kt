@@ -554,7 +554,7 @@ fun NativeAppShell(
                 }) {
                 val tabs = listOf(
                     Triple("messages", R.string.native_shell_messages, R.drawable.native_ui_chat_bubble),
-                    Triple("workbench", R.string.native_workbench, R.drawable.native_ui_edit_square),
+                    Triple("workbench", R.string.native_workbench, R.drawable.native_ui_workbench),
                     Triple("settings", R.string.native_shell_settings, R.drawable.native_settings_settings),
                 )
                 tabs.forEach { (id, title, icon) ->
@@ -716,9 +716,9 @@ fun NativeAppShell(
             composable("advanced") {
                 NativeSettingsGroup(stringResource(R.string.native_advanced_title), ::back,
                     listOf(
-                        Triple("presets", stringResource(R.string.native_engine_presets), R.drawable.native_settings_hub),
-                        Triple("permissions", stringResource(R.string.native_engine_permissions), R.drawable.native_settings_settings),
-                        Triple("plugins", stringResource(R.string.native_shell_plugins_accounts), R.drawable.native_settings_add),
+                        Triple("presets", stringResource(R.string.native_engine_presets), R.drawable.native_ui_task_type),
+                        Triple("permissions", stringResource(R.string.native_engine_permissions), R.drawable.native_engine_shield),
+                        Triple("plugins", stringResource(R.string.native_shell_plugins_accounts), R.drawable.native_settings_hub),
                     )) { section -> open(if (section == "plugins") "advanced-plugins" else "engine/$section") }
             }
             composable("advanced-plugins") {
@@ -774,9 +774,9 @@ fun NativeAppShell(
             composable("notifications-and-pet") {
                 NativeSettingsGroup(stringResource(R.string.native_settings_notifications), ::back,
                     listOf(
-                        Triple("notifications", stringResource(R.string.nps_notifications), R.drawable.native_ui_chat_bubble),
-                        Triple("proactive", stringResource(R.string.nps_proactive), R.drawable.native_settings_hub),
-                        Triple("pet", stringResource(R.string.nps_pet), R.drawable.native_companion_sentiment_satisfied),
+                        Triple("notifications", stringResource(R.string.nps_notifications), R.drawable.native_settings_notifications),
+                        Triple("proactive", stringResource(R.string.nps_proactive), R.drawable.native_settings_notifications),
+                        Triple("pet", stringResource(R.string.nps_pet), R.drawable.native_settings_pets),
                     )) { section -> open("product/$section") }
             }
             composable("product/{section}", arguments = listOf(navArgument("section") { type = NavType.StringType })) { current ->

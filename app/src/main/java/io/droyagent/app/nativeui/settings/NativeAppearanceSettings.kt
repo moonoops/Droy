@@ -15,6 +15,7 @@ import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
+import io.droyagent.app.nativeui.ui.DroyIcon
 import io.droyagent.app.nativeui.ui.DroySettingsSectionTitle
 import io.droyagent.app.nativeui.ui.droyPresetColorScheme
 
@@ -63,7 +64,8 @@ internal fun NativeAppearanceSettings() {
                         colors = ToggleButtonDefaults.colors(
                             containerColor = colors.primaryContainer, contentColor = colors.onPrimaryContainer,
                             checkedContainerColor = colors.primary, checkedContentColor = colors.onPrimary)) {
-                        Text(if (selected) "✓" else "", modifier = Modifier.clearAndSetSemantics {})
+                        if (selected) DroyIcon(R.drawable.native_ui_check, null, Modifier.clearAndSetSemantics {})
+                        else Spacer(Modifier.size(24.dp))
                     }
                     Text(stringResource(label), style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center,
                         modifier = Modifier.padding(top = 6.dp))

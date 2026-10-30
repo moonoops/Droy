@@ -5,7 +5,7 @@
     <string name="native_advanced_plugins">Plugins</string>
     <string name="native_advanced_account">DeepSeek account</string>
     <string name="native_advanced_title">Advanced features</string>
-    <string name="native_advanced_runtime">The engine is not ready. Start it from the workbench.</string>
+    <string name="native_advanced_runtime">The engine is not ready. Start it from Tasks.</string>
     <string name="native_advanced_conflict">Settings changed. Your draft is retained. Reload, review, then save.</string>
     <string name="native_advanced_account_tasks">Account tasks are running. Stop them or wait before signing out.</string>
     <string name="native_advanced_invalid">The input is invalid. Check it and retry.</string>

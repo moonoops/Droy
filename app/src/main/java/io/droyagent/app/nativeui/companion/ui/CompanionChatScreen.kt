@@ -195,7 +195,7 @@ fun CompanionChatScreen(
             if (!state.runtime.ready) Box(Modifier.padding(16.dp)) { CompanionRuntime(state.runtime, model::startRuntime) }
             if (companionNeedsModel(state.error)) io.droyagent.app.nativeui.ui.DroyErrorNotice(
                 stringResource(R.string.native_companion_configure_model), model::dismissError, onConfigureModels,
-                Modifier.padding(horizontal = 16.dp, vertical = 4.dp), actionIcon = R.drawable.native_settings_hub, actionLabel = stringResource(R.string.native_companion_model))
+                Modifier.padding(horizontal = 16.dp, vertical = 4.dp), actionIcon = R.drawable.native_ui_model, actionLabel = stringResource(R.string.native_companion_model))
             else CompanionError(state.error, model::dismissError, model::refresh, Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
             if (!replyNoticeDismissed && (state.status.phase == "error" || state.status.error != null)) {
                 val needsModel = companionNeedsModel(state.status.error)
@@ -204,7 +204,7 @@ fun CompanionChatScreen(
                 io.droyagent.app.nativeui.ui.DroyErrorNotice(
                     stringResource(if (needsModel) R.string.native_companion_configure_model else R.string.native_companion_reply_failed),
                     { replyNoticeDismissed = true }, retry, Modifier.testTag("native-companion-regenerate"),
-                    actionIcon = if (needsModel) R.drawable.native_settings_hub else R.drawable.native_ui_refresh,
+                    actionIcon = if (needsModel) R.drawable.native_ui_model else R.drawable.native_ui_refresh,
                     actionLabel = stringResource(if (needsModel) R.string.native_companion_model else R.string.native_companion_regenerate))
             }
             Box(Modifier.fillMaxWidth().weight(1f)) {

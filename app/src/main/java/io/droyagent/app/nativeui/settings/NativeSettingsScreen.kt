@@ -238,7 +238,7 @@ private fun SettingsHome(state: NativeSettingsState, onMyProfile: () -> Unit, on
             R.drawable.native_settings_person, "native-settings-my-profile", onClick = onMyProfile)))
         DroySettingsLinkGroup(stringResource(R.string.native_settings_group_basic), listOf(
             DroySettingsLink(stringResource(R.string.native_settings_general), R.drawable.native_settings_tune, "native-settings-general", onClick = onGeneral),
-            DroySettingsLink(stringResource(R.string.native_settings_models), R.drawable.native_settings_neurology, "native-settings-models", state.defaultModel?.name, onModels),
+            DroySettingsLink(stringResource(R.string.native_settings_models), R.drawable.native_ui_model, "native-settings-models", state.defaultModel?.name, onModels),
             DroySettingsLink(stringResource(R.string.native_permissions_title), R.drawable.native_engine_shield, "native-settings-permissions", onClick = onPermissions),
         ))
         onOpenFeature?.let { open ->
@@ -326,7 +326,7 @@ private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsView
                     Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary) {
                         Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                            DroyIcon(R.drawable.native_settings_neurology, null, Modifier.size(36.dp))
+                            DroyIcon(R.drawable.native_ui_model, null, Modifier.size(36.dp))
                         }
                     }
                     Text(stringResource(R.string.native_settings_setup_add_first), style = MaterialTheme.typography.headlineSmall)
@@ -391,7 +391,7 @@ private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsView
                             colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
                                 contentColor = MaterialTheme.colorScheme.onSurface),
                             modifier = Modifier.widthIn(min = 152.dp).heightIn(min = 48.dp).testTag("native-settings-test-model")) {
-                            DroyIcon(R.drawable.native_companion_play_arrow, null)
+                            DroyIcon(R.drawable.native_audio_play, null)
                             Spacer(Modifier.width(8.dp))
                             Text(stringResource(if (state.testing) R.string.native_settings_testing else R.string.native_settings_test_model))
                         }
@@ -400,7 +400,7 @@ private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsView
             }
         }
         if (showSubtaskModels) item(key = "subtask-models") {
-            SettingRow(stringResource(R.string.native_settings_subtask_models), null, R.drawable.native_settings_hub, onSubtask,
+            SettingRow(stringResource(R.string.native_settings_subtask_models), null, R.drawable.native_ui_model, onSubtask,
                 enabled = enabled, modifier = Modifier.testTag("native-settings-subtask-models"))
         }
         item(key = "providers-title") {
@@ -429,7 +429,7 @@ private fun ModelsSettings(state: NativeSettingsState, model: NativeSettingsView
                         val supporting = listOfNotNull(type, status).joinToString(" · ")
                         SegmentedListItem(onClick = { model.openProvider(provider.id) }, enabled = enabled,
                             shapes = ListItemDefaults.segmentedShapes(index, state.configuredProviders.size),
-                            leadingContent = { DroyIcon(R.drawable.native_settings_hub, null) },
+                            leadingContent = { DroyIcon(R.drawable.native_ui_model, null) },
                             supportingContent = supporting.takeIf { it.isNotBlank() }?.let { { Text(it) } },
                             trailingContent = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {

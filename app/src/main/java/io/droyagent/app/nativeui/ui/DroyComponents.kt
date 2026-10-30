@@ -81,7 +81,8 @@ fun DroyErrorNotice(message: String, onDismiss: () -> Unit, onRetry: (() -> Unit
     Surface(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
         shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(Modifier.padding(start = 12.dp, end = 4.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Text("!", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
+            Icon(painterResource(io.droyagent.app.R.drawable.native_ui_warning), contentDescription = null,
+                tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
             Text(message, modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 10.dp),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
             if (onRetry != null) DroyIconAction(actionIcon,
