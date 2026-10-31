@@ -625,6 +625,7 @@ private fun SettingsError(code: String, dismiss: () -> Unit, refresh: () -> Unit
         "MODEL_CONFIG_CHANGED" -> R.string.native_settings_error_config_changed
         "MODEL_NOT_CONFIGURED", "INVALID_MODEL_SELECTION", "NATIVE_SETTINGS_MODEL_UNAVAILABLE" -> R.string.native_settings_error_default
         "MODEL_GREETING_FAILED", "MODEL_TEST_FAILED", "MODEL_RESPONSE_INVALID" -> R.string.native_settings_error_test
+        "MODEL_TEST_PRIVACY_UNAVAILABLE" -> R.string.native_settings_error_test_privacy
         "MODEL_TEST_BUSY" -> R.string.native_settings_error_busy
         "MODEL_QUOTA_LIMITED" -> R.string.native_settings_error_quota
         "MODEL_TEST_INTERRUPTED" -> R.string.native_settings_error_interrupted

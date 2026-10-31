@@ -86,6 +86,7 @@
     <string name="native_settings_error_general">操作未完成，请重试</string>
     <string name="native_settings_error_default">请选择默认模型</string>
     <string name="native_settings_error_test">模型验证未通过</string>
+    <string name="native_settings_error_test_privacy">模型测试的隐私校验尚未就绪，请稍后重试。</string>
     <string name="native_settings_error_config_changed">模型配置已变化，请重新测试</string>
     <string name="native_settings_error_key_required">请填写 API key</string>
     <string name="native_settings_error_protocol">请选择协议</string>

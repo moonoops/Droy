@@ -61,11 +61,17 @@ function modelIdentity(value) {
 }
 
 /** Only stable categories reach the UI: provider exceptions can contain credentials or request bodies. */
+function privacyFailure(code) {
+  return typeof code === 'string' && (code.startsWith('PRIVACY_')
+    || code === 'DROY_REQUIRED_PROTECTION_UNAVAILABLE' || code === 'MODEL_TEST_PRIVACY_UNAVAILABLE');
+}
 function modelFailure(error, signal) {
   if (error instanceof SetupError) return error;
   if (signal?.aborted) return new SetupError('MODEL_TEST_INTERRUPTED', '模型验证已取消或超时，请检查网络后重试。', 503);
   const code = typeof error?.code === 'string' ? error.code : '';
   const status = error?.status;
+  if (privacyFailure(code))
+    return new SetupError('MODEL_TEST_PRIVACY_UNAVAILABLE', '模型测试的隐私校验尚未就绪，请稍后重试。', 503);
   if (status === 401) return new SetupError('MODEL_CREDENTIAL_REQUIRED', '模型服务拒绝了 API Key（HTTP 401），请在模型设置中更新。', 422);
   if (status === 403) return new SetupError('MODEL_CREDENTIAL_REQUIRED', '模型服务拒绝访问（HTTP 403），请检查 API Key 的权限或服务限制。', 422);
   if (['MISSING_CREDENTIAL', 'INVALID_API_KEY', 'NO_CREDENTIAL_STORE'].includes(code))
@@ -310,6 +316,7 @@ export function createSetupService(ctx, bridge) {
       if (!selected) throw new SetupError('MODEL_NOT_CONFIGURED', '请先在模型设置中配置并选择文本模型。', 422);
       testing = true;
       const combined = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : []), AbortSignal.timeout(MODEL_TIMEOUT)]);
+      let testSession;
       try {
         await bridge.setup({ operation: 'recordModel', passed: false }, combined);
         if (!ctx.llm.listProviders().some(provider => provider.id === selected.provider))
@@ -322,7 +329,11 @@ export function createSetupService(ctx, bridge) {
         }
         const before = await setupModelFingerprint(ctx, selected);
         const language = resolveMobileLocale(ctx);
-        const greeting = await collectModel(ctx, { ...selected, maxTokens: 512,
+        const privacy = ctx.get('droyPrivacy');
+        if (typeof privacy?.openSetupTestSession !== 'function')
+          throw new SetupError('MODEL_TEST_PRIVACY_UNAVAILABLE', '模型测试的隐私校验尚未就绪，请稍后重试。', 503);
+        testSession = privacy.openSetupTestSession();
+        const greeting = await collectModel(ctx, { ...selected, sessionId: testSession.sessionId, maxTokens: 512,
           system: language === 'zh' ? '这是 Droy 首次安装的连接测试。请只用简短中文回复一句问候。不要请求任何个人资料。'
             : 'This is the Droy first-install connection test. Reply with one short English greeting. Do not request personal information.',
           messages: [{ role: 'user', content: [{ type: 'text', text: language === 'zh' ? '你好' : 'Hello' }] }] }, combined);
@@ -331,7 +342,7 @@ export function createSetupService(ctx, bridge) {
         const nonce = randomBytes(12).toString('hex');
         let toolsPassed = false;
         try {
-          const toolResult = await collectModel(ctx, { ...selected, maxTokens: 768,
+          const toolResult = await collectModel(ctx, { ...selected, sessionId: testSession.sessionId, maxTokens: 768,
             system: language === 'zh' ? '这是 Droy 安装时的工具协议测试。只调用一次 droy_setup_echo，把用户提供的 value 原样放入参数。不调用其他工具，不输出说明。'
               : 'This is the Droy setup tool protocol test. Call droy_setup_echo exactly once with the user-provided value unchanged. Do not call other tools or output explanations.',
             messages: [{ role: 'user', content: [{ type: 'text', text: JSON.stringify({ value: nonce }) }] }],
@@ -343,7 +354,7 @@ export function createSetupService(ctx, bridge) {
         } catch (error) {
           // A text-only model remains useful for dialogue. Cancellation aborts
           // the whole test; an unsupported tool protocol is a separate result.
-          if (combined.aborted) throw error;
+          if (combined.aborted || privacyFailure(error?.code)) throw error;
         }
         combined.throwIfAborted();
         const after = await setupModelFingerprint(ctx, selected);
@@ -359,7 +370,7 @@ export function createSetupService(ctx, bridge) {
           message: toolsPassed ? '模型对话和工具调用验证通过。' : '模型对话验证通过；工具调用尚未通过，可先使用对话。' } };
       } catch (error) {
         throw modelFailure(error, combined);
-      } finally { testing = false; }
+      } finally { testSession?.close(); testing = false; }
     },
   };
 }

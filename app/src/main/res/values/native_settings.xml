@@ -86,6 +86,7 @@
     <string name="native_settings_error_general">Operation failed. Try again.</string>
     <string name="native_settings_error_default">Choose a default model</string>
     <string name="native_settings_error_test">Model verification failed</string>
+    <string name="native_settings_error_test_privacy">Privacy verification for the model test is not ready. Try again in a moment.</string>
     <string name="native_settings_error_config_changed">Model configuration changed. Test again.</string>
     <string name="native_settings_error_key_required">Enter an API key</string>
     <string name="native_settings_error_protocol">Choose a protocol</string>

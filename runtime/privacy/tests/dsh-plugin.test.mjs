@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { PrivacyStore } from '../store.mjs';
 import { createDshPrivacyService, PREPARED_ROUTE } from '../dsh-plugin.mjs';
 import { patchPrivacyLlm, patchPrivacyPiAi } from '../upstream-patch.mjs';
+import { installSetupServices } from '../../mobile/setup.mjs';
 
 const installed = createRequire(new URL('../../dsh/package.json', import.meta.url));
 const modules = fileURLToPath(new URL('../../dsh/node_modules/', import.meta.url));
@@ -38,16 +39,33 @@ const patched = (async () => {
 })();
 after(async () => { await patched.catch(() => {}); if (patchedRoot) await rm(patchedRoot, { recursive: true, force: true }); });
 
-async function fixture(t, { active = true, ready = true, execution = true, unavailableStore = false, api = 'openai-completions', model = 'synthetic', privacyRoot } = {}) {
+async function fixture(t, { active = true, ready = true, execution = true, unavailableStore = false, api = 'openai-completions', model = 'synthetic', privacyRoot, setupEcho = false, onModelRequest } = {}) {
   const [{ llm, pi }, { Context }] = await Promise.all([patched, load('@deepseek-ai/cordis')]);
   const directory = await mkdtemp(join(tmpdir(), 'droy-privacy-plugin-'));
   const store = await PrivacyStore.open({ directory: join(privacyRoot ?? directory, 'store'), markerPath: join(privacyRoot ?? directory, 'marker'), initialize: true });
-  const receipts = [];
+  const receipts = [], modelRequests = [];
   let mode = 'success', activeFlag = active, readyFlag = ready, identity = 'synthetic-direct', locale = 'zh';
   let storeError = unavailableStore ? 'PRIVACY_NOT_INITIALIZED' : undefined;
   const server = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
     receipts.push({ path: req.url, private: body.includes('SYNTHETIC_PRIVATE_RECORD') });
+    if (setupEcho) {
+      const request = JSON.parse(body);
+      modelRequests.push(request);
+      await onModelRequest?.(request, modelRequests.length);
+      if (request.tools?.some(tool => tool.function?.name === 'droy_setup_echo')) {
+        const content = request.messages.find(message => message.role === 'user').content;
+        const text = typeof content === 'string' ? content : content.map(block => block.text ?? '').join('');
+        const { value } = JSON.parse(text);
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.end('data: ' + JSON.stringify({ id: 'synthetic-echo', object: 'chat.completion.chunk', created: 0, model,
+          choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'synthetic-call', type: 'function',
+            function: { name: 'droy_setup_echo', arguments: JSON.stringify({ value }) } }] }, finish_reason: null }] })
+          + '\n\ndata: ' + JSON.stringify({ id: 'synthetic-echo', object: 'chat.completion.chunk', created: 0, model,
+            choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }) + '\n\ndata: [DONE]\n\n');
+        return;
+      }
+    }
     if (mode === 'redirect') { res.writeHead(307, { location: '/unapproved' }); res.end(); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     if (req.url.endsWith('/responses')) {
@@ -94,7 +112,7 @@ async function fixture(t, { active = true, ready = true, execution = true, unava
   const request = (sessionId = 'subject', purpose = 'conversation') => ({ provider: 'synthetic', model, sessionId, purpose,
     messages: [{ role: 'user', content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }] }] });
   const send = async options => { const chunks = []; for await (const chunk of ctx.llm.stream(options)) chunks.push(chunk); return chunks; };
-  return { ctx, llm, pi, store, service, receipts, route, request, send, url,
+  return { ctx, llm, pi, store, service, receipts, modelRequests, route, request, send, url,
     setMode: value => { mode = value; }, setReady: value => { readyFlag = value; }, setIdentity: value => { identity = value; },
     setStoreError: value => { storeError = value; },
     setNativePrompts: value => { host.nativeAccessPrompts = value; },
@@ -106,6 +124,96 @@ function failed(chunks, code) {
   assert.equal(last.type, 'finish'); assert.equal(last.reason.kind, 'error');
   assert.ok(JSON.stringify(last).includes(code), JSON.stringify(last));
 }
+
+async function setupHttp(t, f) {
+  const token = 'synthetic-model-setup-session-token-1234567890';
+  const previous = process.env.DROY_WEB_TOKEN;
+  process.env.DROY_WEB_TOKEN = token;
+  t.after(() => { if (previous === undefined) delete process.env.DROY_WEB_TOKEN; else process.env.DROY_WEB_TOKEN = previous; });
+  f.ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'synthetic', model: 'synthetic' }) });
+  const routes = new Map(), calls = [];
+  f.ctx.provide('webServer', { register(route) { routes.set(route.path, route.handler); } });
+  const originalStream = f.ctx.llm.stream.bind(f.ctx.llm);
+  f.ctx.llm.stream = options => { calls.push(options); return originalStream(options); };
+  let state = { modelVerification: { passed: false, toolsPassed: false } };
+  installSetupServices(f.ctx, { async setup(payload) {
+    if (payload.operation === 'recordModel') state = { modelVerification: { ...payload } };
+    return structuredClone(state);
+  } });
+  const server = createServer((req, res) => {
+    const handler = routes.get(req.url);
+    if (handler) { void handler(req, res); return; }
+    res.writeHead(404); res.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  return { calls, async test() {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/droy/setup/model-test`, {
+      method: 'POST', headers: { cookie: `droy_session=${token}`, 'content-type': 'application/json' }, body: '{}',
+    });
+    const text = await response.text();
+    assert.equal(response.status, 200, text);
+    return { text, result: JSON.parse(text) };
+  } };
+}
+
+test('setup model verification reaches real patched DSH HTTP with isolated provenance across activation', async t => {
+  for (const activation of ['active', 'inactive', 'between-requests']) await t.test(activation, async t => {
+    let f;
+    f = await fixture(t, { active: activation === 'active', setupEcho: true,
+      onModelRequest: (_request, count) => { if (activation === 'between-requests' && count === 1) f.setActive(true); } });
+    const setup = await setupHttp(t, f);
+    const first = await setup.test();
+    assert.equal(first.result.test.passed, true);
+    assert.equal(first.result.test.toolsPassed, true);
+    assert.equal(setup.calls.length, 2);
+    const sessionId = setup.calls[0].sessionId;
+    assert.match(sessionId, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
+    assert.equal(setup.calls[1].sessionId, sessionId);
+    assert.equal(first.text.includes(sessionId), false);
+    assert.equal(f.modelRequests.length, 2);
+    assert.equal(f.modelRequests.every(request => !JSON.stringify(request).includes('SYNTHETIC_PRIVATE_RECORD')), true);
+    assert.deepEqual(f.modelRequests[1].tools.map(tool => tool.function.name), ['droy_setup_echo']);
+    assert.equal(f.modelRequests[0].tools, undefined);
+    assert.match(JSON.stringify(f.modelRequests[0].messages), /简短中文/);
+    assert.match(JSON.stringify(f.modelRequests[1].messages), /工具协议测试/);
+    assert.equal((await f.store.sessionState(sessionId)).state, activation === 'inactive' ? 'unknown' : 'known-clean');
+    const second = await setup.test();
+    assert.equal(second.result.test.toolsPassed, true);
+    assert.equal(setup.calls.length, 4);
+    assert.notEqual(setup.calls[2].sessionId, sessionId);
+    assert.equal(setup.calls[2].sessionId, setup.calls[3].sessionId);
+    assert.equal(second.text.includes(setup.calls[2].sessionId), false);
+    if (activation === 'inactive') {
+      f.setActive(true); await f.service.status();
+      assert.equal((await f.store.sessionState(sessionId)).state, 'unknown', 'finished inactive tests must not be registered later');
+      assert.equal((await f.store.sessionState(setup.calls[2].sessionId)).state, 'unknown');
+    }
+  });
+});
+
+test('setup provenance closes pending identities and preserves protected or forgotten sessions', async t => {
+  const f = await fixture(t, { active: false });
+  const closed = f.service.openSetupTestSession();
+  closed.close(); closed.close();
+  f.setActive(true); await f.service.status();
+  assert.equal((await f.store.sessionState(closed.sessionId)).state, 'unknown');
+  failed(await f.send(f.request(closed.sessionId)), 'PRIVACY_SESSION_UNKNOWN');
+  failed(await f.send({ ...f.request(), sessionId: undefined }), 'PRIVACY_INVALID_SESSION');
+  for (const state of ['protected', 'forgotten']) {
+    const handle = f.service.openSetupTestSession();
+    if (state === 'protected') await f.store.protectSession(handle.sessionId, { categories: ['memory'] });
+    else await f.store.forgetSessions([handle.sessionId]);
+    const expected = state === 'protected' ? 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' : 'PRIVACY_SESSION_FORGOTTEN';
+    failed(await f.send(f.request(handle.sessionId)), expected);
+    handle.close();
+    assert.equal((await f.store.sessionState(handle.sessionId)).state, state);
+    failed(await f.send(f.request(handle.sessionId)), expected);
+  }
+  assert.equal(f.receipts.length, 0);
+  f.service.dispose();
+  assert.throws(() => f.service.openSetupTestSession(), { code: 'PRIVACY_SERVICE_CLOSED' });
+});
 
 async function mountAgentLifecycle(f, history) {
   const plugins = await Promise.all(['@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-projection',

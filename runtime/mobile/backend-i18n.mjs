@@ -130,6 +130,7 @@ export const backendMessages = Object.freeze({
   '模型额度不足或请求过多，请检查额度后重试。': 'The model quota or rate limit was reached. Check your quota and try again.',
   '所选模型尚未配置或不可用，请在模型设置中检查。': 'The selected model is not configured or is unavailable. Check model settings.',
   '模型验证未通过，请检查模型配置、网络和服务额度后重试。': 'Model verification failed. Check the model settings, connection, and provider quota.',
+  '模型测试的隐私校验尚未就绪，请稍后重试。': 'Privacy verification for the model test is not ready. Try again in a moment.',
   '安装状态暂不可用，请重试。': 'Setup status is temporarily unavailable. Try again.',
   '模型验证返回过长，请检查模型后重试。': 'The model verification response was too long. Check the model and try again.',
   '模型验证未完整返回，请检查模型后重试。': 'The model verification response was incomplete. Check the model and try again.',

@@ -5,6 +5,7 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { createSetupService, installSetupServices, SetupError } from '../setup.mjs';
 
 const provider = 'fixture-provider', model = 'fixture-text';
@@ -12,7 +13,11 @@ const key = 'fictional-installation-key-do-not-use';
 const token = 'fictional-setup-session-token-1234567890';
 const greeting = [{ type: 'text-delta', index: 0, text: '你好。' }, { type: 'finish', reason: { kind: 'stop' } }];
 function fixture(options = {}) {
-  const requests = [], nativeCalls = [];
+  const requests = [], nativeCalls = [], testSessions = [];
+  const privacy = { openSetupTestSession() {
+    const session = { sessionId: randomUUID(), closed: false, close() { this.closed = true; } };
+    testSessions.push(session); return session;
+  } };
   const saved = { provider, model };
   const native = { required: true, completed: false, mode: 'dialogue', modelVerification: { passed: false, toolsPassed: false } };
   const credential = { value: key };
@@ -22,6 +27,7 @@ function fixture(options = {}) {
     settings: { describe: () => [{ ns: 'fixture-adapter', value: config }, { ns: 'locale', value: { preference: options.locale ?? 'zh' } }] },
     get(name) {
       if (name === 'settings') return this.settings;
+      if (name === 'droyPrivacy') return options.noPrivacy ? undefined : privacy;
       if (name === 'agentDefaultModel') return { currentSelection: () => ({ ...saved }),
         async saveSelection(next) { Object.assign(saved, next); } };
       if (name === 'credentials') return { async resolve(ref) { assert.equal(ref, 'FIXTURE_KEY'); return credential; },
@@ -53,7 +59,7 @@ function fixture(options = {}) {
     if (payload.operation === 'complete') native.completed = true;
     return structuredClone(native);
   } };
-  return { ctx, bridge, native, requests, nativeCalls, credential, config,
+  return { ctx, bridge, native, requests, nativeCalls, credential, config, testSessions,
     service: createSetupService(ctx, bridge), saved, get fingerprint() { return recordedFingerprint; } };
 }
 
@@ -67,7 +73,10 @@ test('model setup uses two isolated one-shot requests and records independently 
   assert.equal(f.requests.length, 2);
   assert.equal(f.requests[0].messages.length, 1);
   assert.equal(f.requests[0].messages[0].content[0].text, '你好');
-  assert.equal(f.requests[0].sessionId, undefined);
+  assert.equal(f.requests[0].sessionId, f.testSessions[0].sessionId);
+  assert.equal(f.requests[1].sessionId, f.requests[0].sessionId);
+  assert.equal(f.testSessions[0].closed, true);
+  assert.ok(!JSON.stringify(result).includes(f.requests[0].sessionId));
   assert.equal(f.requests[0].tools, undefined);
   assert.deepEqual(f.requests[1].tools.map(tool => tool.name), ['droy_setup_echo']);
   for (const request of f.requests) assert.equal(request.messages.some(message => message.role !== 'user'), false);
@@ -155,6 +164,22 @@ test('missing credentials and service denials keep distinct actionable messages'
   }
 });
 
+test('unavailable privacy protection fails explicitly and closes the isolated test session', async () => {
+  const missing = fixture({ noPrivacy: true });
+  await assert.rejects(missing.service.test(), { code: 'MODEL_TEST_PRIVACY_UNAVAILABLE' });
+  assert.equal(missing.requests.length, 0);
+  for (const code of ['PRIVACY_NOT_INITIALIZED', 'PRIVACY_INVALID_SESSION', 'DROY_REQUIRED_PROTECTION_UNAVAILABLE']) {
+    for (const phase of [1, 2]) {
+      const f = fixture({ script: (_request, count) => count === phase
+        ? [{ type: 'finish', reason: { kind: 'error', failure: { code, message: key } } }] : undefined });
+      await assert.rejects(f.service.test(), error => error.code === 'MODEL_TEST_PRIVACY_UNAVAILABLE' && !error.message.includes(key));
+      assert.equal(f.requests.length, phase);
+      assert.equal(f.testSessions[0].closed, true);
+      assert.equal(f.native.modelVerification.passed, false);
+    }
+  }
+});
+
 test('incomplete and oversized greetings never record passed status', async () => {
   for (const script of [
     [{ type: 'text-delta', index: 0, text: 'unfinished' }],
@@ -180,6 +205,7 @@ test('client cancellation prevents either a late receipt or another request', as
   await assert.rejects(f.service.test({}, cancellation.signal), error => error.code === 'MODEL_TEST_INTERRUPTED');
   assert.equal(f.native.modelVerification.passed, false);
   assert.equal(f.requests.length, 1);
+  assert.equal(f.testSessions[0].closed, true);
 });
 
 test('concurrent model tests cannot dispatch duplicate paid requests', async () => {
@@ -247,6 +273,7 @@ test('REAL DSH LlmRuntime accepts the one-shot greeting and echo schema without 
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider, model }) });
   ctx.provide('settings', { describe: () => [{ ns: 'locale', value: { preference: 'zh' } }] });
   const f = fixture();
+  ctx.provide('droyPrivacy', f.ctx.get('droyPrivacy'));
   const result = await createSetupService(ctx, f.bridge).test();
   assert.equal(result.test.toolsPassed, true);
   assert.equal(seen.length, 2);
@@ -328,6 +355,7 @@ test('REAL official DeepSeek adapter uses stored credentials for both setup requ
   const config = official.Config(configValue);
   await ctx.plugin({ name: 'setup-official-fixture', inject: ['llm'], apply: child => official.apply(child, config) });
   const f = fixture();
+  ctx.provide('droyPrivacy', f.ctx.get('droyPrivacy'));
   const service = createSetupService(ctx, f.bridge);
   t.after(() => service.dispose());
   assert.equal((await service.status()).selectionAvailable, false);

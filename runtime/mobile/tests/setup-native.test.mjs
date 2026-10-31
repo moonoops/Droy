@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,6 +28,7 @@ async function fixture(t, options = {}) {
       if (name === 'agentDefaultModel') return { currentSelection: () => ({ ...selection }) };
       if (name === 'credentials') return { resolve: async () => credential, readRecord: async () => undefined };
       if (name === 'settings') return this.settings;
+      if (name === 'droyPrivacy') return { openSetupTestSession: () => ({ sessionId: randomUUID(), close() {} }) };
     },
     llm: {
       listProviders: () => [{ id: selection.provider, name: 'Fixture provider' }],

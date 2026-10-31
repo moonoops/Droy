@@ -14,6 +14,8 @@ Open `PrivacyStore` with absolute host-owned `directory` and `markerPath`; keep 
 
 Endpoint grants bind URL, purpose, category set and configuration digest. Model names alone are not endpoint identities. Grants and revocation come from user-authorized host settings, never model tools. Recheck queued work at dispatch; an earlier success is not a reusable authorization token.
 
+The trusted setup service uses `openSetupTestSession()` for its fixed greeting and echo prompts. The random identity follows normal clean-session registration and dispatch checks, without creating an Agent, conversation history or memory access. Closing the scope removes pending registration; already registered provenance metadata follows the store's normal retention policy.
+
 Categories are `memory`, `activity`, `location` and `derived`. The store retains opaque source identities rather than private text or credentials. Unknown and forgotten sessions remain restricted. Disabling memory collection does not remove existing conversation protection.
 
 The worker requires the trusted runtime; Node permission-mode hosts are rejected instead of clearing execution flags. Source-limit, backpressure and worker errors reject the operation without dropping source identities.

@@ -435,9 +435,17 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     notifyInvalidated(); invalidationListeners.clear();
   }
   function invalidate() { cancelEndpointAccess(); abortCalls(() => true); notifyInvalidated(); }
+  function openSetupTestSession() {
+    if (disposed) fail('PRIVACY_SERVICE_CLOSED');
+    // Setup supplies only fixed synthetic prompts. Queue its new identity through
+    // the same provenance registration used before memory activation.
+    const sessionId = randomUUID();
+    pendingSessions.set(sessionId, null);
+    return Object.freeze({ sessionId, close() { pendingSessions.delete(sessionId); } });
+  }
   return Object.freeze({ status, prepareRoute, routeForPrepared, routeForAgent, describeRoute,
     capturePiRoute, wrapDispatch, fetchFor, onAgentCreated, beforeDisclosure,
-    grantEndpoint, revokeEndpoint, pendingEndpointAccess, resolveEndpointAccess, forgetSources, authorizeExecution, getSourceSession, outputState, onInvalidated, invalidate, dispose });
+    grantEndpoint, revokeEndpoint, pendingEndpointAccess, resolveEndpointAccess, forgetSources, authorizeExecution, getSourceSession, outputState, onInvalidated, invalidate, openSetupTestSession, dispose });
 }
 
 export function apply(ctx) {
