@@ -53,7 +53,7 @@ async function fixture(t, { locale = 'en' } = {}) {
   const store = await openLegacyCompanionStore({ directory });
   await store.updateProfile('kaka', { model: { provider: 'fictional', model: 'fixture' } });
   const library = await new StickerPackLibrary(join(directory, 'sticker-packs'), { builtinCatalog: stickerCatalog }).open();
-  const ctx = { logger: { warn() {} }, agents: { get() {} }, workspaceRegistry: { get() {} },
+  const ctx = { get(name) { return this[name]; }, logger: { warn() {} }, agents: { get() {} }, workspaceRegistry: { get() {} },
     agentDefaultModel: { currentSelection: () => ({ provider: 'fictional', model: 'fixture' }) },
     sessionController: { modelCatalog: async () => ({ groups: [] }) },
     settings: { describe: () => [{ ns: 'locale', value: { preference: locale } }] } };
