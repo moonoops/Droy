@@ -4,6 +4,10 @@ import io.droyagent.app.nativeui.data.NativeApiException
 import io.droyagent.app.nativeui.data.NativeRuntimeState
 import io.droyagent.app.nativeui.media.NativeLocalAttachment
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import org.json.JSONObject
@@ -59,10 +63,14 @@ class NativeCompanionCreationCoordinatorTest {
         val repo = Repository(); val storage = Journal(); val model = NativeCreationCoordinator(repo, storage, Images(), this)
         ready(model); model.selectTemplate(NativeCreationFixtures.template); model.edit { it.copy(name = "Changed") }; yield()
         assertNotNull(storage.value)
+        val observed = mutableListOf<NativeCreationState>()
+        val observation = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) { model.state.collect { observed += it } }
         var exited = false
         model.leaveEditor(false) { exited = true }?.join()
+        observation.cancel()
         assertTrue(exited); assertNull(storage.value); assertNull(model.state.value.editor)
         assertEquals(NativeCreationPage.TEMPLATES, model.state.value.page)
+        assertFalse("The editor must not lose its content before switching pages", observed.any { it.page == NativeCreationPage.EDITOR && it.editor == null })
     }
     @Test fun explicitlySavedDraftCanResumeAndUncertainCancellationKeepsIt() = runBlocking {
         val repo = Repository(); val storage = Journal(); val model = NativeCreationCoordinator(repo, storage, Images(), this)

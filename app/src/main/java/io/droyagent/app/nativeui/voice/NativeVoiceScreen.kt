@@ -3,7 +3,6 @@ package io.droyagent.app.nativeui.voice
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.ui.graphics.Color
@@ -24,6 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -33,6 +33,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
+import io.droyagent.app.nativeui.ui.pageTransition
 import io.droyagent.app.nativeui.ui.DroyIcon
 import io.droyagent.app.nativeui.ui.DroySwitch as Switch
 import io.droyagent.app.nativeui.ui.DroyIconAction
@@ -71,10 +72,9 @@ fun NativeVoiceScreen(state: NativeVoiceState, onAction: (NativeVoiceAction) -> 
                 }
             }
         }) { padding ->
-        AnimatedContent(targetState = state.page, modifier = Modifier.padding(padding).consumeWindowInsets(padding),
+        AnimatedContent(targetState = state.page, modifier = Modifier.padding(padding).consumeWindowInsets(padding).clipToBounds(),
             transitionSpec = {
-                if (targetState == NativeVoicePage.HOME) (motion.popEnter togetherWith motion.popExit).apply { targetContentZIndex = -1f }
-                else motion.enter togetherWith motion.exit
+                motion.pageTransition(targetState != NativeVoicePage.HOME, if (targetState == NativeVoicePage.HOME) 0 else 1)
             }, label = "voice-page") { page ->
         LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding()
             .testTag("native-voice-content"), state = when (page) {

@@ -3,7 +3,6 @@ package io.droyagent.app.nativeui.memory
 import io.droyagent.app.nativeui.ui.DroySwitch as Switch
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +13,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
+import io.droyagent.app.nativeui.ui.pageTransition
 import io.droyagent.app.nativeui.ui.DroyIconAction
 import io.droyagent.app.nativeui.ui.droyNavigationMotion
 
@@ -115,11 +116,10 @@ fun NativeMemoryScreen(
             if (state.conflict || state.error != null && state.error != "memory_result_unconfirmed") MemoryNotice(if (state.conflict) "MEMORY_REVISION_CONFLICT" else state.error!!,
                 if (state.conflict) model::reloadEditor else null,
                 actionText = stringResource(R.string.native_memory_reload_editor))
-            AnimatedContent(targetState = state, contentKey = { it.page }, modifier = Modifier.weight(1f),
+            AnimatedContent(targetState = state, contentKey = { it.page }, modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds(),
                 transitionSpec = {
-                    if (memoryPageDepth(targetState.page) < memoryPageDepth(initialState.page)) {
-                        navigationMotion.popEnter togetherWith navigationMotion.popExit
-                    } else navigationMotion.enter togetherWith navigationMotion.exit
+                    navigationMotion.pageTransition(
+                        memoryPageDepth(targetState.page) >= memoryPageDepth(initialState.page), memoryPageDepth(targetState.page))
                 }, label = "memory-page") { displayed ->
                 pageStates.SaveableStateProvider(displayed.page.name) {
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {

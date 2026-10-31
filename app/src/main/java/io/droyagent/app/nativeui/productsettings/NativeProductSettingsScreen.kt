@@ -3,7 +3,6 @@ package io.droyagent.app.nativeui.productsettings
 import io.droyagent.app.nativeui.ui.DroySwitch as Switch
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -23,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -41,6 +41,7 @@ import io.droyagent.app.NativeProductSettingsHost
 import io.droyagent.app.NativeLocale
 import io.droyagent.app.NativePersonalizationReset
 import io.droyagent.app.R
+import io.droyagent.app.nativeui.ui.pageTransition
 import io.droyagent.app.nativeui.ui.DroyIcon
 import io.droyagent.app.nativeui.ui.DroyIconAction
 import kotlinx.coroutines.Job
@@ -227,9 +228,8 @@ fun NativeProductSettingsScreen(
         }) { padding ->
     Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).testTag(
         if (state != null && !busy && !failed) "native-product-body:${section.wire}" else "native-product-pending:${section.wire}")) {
-    AnimatedContent(notificationPage, modifier = Modifier.fillMaxSize(), transitionSpec = {
-        if (targetState != null) (navigationMotion.enter togetherWith navigationMotion.exit).using(null)
-        else (navigationMotion.popEnter togetherWith navigationMotion.popExit).using(null)
+    AnimatedContent(notificationPage, modifier = Modifier.fillMaxSize().clipToBounds(), transitionSpec = {
+        navigationMotion.pageTransition(targetState != null, if (targetState == null) 0 else 1)
     }, label = "notificationNavigation") { displayedPage ->
     LazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).navigationBarsPadding().imePadding().testTag("native-product-list:${section.wire}"),
         state = when (displayedPage) { "apps" -> appsScroll; "history" -> historyScroll; else -> overviewScroll },

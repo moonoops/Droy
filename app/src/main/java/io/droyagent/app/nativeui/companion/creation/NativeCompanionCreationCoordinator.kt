@@ -127,10 +127,12 @@ internal class NativeCreationCoordinator(
                     }
                     journalLock.withLock {
                         storage.write(null)
-                        update { it.copy(journal = null, draftState = null, error = null, imageError = null, checked = true) }
+                        update { it.copy(journal = null, page = NativeCreationPage.TEMPLATES, draftState = null, error = null, imageError = null, checked = true) }
                     }
-                } else persist()
-                update { it.copy(page = NativeCreationPage.TEMPLATES) }
+                } else {
+                    persist()
+                    update { it.copy(page = NativeCreationPage.TEMPLATES) }
+                }
                 onDone()
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { update { it.copy(error = code(error)) } }

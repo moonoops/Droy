@@ -12,6 +12,8 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Base64
 import androidx.compose.ui.test.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.ViewModelProvider
@@ -61,6 +63,74 @@ class NativeCompanionCreationDeviceTest {
             val id = rows.getJSONObject(index).getString("id")
             if (id in importedIds) store.complete(id, "work")
         }
+    }
+
+    @Test fun templateAndEditorKeepOpaqueStableContentThroughoutNavigation() {
+        openCreation()
+        val template = creation.state.value.templates.single { it.id == "kaka" }
+        compose.waitUntil(15_000) { cachedCompanionImageSize(template.avatarUrl) != null }
+        compose.onNodeWithTag("native-creation-template-kaka").assertIsDisplayed()
+        compose.onNodeWithTag("native-creation-resume").assertDoesNotExist()
+        val root = compose.onNodeWithTag("native-companion-creation")
+        val density = context.resources.displayMetrics.density
+        val initial = root.captureToImage().toPixelMap()
+        val initialRoot = root.fetchSemanticsNode().positionInRoot
+        val templates = compose.onNodeWithTag("native-creation-page:TEMPLATES").fetchSemanticsNode().positionInRoot
+        val surface = initial[(2 * density).toInt(), (templates.y - initialRoot.y + 100 * density).toInt()]
+        var inspectedMargins = 0
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.onNodeWithTag("native-creation-template-kaka").performClick()
+            for ((index, elapsed) in listOf(32L, 32L, 48L, 64L).withIndex()) {
+                compose.mainClock.advanceTimeBy(elapsed)
+                compose.onNodeWithTag("native-creation-resume").assertDoesNotExist()
+                val editor = compose.onNodeWithTag("native-creation-page:EDITOR").fetchSemanticsNode().positionInRoot
+                val origin = root.fetchSemanticsNode().positionInRoot
+                val pixels = root.captureToImage().toPixelMap()
+                val x = (editor.x - origin.x + 8 * density).toInt()
+                if (x in 0 until pixels.width) {
+                    for (height in listOf(80, 140, 220)) {
+                        val y = (editor.y - origin.y + height * density).toInt()
+                        if (y in 0 until pixels.height) {
+                            assertSurfaceColor("Entering editor margin at frame $index ($x,$y)", surface, pixels[x, y])
+                            inspectedMargins++
+                        }
+                    }
+                }
+                fixture.capture("creation-forward-frame-$index")
+            }
+            assertTrue("Inspect overlapping pages before the animation settles", inspectedMargins >= 6)
+            compose.mainClock.advanceTimeBy(2_000)
+            compose.onNodeWithTag("native-creation-name").assertIsDisplayed()
+            compose.onNodeWithTag("native-creation-page:TEMPLATES").assertDoesNotExist()
+            assertEquals("kaka", creation.state.value.editor?.template?.id)
+            fixture.capture("creation-forward-settled")
+
+            pressAndroidBack()
+            compose.waitUntil(10_000) { creation.state.value.page == NativeCreationPage.TEMPLATES && creation.state.value.journal == null }
+            for ((index, elapsed) in listOf(32L, 32L, 48L, 64L).withIndex()) {
+                compose.mainClock.advanceTimeBy(elapsed)
+                compose.onNodeWithTag("native-creation-page:EDITOR").assertExists()
+                compose.onNodeWithTag("native-creation-name").assertTextContains(template.suggestedName)
+                compose.onNodeWithTag("native-creation-resume").assertDoesNotExist()
+                fixture.capture("creation-back-frame-$index")
+            }
+            compose.mainClock.advanceTimeBy(2_000)
+            compose.onNodeWithTag("native-creation-page:EDITOR").assertDoesNotExist()
+            compose.onNodeWithTag("native-creation-template-kaka").assertIsDisplayed()
+            assertNull(creation.state.value.journal)
+            assertEquals(1, profiles().size)
+            fixture.capture("creation-back-settled")
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
+    private fun assertSurfaceColor(message: String, expected: Color, actual: Color) {
+        assertEquals("$message: red", expected.red, actual.red, .025f)
+        assertEquals("$message: green", expected.green, actual.green, .025f)
+        assertEquals("$message: blue", expected.blue, actual.blue, .025f)
+        assertEquals("$message: alpha", expected.alpha, actual.alpha, .025f)
     }
 
     @Test fun customPersonaPreviewEditsAllFieldsAndKeepsNewProactiveDefault() {

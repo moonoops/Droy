@@ -1,7 +1,6 @@
 package io.droyagent.app.nativeui.companion.ui
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.togetherWith
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -12,12 +11,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
+import io.droyagent.app.nativeui.ui.pageTransition
 import io.droyagent.app.nativeui.companion.data.*
 import io.droyagent.app.nativeui.data.NativeModel
 import io.droyagent.app.nativeui.media.NativeAvatarResult
@@ -97,10 +98,9 @@ fun CompanionProfileScreen(
     }
     val motion = io.droyagent.app.nativeui.ui.droyNavigationMotion()
     AnimatedContent(targetState = sheet?.takeIf { it in setOf("personality", "interaction", "background", "sticker-packs") } ?: "profile",
-        transitionSpec = {
+        modifier = Modifier.fillMaxSize().clipToBounds(), transitionSpec = {
             val forward = targetState != "profile" && !(initialState == "background" && targetState == "interaction")
-            ((if (forward) motion.enter else motion.popEnter) togetherWith
-                (if (forward) motion.exit else motion.popExit)).using(null)
+            motion.pageTransition(forward, when (targetState) { "profile" -> 0; "background" -> 2; else -> 1 })
         }, label = "companion-profile-pages") { page ->
     if (page == "personality") {
         CompanionPersonalityPage(companion.personalityOverride, companion.presetPersonality.ifBlank { companion.personality }, state.runtime.ready && !profileBusy,

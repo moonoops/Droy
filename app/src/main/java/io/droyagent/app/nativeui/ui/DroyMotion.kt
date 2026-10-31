@@ -2,6 +2,7 @@ package io.droyagent.app.nativeui.ui
 
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -30,6 +31,11 @@ internal fun droyNavigationMotion(): DroyNavigationMotion {
         slideInHorizontally(spatial) { it }, slideOutHorizontally(spatial) { -it / 4 },
         slideInHorizontally(spatial) { -it / 4 }, slideOutHorizontally(spatial) { it })
 }
+
+/** Stable depths keep the departing child above its parent, including consecutive back steps. */
+internal fun DroyNavigationMotion.pageTransition(forward: Boolean, targetDepth: Int): ContentTransform =
+    ContentTransform(if (forward) enter else popEnter, if (forward) exit else popExit,
+        targetContentZIndex = targetDepth.toFloat(), sizeTransform = null)
 
 /** A newly sent bubble rises from the composer; restored history never replays this entrance. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

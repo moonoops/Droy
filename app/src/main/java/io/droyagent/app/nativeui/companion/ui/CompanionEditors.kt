@@ -3,6 +3,7 @@ package io.droyagent.app.nativeui.companion.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
@@ -240,7 +241,9 @@ internal fun CompanionTimeDialog(value: String, start: Boolean, onClose: () -> U
         dismissButton = { TextButton(onClick = onClose) { Text(stringResource(R.string.native_companion_cancel)) } })
 }
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
+private data class CompanionBackgroundPreview(val url: String?, val alignment: BiasAlignment)
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class, androidx.compose.animation.ExperimentalAnimationApi::class)
 @Composable
 internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoader, enabled: Boolean,
     onChoose: (((NativeAvatarResult) -> Unit) -> Unit)?, onApply: (String) -> Unit, onClose: () -> Unit, incomingSelection: String? = null, onIncomingConsumed: () -> Unit = {}, errorContent: @Composable () -> Unit = {}) {
@@ -267,16 +270,17 @@ internal fun CompanionBackgroundPage(initial: String?, loader: CompanionImageLoa
     }) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item("preview") {
-                val previewUrl = companionBackgroundUrl(value)
                 val position = value.optJSONObject("position")
+                val preview = CompanionBackgroundPreview(companionBackgroundUrl(value), BiasAlignment(
+                    ((position?.optDouble("x", 50.0) ?: 50.0) / 50.0 - 1.0).toFloat(),
+                    ((position?.optDouble("y", 50.0) ?: 50.0) / 50.0 - 1.0).toFloat()))
                 Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.fillMaxWidth().aspectRatio(1.4f).testTag("native-background-preview")) {
                     Box {
-                        Crossfade(targetState = previewUrl, animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
-                            label = "backgroundPreview", modifier = Modifier.fillMaxSize()) { url ->
-                            if (url != null) CompanionBackgroundImage(url, loader, Modifier.fillMaxSize(), alignment = BiasAlignment(
-                                ((position?.optDouble("x", 50.0) ?: 50.0) / 50.0 - 1.0).toFloat(),
-                                ((position?.optDouble("y", 50.0) ?: 50.0) / 50.0 - 1.0).toFloat()))
+                        // Keep the outgoing crop with its image; dragging the same image stays immediate.
+                        updateTransition(preview, label = "backgroundPreview").Crossfade(contentKey = { it.url },
+                            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(), modifier = Modifier.fillMaxSize()) { image ->
+                            if (image.url != null) CompanionBackgroundImage(image.url, loader, Modifier.fillMaxSize(), alignment = image.alignment)
                         }
                         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.Center) {
                             Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {

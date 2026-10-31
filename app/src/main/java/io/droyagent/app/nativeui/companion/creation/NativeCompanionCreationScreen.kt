@@ -3,7 +3,7 @@ package io.droyagent.app.nativeui.companion.creation
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.platform.LocalDensity
@@ -36,6 +37,7 @@ import io.droyagent.app.nativeui.companion.ui.CompanionModelSelection
 import io.droyagent.app.nativeui.ui.DroyIcon
 import io.droyagent.app.nativeui.ui.DroyIconAction
 import io.droyagent.app.nativeui.ui.droyNavigationMotion
+import io.droyagent.app.nativeui.ui.pageTransition
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
@@ -120,20 +122,30 @@ fun NativeCompanionCreationScreen(
             }
             if (state.image != null || state.imageError != null) CreationImageStatus(state, model)
             if (state.busy || !state.restored) LinearProgressIndicator(Modifier.fillMaxWidth())
-            AnimatedContent(targetState = if (state.page == NativeCreationPage.MODEL) NativeCreationPage.EDITOR else state.page, modifier = Modifier.weight(1f).fillMaxWidth(), label = "companionCreationPage",
+            AnimatedContent(targetState = state, contentKey = { creationContentPage(it.page) },
+                modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds(), label = "companionCreationPage",
                 transitionSpec = {
-                    val back = targetState.ordinal < initialState.ordinal
-                    ((if (back) motion.popEnter else motion.enter) togetherWith (if (back) motion.popExit else motion.exit)).using(null)
-                }) { page -> when (page) {
-                NativeCreationPage.TEMPLATES -> CreationTemplates(state, model, Modifier.fillMaxSize()) { template ->
-                    if (currentEditor != null && currentEditor.dirty && currentEditor.template.id != template.id) switchTemplate = template else model.selectTemplate(template)
+                    val target = creationContentPage(targetState.page)
+                    motion.pageTransition(target.ordinal >= creationContentPage(initialState.page).ordinal, target.ordinal)
+                }) { displayed ->
+                val page = creationContentPage(displayed.page)
+                // Each moving page owns its background and retains its outgoing state until disposal.
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).testTag("native-creation-page:${page.name}")) {
+                    when (page) {
+                        NativeCreationPage.TEMPLATES -> CreationTemplates(displayed, model, Modifier.fillMaxSize()) { template ->
+                            val editor = displayed.editor
+                            if (editor != null && editor.dirty && editor.template.id != template.id) switchTemplate = template else model.selectTemplate(template)
+                        }
+                        NativeCreationPage.EDITOR -> CreationEditor(displayed, model, onChooseImage, Modifier.fillMaxSize())
+                        NativeCreationPage.PERSONALITY -> CreationPersonality(displayed, model, Modifier.fillMaxSize())
+                        NativeCreationPage.MODEL -> CreationModels(displayed, model, Modifier.fillMaxSize())
+                        NativeCreationPage.INTERACTION -> editorStates.SaveableStateProvider("interaction:${displayed.journal?.requestId}") {
+                            CreationInteraction(displayed, model, Modifier.fillMaxSize()) { editorStates.removeState("interaction:${displayed.journal?.requestId}") }
+                        }
+                        NativeCreationPage.BACKGROUND -> CreationBackground(displayed, model, onChooseImage, Modifier.fillMaxSize())
+                    }
                 }
-                NativeCreationPage.EDITOR -> CreationEditor(state, model, onChooseImage, Modifier.fillMaxSize())
-                NativeCreationPage.PERSONALITY -> CreationPersonality(state, model, Modifier.fillMaxSize())
-                NativeCreationPage.MODEL -> CreationModels(state, model, Modifier.fillMaxSize())
-                NativeCreationPage.INTERACTION -> editorStates.SaveableStateProvider("interaction:${state.journal?.requestId}") { CreationInteraction(state, model, Modifier.fillMaxSize()) { editorStates.removeState("interaction:${state.journal?.requestId}") } }
-                NativeCreationPage.BACKGROUND -> CreationBackground(state, model, onChooseImage, Modifier.fillMaxSize())
-            } }
+            }
         }
     }
     if (state.page == NativeCreationPage.MODEL && currentEditor != null) ModalBottomSheet(
@@ -165,6 +177,8 @@ fun NativeCompanionCreationScreen(
         confirmButton = { TextButton(onClick = { cancel = false; model.cancelCreation() }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.native_companion_creation_cancel_creation)) } },
         dismissButton = { TextButton(onClick = { cancel = false }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.native_companion_cancel)) } })
 }
+
+private fun creationContentPage(page: NativeCreationPage) = if (page == NativeCreationPage.MODEL) NativeCreationPage.EDITOR else page
 
 @Composable
 internal fun CreationCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {

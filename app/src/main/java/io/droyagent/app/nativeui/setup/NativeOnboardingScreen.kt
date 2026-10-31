@@ -2,7 +2,6 @@ package io.droyagent.app.nativeui.setup
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -21,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import io.droyagent.app.R
+import io.droyagent.app.nativeui.ui.pageTransition
 import io.droyagent.app.nativeui.companion.data.NativeCompanionState
 import io.droyagent.app.nativeui.companion.data.NativeCompanionViewModel
 import io.droyagent.app.nativeui.companion.ui.CompanionAvatar
@@ -184,11 +185,8 @@ fun NativeOnboardingScreen(
                 else Text(stringResource(R.string.native_setup_error_state), color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 if (!route.environment.ready && step != 1 && step != 2) SetupEnvironment(state, model, compact = true)
-                AnimatedContent(targetState = route.step, modifier = Modifier.weight(1f), transitionSpec = {
-                    if (targetState > initialState) (navigationMotion.enter togetherWith navigationMotion.exit)
-                        .apply { targetContentZIndex = 1f }.using(null)
-                    else (navigationMotion.popEnter togetherWith navigationMotion.popExit)
-                        .apply { targetContentZIndex = -1f }.using(null)
+                AnimatedContent(targetState = route.step, modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds(), transitionSpec = {
+                    navigationMotion.pageTransition(targetState > initialState, targetState)
                 }, label = "setupStep") { destination ->
                     pageStates.SaveableStateProvider(destination) {
                         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {

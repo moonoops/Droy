@@ -1,6 +1,7 @@
 package io.droyagent.app.nativeui.ui
 
 import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -609,7 +610,7 @@ fun NativeAppShell(
                 val state by creationModel.state.collectAsStateWithLifecycle()
                 if (createdCompanion == null) NativeCompanionCreationScreen(state, creationModel, onBack = ::back,
                     onCreated = { id -> createdCompanion = id; companionModel.refresh() }, onChooseImage = onChooseCreationImage)
-                else Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(24.dp),
+                else Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).statusBarsPadding().navigationBarsPadding().padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     if (companions.error == null) { CircularProgressIndicator(); Text(stringResource(R.string.native_loading)) }
                     else CompanionError(companions.error, companionModel::dismissError, companionModel::refresh)
@@ -684,6 +685,7 @@ fun NativeAppShell(
                     }) })
             }
             composable("standard-voice") {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface))
                 LaunchedEffect(Unit) { standardVoiceExpanded = true; root("workbench") }
             }
             composable("memory") {
@@ -843,29 +845,31 @@ fun NativeAppShell(
             }
             composable("chat/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { current ->
                 val id = current.arguments!!.getString("id")!!
-                LaunchedEffect(id) { if (companions.selectedCompanionId != id) companionModel.selectCompanion(id) }
-                if (companions.selectedCompanionId == id) CompanionChatScreen(companions, companionModel, onBack = ::back,
-                    onConfigureModels = { open("settings-models") },
-                    onOpenCompanionProfile = { open("profile/${Uri.encode(it)}") }, onOpenUserProfile = { open("user-profile") },
-                    onChooseAttachments = media.chooseAttachments?.let { choose -> { choose(id) } },
-                    onOpenAttachment = media.openAttachment?.let { show -> { show(id, it) } },
-                    onPlayVoice = media.playVoice?.let { play -> { play(id, it) } },
-                    onChooseImages = media.chooseImages?.let { choose -> { choose(id) } },
-                    onCamera = media.chooseCamera?.let { capture -> { chooseCamera { capture(id) } } },
-                    voiceButton = {
-                        NativeHoldToRecordButton(voiceInput, onBegin = {
-                            voiceInputModel.open(NativeVoiceInputTarget(companionId = id)); voiceInputModel.beginHold()
-                        }, onAction = ::voiceAction, onRequestPermissions = { authorizeVoice = true })
-                    },
-                    voiceStatus = { if (voiceInput.target?.companionId == id) inlineVoice() },
-                    pendingVoiceKey = voiceInput.operationId?.takeIf { operation ->
-                        voiceInput.target?.companionId == id && voiceInput.showPendingBubble && companions.messages.none { it.clientId == operation }
-                    }, pendingVoiceBubble = pendingVoiceBubble,
-                    onRetryVoiceTranscript = companionModel::retryVoiceTranscript,
-                    onOpenTask = { task ->
-                        val taskId = task.id; val sessionId = task.sessionId
-                        if (taskId != null && sessionId != null) externalNavigation.accept(NativeExternalNavigationTarget.CompanionTask(id, taskId, sessionId))
-                    })
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+                    LaunchedEffect(id) { if (companions.selectedCompanionId != id) companionModel.selectCompanion(id) }
+                    if (companions.selectedCompanionId == id) CompanionChatScreen(companions, companionModel, onBack = ::back,
+                        onConfigureModels = { open("settings-models") },
+                        onOpenCompanionProfile = { open("profile/${Uri.encode(it)}") }, onOpenUserProfile = { open("user-profile") },
+                        onChooseAttachments = media.chooseAttachments?.let { choose -> { choose(id) } },
+                        onOpenAttachment = media.openAttachment?.let { show -> { show(id, it) } },
+                        onPlayVoice = media.playVoice?.let { play -> { play(id, it) } },
+                        onChooseImages = media.chooseImages?.let { choose -> { choose(id) } },
+                        onCamera = media.chooseCamera?.let { capture -> { chooseCamera { capture(id) } } },
+                        voiceButton = {
+                            NativeHoldToRecordButton(voiceInput, onBegin = {
+                                voiceInputModel.open(NativeVoiceInputTarget(companionId = id)); voiceInputModel.beginHold()
+                            }, onAction = ::voiceAction, onRequestPermissions = { authorizeVoice = true })
+                        },
+                        voiceStatus = { if (voiceInput.target?.companionId == id) inlineVoice() },
+                        pendingVoiceKey = voiceInput.operationId?.takeIf { operation ->
+                            voiceInput.target?.companionId == id && voiceInput.showPendingBubble && companions.messages.none { it.clientId == operation }
+                        }, pendingVoiceBubble = pendingVoiceBubble,
+                        onRetryVoiceTranscript = companionModel::retryVoiceTranscript,
+                        onOpenTask = { task ->
+                            val taskId = task.id; val sessionId = task.sessionId
+                            if (taskId != null && sessionId != null) externalNavigation.accept(NativeExternalNavigationTarget.CompanionTask(id, taskId, sessionId))
+                        })
+                }
             }
             composable("profile/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { current ->
                 val id = current.arguments!!.getString("id")!!
@@ -879,25 +883,27 @@ fun NativeAppShell(
             }
             composable("work-session/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { current ->
                 val id = current.arguments!!.getString("id")!!
-                LaunchedEffect(id) { if (work.selectedSessionId != id) { workModel.selectSession(id); workModel.refresh() } }
-                if (work.selectedSessionId == id) WorkbenchScreen(work, workModel, onConfigureModels = { open("settings-models") }, onSchedules = { open("schedules") }, onBack = ::back,
-                    onChooseAttachments = onChooseWorkbenchAttachments,
-                    onStandardVoice = { open("standard-voice") },
-                    onVoice = { workModel.mediaTargetOrNull()?.let { openVoice(NativeVoiceInputTarget(workbench = it)) } },
-                    voiceVisible = workVoiceVisible, voicePanel = voicePanel,
-                    voiceButton = workMic, voiceStatus = { if (workVoiceVisible) inlineVoice() },
-                    pendingVoiceId = workPendingVoiceId, pendingVoiceBubble = pendingVoiceBubble,
-                    onLoadAttachment = { message, attachment ->
-                        if (message.canOpenAttachment(attachment)) toolsModel.loadMessageAttachment(id, message.seq!!, attachment.attachmentId!!)
-                        else workModel.loadLocalAttachment(requireNotNull(attachment.local))
-                    },
-                    onOpenAttachment = { message, attachment ->
-                        val seq = message.seq
-                        val attachmentId = attachment.attachmentId
-                        if (seq != null && attachmentId != null) { toolsModel.openAttachment(id, seq, attachmentId); open("tools") }
-                    }, onOpenLink = ::openWorkLink, engineModel = engineModel, onPreviewSkill = ::openSkill,
-                    onCamera = { chooseCamera(onChooseWorkbenchCamera) }, onSpaces = { open("spaces") },
-                    onDraftOpened = { root("workbench", restoreScene = false) })
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+                    LaunchedEffect(id) { if (work.selectedSessionId != id) { workModel.selectSession(id); workModel.refresh() } }
+                    if (work.selectedSessionId == id) WorkbenchScreen(work, workModel, onConfigureModels = { open("settings-models") }, onSchedules = { open("schedules") }, onBack = ::back,
+                        onChooseAttachments = onChooseWorkbenchAttachments,
+                        onStandardVoice = { open("standard-voice") },
+                        onVoice = { workModel.mediaTargetOrNull()?.let { openVoice(NativeVoiceInputTarget(workbench = it)) } },
+                        voiceVisible = workVoiceVisible, voicePanel = voicePanel,
+                        voiceButton = workMic, voiceStatus = { if (workVoiceVisible) inlineVoice() },
+                        pendingVoiceId = workPendingVoiceId, pendingVoiceBubble = pendingVoiceBubble,
+                        onLoadAttachment = { message, attachment ->
+                            if (message.canOpenAttachment(attachment)) toolsModel.loadMessageAttachment(id, message.seq!!, attachment.attachmentId!!)
+                            else workModel.loadLocalAttachment(requireNotNull(attachment.local))
+                        },
+                        onOpenAttachment = { message, attachment ->
+                            val seq = message.seq
+                            val attachmentId = attachment.attachmentId
+                            if (seq != null && attachmentId != null) { toolsModel.openAttachment(id, seq, attachmentId); open("tools") }
+                        }, onOpenLink = ::openWorkLink, engineModel = engineModel, onPreviewSkill = ::openSkill,
+                        onCamera = { chooseCamera(onChooseWorkbenchCamera) }, onSpaces = { open("spaces") },
+                        onDraftOpened = { root("workbench", restoreScene = false) })
+                }
             }
             composable("transcript/{parent}/{child}", arguments = listOf(
                 navArgument("parent") { type = NavType.StringType }, navArgument("child") { type = NavType.StringType })) { current ->
