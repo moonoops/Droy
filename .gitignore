@@ -22,4 +22,4 @@ artifacts/
 keystore.properties
 signing.properties
 *.log
-
+UI_DESIGN.md
