@@ -1,9 +1,36 @@
-/* DSH 0.2.1-rc.4 settings classes, verified in the Android WebView.
+/* DSH 0.2.1-rc.5 settings classes, verified in the Android WebView.
    Keep this adapter scoped to the packaged app and recheck it on DSH upgrades. */
 html[data-droy-mobile] {
   --droy-mobile-layout-ready: 1;
+  --droy-header-height: 56px;
+  --droy-header-font-size: 18px;
   --droy-content-bottom: max(var(--droy-safe-bottom, 0px), var(--droy-ime-bottom, 0px));
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Editor selection scrolling must stop at the transcript or draft. Hidden
+   overflow still accepts scrollTop and lets focus move the whole app shell. */
+html[data-droy-mobile],
+html[data-droy-mobile] body,
+html[data-droy-mobile] #root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  overflow: clip;
+  overscroll-behavior: none;
+  background: var(--dsw-alias-bg-base);
+}
+html[data-droy-mobile] [data-droy-frame],
+html[data-droy-mobile] [data-droy-center],
+html[data-droy-mobile] .wSkVaW_root,
+html[data-droy-mobile] [data-conversation-content] {
+  min-height: 0;
+  overflow: clip;
+}
+html[data-droy-mobile] [data-conversation-scroll] {
+  min-height: 0;
+  overscroll-behavior: contain;
 }
 
 /* The three data attributes are introduced by the version-checked layout patch.
@@ -21,6 +48,48 @@ html[data-droy-mobile] [data-droy-center] {
   padding: var(--droy-safe-top, 0px) var(--droy-safe-right, 0px)
     var(--droy-content-bottom) var(--droy-safe-left, 0px);
 }
+html[data-droy-mobile] body[data-droy-work-active] [data-droy-center] {
+  padding-top: calc(var(--droy-safe-top, 0px) + var(--droy-header-height));
+}
+.droy-work-header {
+  box-sizing: border-box;
+  position: absolute;
+  top: var(--droy-safe-top, 0px);
+  left: var(--droy-safe-left, 0px);
+  right: var(--droy-safe-right, 0px);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  height: var(--droy-header-height);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  pointer-events: auto;
+}
+.droy-work-header > .droy-im-mode { min-width: 0; }
+.droy-work-header-actions { display: flex; flex: none; align-items: center; }
+.droy-work-header-actions > button {
+  box-sizing: border-box;
+  width: var(--droy-touch-target, 48px);
+  height: var(--droy-touch-target, 48px);
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.droy-work-header-actions > button:active { background: var(--dsw-alias-interactive-bg-hover); }
+.droy-work-resource-button > svg { transform: scaleX(-1); }
+.droy-work-header-actions > button:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+html[data-droy-mobile] [data-conversation-header-corner] { display: none; }
 /* Android already subtracts the IME once through the center's bottom inset.
    The empty conversation keeps its centered layout until the keyboard opens. */
 html[data-droy-mobile][data-droy-ime-visible="true"] [data-conversation-content][data-content-phase="hero"] > [data-conversation-scroll] {
@@ -93,31 +162,64 @@ html[data-droy-mobile] [data-droy-frame] { transition: none; }
 [data-droy-frame] [data-droy-sidebar] {
   touch-action: pan-y;
   position: absolute;
-  inset: 0 auto 0 0;
-  width: var(--droy-drawer-width);
+  inset: 0;
+  width: 100%;
   z-index: 40;
   visibility: hidden;
   transform: translateX(-100%);
   transition: transform 180ms ease, visibility 0s linear 180ms;
   will-change: transform;
-  box-shadow: 6px 0 24px #0002;
+  box-shadow: none;
+  background: var(--dsw-alias-bg-base);
 }
 html[data-droy-mobile] [data-droy-sidebar] .hHd-Xa_root {
-  padding-top: calc(var(--droy-safe-top, 0px) + 6px);
-  padding-bottom: calc(var(--droy-content-bottom) + 6px);
-  padding-left: calc(var(--droy-safe-left, 0px) + 12px);
+  padding: var(--droy-safe-top, 0px) var(--droy-safe-right, 0px)
+    var(--droy-content-bottom) var(--droy-safe-left, 0px);
+  background: var(--dsw-alias-bg-base);
 }
-/* Fixed drawer sections can consume the entire short viewport. Keep sessions
-   and the footer reachable through one scroller when that happens. */
+.droy-conversations-header {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: var(--droy-touch-target, 48px) minmax(0, 1fr) var(--droy-touch-target, 48px);
+  align-items: center;
+  flex: none;
+  min-height: var(--droy-header-height);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
+}
+.droy-conversations-header > strong {
+  min-width: 0;
+  text-align: center;
+  font-size: var(--droy-header-font-size);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.droy-conversations-header > button {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--droy-touch-target, 48px);
+  height: var(--droy-touch-target, 48px);
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  color: inherit;
+  background: transparent;
+}
+/* Keep the standalone page's Back control visible even in a short window. */
 @media (max-height: 480px) {
   html[data-droy-mobile] [data-droy-sidebar] .hHd-Xa_root {
     margin-top: var(--droy-safe-top, 0px);
     height: calc(100% - var(--droy-safe-top, 0px) - var(--droy-content-bottom));
-    padding-top: 6px;
-    padding-bottom: 6px;
+    padding-top: 0;
+    padding-bottom: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
   }
+  .droy-conversations-header { position: sticky; top: 0; z-index: 2; }
   html[data-droy-mobile] [data-droy-sidebar] .hHd-Xa_regionArea,
   html[data-droy-mobile] [data-droy-sidebar] .bhn1Oq_root,
   html[data-droy-mobile] [data-droy-sidebar] .bhn1Oq_listArea,
@@ -315,7 +417,26 @@ html[data-droy-mobile] [data-droy-dragging="drawer"] [data-droy-backdrop] { tran
   html[data-droy-mobile] [data-droy-session-surface] { transition: none; }
 }
 
-/* The Android marker also covers landscape and resized app windows. */
+body[data-droy-mode-enter="messages"] .droy-im-conversation-list {
+  animation: droy-mode-messages-in 200ms ease-out both;
+}
+body[data-droy-mode-enter="work"] [data-conversation-content] {
+  animation: droy-mode-work-in 200ms ease-out both;
+}
+@keyframes droy-mode-messages-in {
+  from { opacity: .35; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes droy-mode-work-in {
+  from { opacity: .35; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body[data-droy-mode-enter] .droy-im-conversation-list,
+  body[data-droy-mode-enter] [data-conversation-content] { animation: none; }
+}
+
+/* Apply mobile layout rules to every Android app window. */
 /* Desktop's 680px minimum also positions invisible width handles offscreen.
    Their overflow lets WebView focus scrolling shift the entire conversation. */
 html[data-droy-mobile] .wSkVaW_body {
@@ -327,6 +448,11 @@ html[data-droy-mobile] .wSkVaW_widthHandle { display: none; }
 html[data-droy-mobile] .wSkVaW_scrollBody { min-width: 0; }
 html[data-droy-mobile] .wSkVaW_composerSeat {
   --dsh-composer-text-max-height: clamp(36px, 20dvh, 120px);
+}
+html[data-droy-mobile] [data-conversation-content][data-content-phase="active"] > [data-conversation-scroll] > [data-composer-seat] {
+  box-sizing: border-box;
+  max-height: 100%;
+  overscroll-behavior: contain;
 }
 /* The command menu belongs above the floating conversation controls, while
    the drawer and full-screen resource panel retain their higher layers. */
@@ -375,6 +501,7 @@ html[data-droy-mobile] [data-droy-settings-panel] {
   border: 0;
   border-radius: 0;
   box-shadow: none;
+  background: var(--dsw-alias-bg-base);
 }
 html[data-droy-mobile] [data-droy-settings-panel]:focus { outline: none; }
 html[data-droy-mobile] [data-droy-settings-nav] {
@@ -456,34 +583,6 @@ html[data-droy-mobile] [data-droy-settings-options] {
   padding: 4px 12px 16px;
   overflow: auto;
   overscroll-behavior: contain;
-}
-
-/* In a short keyboard viewport, fixed settings chrome can consume all editing
-   space. Let it scroll with the focused settings field instead. */
-@media (orientation: landscape) and (max-height: 480px) {
-  html[data-droy-ime-visible="true"] [data-droy-settings-panel]:has([data-droy-general="proactiveNotifications"] input:focus, [data-droy-voice-settings] input:focus, [data-droy-memory] :is(input,textarea):focus) {
-    display: block;
-    height: calc(100dvh - var(--droy-ime-bottom, 0px));
-    max-height: calc(100dvh - var(--droy-ime-bottom, 0px));
-    padding-bottom: 0;
-    overflow: auto;
-    scroll-padding-block: 8px;
-  }
-  html[data-droy-ime-visible="true"] [data-droy-settings-panel]:has([data-droy-general="proactiveNotifications"] input:focus, [data-droy-voice-settings] input:focus, [data-droy-memory] :is(input,textarea):focus) [data-droy-settings-content],
-  html[data-droy-ime-visible="true"] [data-droy-settings-panel]:has([data-droy-general="proactiveNotifications"] input:focus, [data-droy-voice-settings] input:focus, [data-droy-memory] :is(input,textarea):focus) [data-droy-settings-options] {
-    display: block;
-    flex: none;
-    height: auto;
-    max-height: none;
-    overflow: visible;
-  }
-  /* Keep focused forms below the status bar in the short editing viewport. */
-  html[data-droy-ime-visible="true"] [data-droy-settings-panel]:has([data-droy-voice-settings] input:focus, [data-droy-memory] :is(input,textarea):focus) {
-    margin-top: var(--droy-safe-top, 0px);
-    padding-top: 0;
-    height: calc(100dvh - var(--droy-ime-bottom, 0px) - var(--droy-safe-top, 0px));
-    max-height: calc(100dvh - var(--droy-ime-bottom, 0px) - var(--droy-safe-top, 0px));
-  }
 }
 
 /* Desktop font fields reserve 240px plus a 48px text gutter. Use the whole

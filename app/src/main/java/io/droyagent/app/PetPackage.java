@@ -38,14 +38,15 @@ final class PetPackage {
     }
     static PetPackage load(Context context, String id) throws Exception {
         if (!validId(id)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("伙伴形象编号无效", "Invalid companion artwork ID"));
+        String assetDirectory = BuiltInPets.directory(id);
         File directory = null;
-        if (!"default".equals(id)) {
+        if (assetDirectory == null) {
             File root = new File(context.getFilesDir(), "dsh-home/pets").getCanonicalFile();
             directory = new File(root, id).getCanonicalFile();
             if (!root.equals(directory.getParentFile())) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("伙伴形象目录无效", "Invalid companion artwork directory"));
         }
         PetSpriteSpec spec; String name;
-        try (InputStream input = open(context, directory, "pet.json", 512 * 1024)) {
+        try (InputStream input = open(context, directory, assetDirectory, "pet.json", 512 * 1024)) {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             byte[] buffer = new byte[4096]; int count;
             while ((count = input.read(buffer)) != -1) { bytes.write(buffer, 0, count); if (bytes.size() > 512 * 1024) throw new IOException(io.droyagent.app.NativeLocale.text("伙伴形象描述文件过大", "Companion artwork description is too large")); }
@@ -59,12 +60,12 @@ final class PetPackage {
             for (Map.Entry<String, PetSpriteSpec.Atlas> entry : spec.atlases.entrySet()) {
                 PetSpriteSpec.Atlas atlas = entry.getValue();
                 BitmapFactory.Options options = new BitmapFactory.Options(); options.inJustDecodeBounds = true;
-                try (InputStream input = open(context, directory, atlas.file, 24 * 1024 * 1024)) { BitmapFactory.decodeStream(input, null, options); }
+                try (InputStream input = open(context, directory, assetDirectory, atlas.file, 24 * 1024 * 1024)) { BitmapFactory.decodeStream(input, null, options); }
                 if (options.outWidth != atlas.width || options.outHeight != atlas.height || !"image/png".equals(options.outMimeType))
                     throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("伙伴形象图片尺寸或格式不符", "Companion image dimensions or format do not match"));
                 options.inJustDecodeBounds = false; options.inScaled = false;
                 Bitmap bitmap;
-                try (InputStream input = open(context, directory, atlas.file, 24 * 1024 * 1024)) { bitmap = BitmapFactory.decodeStream(input, null, options); }
+                try (InputStream input = open(context, directory, assetDirectory, atlas.file, 24 * 1024 * 1024)) { bitmap = BitmapFactory.decodeStream(input, null, options); }
                 if (bitmap == null) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("伙伴形象图片无法解码", "Unable to decode companion image"));
                 if (!bitmap.hasAlpha() || (bitmap.getPixel(0, 0) >>> 24) != 0
                     || (bitmap.getPixel(bitmap.getWidth() - 1, bitmap.getHeight() - 1) >>> 24) != 0) {
@@ -75,8 +76,8 @@ final class PetPackage {
             return new PetPackage(id, name, spec, bitmaps);
         } catch (Exception failure) { for (Bitmap bitmap : bitmaps.values()) bitmap.recycle(); throw failure; }
     }
-    private static InputStream open(Context context, File directory, String file, long maxBytes) throws IOException {
-        if (directory == null) return context.getAssets().open("pet/" + file);
+    private static InputStream open(Context context, File directory, String assetDirectory, String file, long maxBytes) throws IOException {
+        if (directory == null) return context.getAssets().open(assetDirectory + file);
         File target = new File(directory, file).getCanonicalFile();
         if (!directory.equals(target.getParentFile()) || !target.isFile() || target.length() > maxBytes)
             throw new IOException(io.droyagent.app.NativeLocale.text("伙伴形象素材文件无效", "Invalid companion artwork file"));

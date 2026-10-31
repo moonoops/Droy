@@ -43,7 +43,7 @@ public final class NotificationManagementDeviceTest {
     private static final String RECEIVER = SOURCE + "/io.droyagent.app.NotificationManagementDeviceTest$FixtureReceiver";
     private Instrumentation instrumentation;
     private Context context;
-    private MainActivity activity;
+    private NativeAppActivity activity;
     private NotificationTestState saved;
     private boolean listenerWasGranted, sourceNotificationsGranted, targetNotificationsGranted;
     private final String fixtureSuffix = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 12);
@@ -57,6 +57,18 @@ public final class NotificationManagementDeviceTest {
         assertTrue("Stop existing tasks before notification tests", RuntimeService.canManageHistory());
         saved = new NotificationTestState(context);
         saved.prepare();
+        File home = new File(context.getFilesDir(), "dsh-home");
+        File profile = new File(home, "profiles/mobile");
+        assertTrue(profile.isDirectory() || profile.mkdirs());
+        File provider = new File(home, "notification-organizer-provider.mjs");
+        try (InputStream input = instrumentation.getContext().getAssets().open("notification-organizer-provider.mjs")) {
+            java.nio.file.Files.copy(input, provider.toPath());
+        }
+        java.nio.file.Files.writeString(new File(profile, "cordis.patch.yml").toPath(), new JSONArray()
+                .put(new JSONObject().put("id", "agent-default-model").put("config", new JSONObject()
+                        .put("provider", "droy-native-fixture").put("model", "native-local")))
+                .put(new JSONObject().put("insert", new JSONArray().put(new JSONObject()
+                        .put("id", "notification-organizer-fixture").put("name", provider.getAbsolutePath())))).toString());
         listenerWasGranted = DroyNotificationService.hasAccess(context);
         sourceNotificationsGranted = context.getPackageManager().checkPermission(Manifest.permission.POST_NOTIFICATIONS, SOURCE) == PackageManager.PERMISSION_GRANTED;
         targetNotificationsGranted = context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
@@ -65,19 +77,15 @@ public final class NotificationManagementDeviceTest {
             shell("pm grant " + context.getPackageName() + " android.permission.POST_NOTIFICATIONS");
         }
         shell("cmd notification allow_listener " + new ComponentName(context, DroyNotificationService.class).flattenToString());
-        activity = (MainActivity) instrumentation.startActivitySync(new Intent(context, MainActivity.class)
+        activity = (NativeAppActivity) instrumentation.startActivitySync(new Intent(context, NativeAppActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
-        new DeviceUi(instrumentation, activity).awaitPage();
+        DeviceUi.await("The local notification fixture Host did not become ready", 120000, () -> RuntimeService.ready);
         DeviceUi.await("Notification listener did not connect", 10000,
                 () -> DroyNotificationService.status(context).getBoolean("connected"));
         NotificationManagement management = NotificationManagement.get(context);
-        management.request(new JSONObject().put("operation", "upsertRule").put("rule", new JSONObject()
-                .put("id", "device-fixture").put("packageName", SOURCE).put("instruction", "Fictional notification device rules")
-                .put("defaultAction", "retain").put("entries", new JSONArray()
-                    .put(entry("retain", "retain")).put(entry("clear", "clear"))
-                    .put(entry("collect", "collect")).put(entry("notify", "notify")))));
         management.request(new JSONObject().put("operation", "configure").put("enabled", true)
-                .put("exceptions", saved.allowOthers(SOURCE)).put("cloudAnalysisEnabled", false));
+                .put("ruleText", "Use each fictional DroyFixture marker to retain, clear, collect, or notify. Keep all other notifications."));
+        management.request(new JSONObject().put("operation", "setAppMode").put("packageName", SOURCE).put("mode", "managed"));
     }
 
     @After public void tearDown() throws Exception {
@@ -168,19 +176,9 @@ public final class NotificationManagementDeviceTest {
         DeviceUi.await("The high-channel fixture was neither delivered nor processed", 15000,
                 () -> sourcePresent(105) || recordsContain("DroyFixture clear", highChannel));
         NotificationManagement.get(context).rescan(); saved.awaitWorker();
-        if (sourcePresent(105)) {
-            android.service.notification.NotificationListenerService.Ranking rank = new android.service.notification.NotificationListenerService.Ranking();
-            DroyNotificationService service = listener();
-            StatusBarNotification original = source(105);
-            assertNotNull(original);
-            assertTrue("The delivered fixture has no current ranking", service.getCurrentRanking().getRanking(original.getKey(), rank));
-            assertTrue("A quiet high-channel notification was left unprocessed", rank.getChannel().getImportance() > NotificationManager.IMPORTANCE_LOW
-                    || rank.getChannel().shouldVibrate());
-            assertTrue("The missing automatic-silence capability was hidden", NotificationManagement.get(context).state()
-                    .getJSONObject("autoSilence").optBoolean("actionRequired"));
-        } else {
-            assertTrue("The source disappeared before the manager processed it", recordsContain("DroyFixture clear", highChannel));
-        }
+        assertTrue("Clearing an advertisement must not require silencing its source", recordsContain("DroyFixture clear", highChannel));
+        assertFalse("The safe default unexpectedly opted into automatic silence",
+                NotificationManagement.get(context).state().getBoolean("silentTakeoverEnabled"));
 
         String mixed = shell("am broadcast --include-stopped-packages -n " + RECEIVER + " --ei id 107 --es kind clear_mixed --ez mixed true --es suffix " + fixtureSuffix);
         assertTrue("External mixed-message fixture was not posted: " + mixed, mixed.contains("DROY_FIXTURE_POSTED"));
@@ -197,13 +195,16 @@ public final class NotificationManagementDeviceTest {
         assertTrue("An allow exception was still classified or removed", sourcePresent(108));
 
         post(109, "retain", false);
-        DeviceUi.await("The later block fixture did not reach Android while allowed", 5000, () -> sourcePresent(109));
-        NotificationManagement.get(context).request(new JSONObject().put("operation", "setAppMode")
-                .put("packageName", SOURCE).put("mode", "block"));
-        DeviceUi.await("Block exception did not clear an otherwise retained notification", 15000,
-                () -> !sourcePresent(108) && !sourcePresent(109));
+        DeviceUi.await("The allowed source did not reach Android", 5000, () -> sourcePresent(109));
+        try {
+            NotificationManagement.get(context).request(new JSONObject().put("operation", "setAppMode")
+                    .put("packageName", SOURCE).put("mode", "block"));
+            fail("A retired block mode must not become a hidden notification policy");
+        } catch (IllegalArgumentException expected) { assertTrue(sourcePresent(108) && sourcePresent(109)); }
         NotificationManagement.get(context).request(new JSONObject().put("operation", "setAppMode")
                 .put("packageName", SOURCE).put("mode", "managed"));
+        DeviceUi.await("Restoring management did not classify the existing sources", 15000,
+                () -> !sourcePresent(108) && sourcePresent(109) && recordsContain("DroyFixture retain"));
         assertFalse("Resetting one application kept a hidden exception", hasException(SOURCE));
 
         NotificationManagement.get(context).request(new JSONObject().put("operation", "configure").put("enabled", false));
@@ -430,10 +431,6 @@ public final class NotificationManagementDeviceTest {
         return false;
     }
 
-    private static JSONObject entry(String keyword, String action) throws Exception {
-        return new JSONObject().put("containsAny", new JSONArray().put("DroyFixture " + keyword)).put("action", action);
-    }
-
     private void post(int id, String kind, boolean noisy) throws Exception {
         String result = shell("am broadcast --include-stopped-packages -n " + RECEIVER + " --ei id " + id + " --es kind " + kind + " --ez noisy " + noisy + " --es suffix " + fixtureSuffix);
         assertTrue("External fixture receiver did not post: " + result, result.contains("DROY_FIXTURE_POSTED"));
@@ -517,12 +514,23 @@ public final class NotificationManagementDeviceTest {
             channel.enableVibration(false); channel.setSound(null, null); manager.createNotificationChannel(channel);
             String kind = intent.getStringExtra("kind");
             Notification.Builder notification = new Notification.Builder(context, channelId)
-                    .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("DroyFixture " + kind)
-                    .setContentText("Fictional notification content");
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle(fixtureText(intent, "title", "DroyFixture " + kind))
+                    .setContentText(fixtureText(intent, "text", "Fictional notification content"));
             if (intent.getBooleanExtra("mixed", false)) notification.setStyle(new Notification.InboxStyle()
                     .addLine("Fictional advertisement").addLine("Fictional delivery update"));
             manager.notify(SOURCE_TAG, intent.getIntExtra("id", 1), notification.build());
             setResultData("DROY_FIXTURE_POSTED");
+        }
+
+        private static String fixtureText(Intent intent, String key, String fallback) {
+            String encoded = intent.getStringExtra(key + "Base64");
+            if (encoded != null) {
+                if (!encoded.startsWith("b64:")) throw new IllegalArgumentException("Invalid fictional notification encoding");
+                return new String(android.util.Base64.decode(encoded.substring(4), android.util.Base64.URL_SAFE | android.util.Base64.NO_WRAP),
+                        java.nio.charset.StandardCharsets.UTF_8);
+            }
+            return intent.hasExtra(key) ? intent.getStringExtra(key) : fallback;
         }
     }
 }
@@ -530,7 +538,8 @@ public final class NotificationManagementDeviceTest {
 final class NotificationTestState {
     private static final String[] KEYS = {"notificationManagementData", "notificationManagementEnabled", "backgroundRuntimeEnabled",
         "backgroundRuntimeStopped", "toolsStopped", "allowNotifications", "petEnabled", "petInternalDisplay", "petExternalDisplay",
-        "themePreference", "themeColorScheme", "themeBackgroundColor", "resetTheme", "darkTheme"};
+        "themePreference", "themeColorScheme", "themeBackgroundColor", "resetTheme", "darkTheme",
+        "proactiveNotificationRecords", "companionNotificationPositions", "notifyMessagesEnabled", "notifyTasksEnabled", "notifyLocalEnabled"};
     private final Context context;
     private final SharedPreferences preferences;
     private final Map<String, Object> original = new HashMap<>();
@@ -561,12 +570,13 @@ final class NotificationTestState {
                 .putBoolean("backgroundRuntimeStopped", false).putBoolean("toolsStopped", false).putBoolean("allowNotifications", true)
                 .putBoolean("petEnabled", false).putString("petInternalDisplay", "off").putString("petExternalDisplay", "off").commit());
         NotificationManagement manager = NotificationManagement.get(context);
-        Field records = NotificationManagement.class.getDeclaredField("records"); records.setAccessible(true);
-        synchronized (manager) { records.set(manager, new JSONArray()); }
+        reloadNotificationMemory(context, new JSONObject().put("config", NotificationManagementRules.configuration(null))
+                .put("records", new JSONArray()).toString());
         manager.request(new JSONObject().put("operation", "configure").put("enabled", false)
-                .put("exceptions", allowOthers(null)).put("cloudAnalysisEnabled", false));
-        JSONArray rules = manager.state().getJSONArray("rules");
-        for (int i = 0; i < rules.length(); i++) manager.request(new JSONObject().put("operation", "deleteRule").put("id", rules.getJSONObject(i).getString("id")));
+                .put("resetRule", true).put("silentTakeoverEnabled", false));
+        JSONArray apps = manager.state().getJSONArray("apps"), packageNames = new JSONArray();
+        for (int i = 0; i < apps.length(); i++) packageNames.put(apps.getJSONObject(i).getString("packageName"));
+        manager.request(new JSONObject().put("operation", "setApps").put("enabled", false).put("packageNames", packageNames));
     }
 
     JSONArray allowOthers(String managedPackage) throws Exception {
@@ -596,13 +606,7 @@ final class NotificationTestState {
             else editor.remove(key);
         }
         assertTrue("Could not restore notification preferences", editor.commit());
-        JSONObject data = new JSONObject(preferences.getString("notificationManagementData", "{}"));
-        synchronized (manager) {
-            Field config = NotificationManagement.class.getDeclaredField("config"), records = NotificationManagement.class.getDeclaredField("records");
-            config.setAccessible(true); records.setAccessible(true);
-            config.set(manager, NotificationManagementRules.configuration(data.optJSONObject("config")));
-            records.set(manager, data.optJSONArray("records") == null ? new JSONArray() : data.getJSONArray("records"));
-        }
+        reloadNotificationMemory(context, (String) original.get("notificationManagementData"));
         if (setupOwned) {
             SharedPreferences.Editor setup = context.getSharedPreferences("installation", Context.MODE_PRIVATE).edit();
             if (originalSetupCompleted == null) setup.remove("completed"); else setup.putBoolean("completed", originalSetupCompleted);
@@ -614,6 +618,57 @@ final class NotificationTestState {
             if (hadOriginalHome) assertTrue("Could not restore DSH home", preservedHome.renameTo(home));
             homeOwned = false;
         }
+    }
+
+    /** Runs after preference restoration; never creates a singleton from fixture preferences. */
+    static void reloadNotificationMemory(Context context, String savedData) throws Exception {
+        Field singleton = notificationField("singleton");
+        NotificationManagement manager = (NotificationManagement) singleton.get(null);
+        if (manager == null) return;
+        ExecutorService worker = (ExecutorService) notificationField("worker").get(manager);
+        Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) instrumentation.waitForIdleSync();
+        worker.submit(() -> {}).get(90, TimeUnit.SECONDS);
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) instrumentation.waitForIdleSync();
+        worker.submit(() -> {
+            JSONObject data = new JSONObject(savedData == null ? "{}" : savedData);
+            synchronized (manager) {
+                android.os.Handler handler = (android.os.Handler) notificationField("handler").get(manager);
+                handler.removeCallbacks((Runnable) notificationField("maintenance").get(manager));
+                notificationField("config").set(manager, NotificationManagementRules.configuration(data.optJSONObject("config")));
+                notificationField("records").set(manager, data.optJSONArray("records") == null ? new JSONArray() : data.getJSONArray("records"));
+                notificationField("lastResult").set(manager, data.optJSONObject("lastResult") == null ? new JSONObject() : data.getJSONObject("lastResult"));
+                notificationField("lastFailure").set(manager, data.optJSONObject("lastFailure") == null ? new JSONObject() : data.getJSONObject("lastFailure"));
+                notificationField("takeoverSuspended").setBoolean(manager, data.optBoolean("silentTakeoverSuspended"));
+                notificationField("takeoverSuspensionCode").set(manager, data.optString("takeoverSuspensionCode"));
+                notificationField("modelConfigured").setBoolean(manager, false);
+                notificationField("modelCode").set(manager, "DROY_NOTIFICATION_MODEL_UNAVAILABLE");
+                notificationField("checkingModel").setBoolean(manager, false);
+                notificationField("modelStatusCheckedAt").setLong(manager, 0);
+                notificationField("scanQueued").setBoolean(manager, false);
+                notificationField("applyingChannels").setBoolean(manager, false);
+                for (String name : new String[]{"intents", "silentApps", "applicationNames", "inFlight"})
+                    ((Map<?, ?>) notificationField(name).get(manager)).clear();
+                for (String name : new String[]{"internalRemovals", "channelSyncAttempts"})
+                    ((java.util.Set<?>) notificationField(name).get(manager)).clear();
+                JSONObject result = data.optJSONObject("lastResult");
+                String error = "";
+                if (result != null && !result.optBoolean("success", true)) {
+                    Method message = NotificationManagement.class.getDeclaredMethod("resultMessage", String.class); message.setAccessible(true);
+                    error = (String) message.invoke(null, result.optString("code"));
+                }
+                notificationField("error").set(manager, error);
+                SharedPreferences.Editor restore = context.getSharedPreferences("product", Context.MODE_PRIVATE).edit();
+                if (savedData == null) restore.remove("notificationManagementData"); else restore.putString("notificationManagementData", savedData);
+                assertTrue("Could not restore notification memory's persisted source", restore.commit());
+            }
+            return null;
+        }).get(90, TimeUnit.SECONDS);
+        worker.submit(() -> {}).get(90, TimeUnit.SECONDS);
+    }
+
+    private static Field notificationField(String name) throws Exception {
+        Field field = NotificationManagement.class.getDeclaredField(name); field.setAccessible(true); return field;
     }
 
     static boolean emulator() {

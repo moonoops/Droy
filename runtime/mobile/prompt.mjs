@@ -15,8 +15,15 @@ const ownedNames = new Set([MOBILE_PROMPT_SECTION, COMPANION_PROMPT_SECTION, LAN
 const shippedTexts = [...Object.values(mobilePersonas), ...Object.values(companionPersonas), ...Object.values(responseLanguagePrompts), legacyChinesePersona];
 
 /** Apply current product rules after DSH has enforced a complete persona. */
-export function finalizeMobileAssembly(assembly, completeSectionName, locale = resolveMobileLocale()) {
+export function finalizeMobileAssembly(assembly, completeSectionName, locale = resolveMobileLocale(), companion = false) {
   locale = normalizeMobileLocale(locale);
+  if(companion) {
+    const sections=assembly.sections.filter(section=>section.name==='droy:companion-planner');
+    if(!sections.length)throw new Error('COMPANION_PROMPT_MISSING');
+    return {...assembly,sections:[...sections,{name:LANGUAGE_PROMPT_SECTION,text:responseLanguagePrompts[locale],interpolate:false}],
+      contexts:assembly.contexts.filter(entry=>entry.name==='droy:shared-conversation'),
+      tools:localizeToolDescriptions(assembly.tools,locale)};
+  }
   if (completeSectionName !== undefined && (assembly.sections.length !== 1 || assembly.sections[0].name !== completeSectionName)) {
     throw new Error('DSH complete prompt contract changed; review Android prompt adaptation');
   }

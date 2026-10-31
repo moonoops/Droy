@@ -9,7 +9,7 @@ export const DEFAULT_CONFIG = {
   realtime: { provider: 'minicpm', url: '', model: '', voice: '' },
   tts: { provider: 'system', voiceId: '', rate: 1, url: '', model: 'tts-1' },
   voices: [],
-  wake: { enabled: false, chinese: '你好小黑', english: 'Hey Droy', target: 'standard', timing: 'screen_on', useCompanionName: false },
+  wake: { enabled: false, chinese: '你好Droy', english: 'Hey Dory', target: 'standard', timing: 'screen_on', useCompanionName: false },
 };
 const REFS = { realtime: 'DROY_VOICE_REALTIME_API_KEY', tts: 'DROY_VOICE_TTS_API_KEY' };
 
@@ -59,6 +59,8 @@ export function mergeConfig(current, patch) {
   const next = structuredClone(current);
   if (patch.entries) for (const name of ['standard', 'realtimeVoice', 'realtimeVideo'])
     if (Object.hasOwn(patch.entries, name)) next.entries[name] = bool(patch.entries[name]);
+  // The entry preference is retired; microphone and product authorization still gate capture.
+  next.entries.standard = true;
   if (Object.hasOwn(patch, 'interruptible')) next.interruptible = bool(patch.interruptible);
   for (const section of ['realtime', 'tts']) {
     const incoming = patch[section];
@@ -83,7 +85,8 @@ export function mergeConfig(current, patch) {
   if (patch.wake) {
     if (Object.hasOwn(patch.wake, 'enabled')) next.wake.enabled = bool(patch.wake.enabled);
     if (Object.hasOwn(patch.wake, 'timing')) next.wake.timing = source(patch.wake.timing, ['screen_on', 'foreground'], '唤醒时机');
-    if (Object.hasOwn(patch.wake, 'useCompanionName')) next.wake.useCompanionName = bool(patch.wake.useCompanionName);
+    if (Object.hasOwn(patch.wake, 'useCompanionName')) bool(patch.wake.useCompanionName);
+    next.wake.useCompanionName = false;
     for (const name of ['chinese', 'english'])
       if (Object.hasOwn(patch.wake, name)) next.wake[name] = text(patch.wake[name], 80, '唤醒词');
     if (Object.hasOwn(patch.wake, 'target')) next.wake.target = source(patch.wake.target, ['standard', 'realtime'], '唤醒目标');

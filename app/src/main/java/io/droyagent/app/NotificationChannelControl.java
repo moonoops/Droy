@@ -25,11 +25,23 @@ final class NotificationChannelControl {
     private volatile Map<String, Boolean> silentSnapshot = Map.of();
     private volatile JSONObject status = new JSONObject();
     private volatile Process runningProcess;
+    private Map<String, String> requestedModes = Map.of();
+    private boolean takeoverEnabled;
 
-    NotificationChannelControl(Context context) { this.context = context.getApplicationContext(); saved = context.getSharedPreferences("notification-channels", Context.MODE_PRIVATE); }
+    NotificationChannelControl(Context context) {
+        this.context = context.getApplicationContext();
+        saved = context.getSharedPreferences("notification-channels", Context.MODE_PRIVATE);
+        result("idle", 0, 0, "");
+    }
 
     Boolean packageSilent(String packageName) { return silentSnapshot.get(packageName); }
     JSONObject status() { return status; }
+    boolean hasOwnedSettings() {
+        // This is also read while the management lock is held; never wait for the channel worker.
+        try { return new JSONObject(saved.getString("originals", "{}")).length() > 0
+                || new JSONObject(saved.getString("packages", "{}")).length() > 0; }
+        catch (org.json.JSONException invalid) { throw new IllegalStateException("channel_settings_invalid", invalid); }
+    }
 
     void cancelCurrent() {
         Process process = runningProcess;
@@ -41,11 +53,15 @@ final class NotificationChannelControl {
     }
 
     synchronized JSONObject synchronize(Map<String, String> modes, boolean enabled, java.util.function.BooleanSupplier policyCurrent) {
+        requestedModes = Map.copyOf(modes);
+        takeoverEnabled = enabled;
+        silent.clear();
         int changed = 0, restored = 0;
         try {
             JSONObject originals = new JSONObject(saved.getString("originals", "{}"));
             JSONObject packageOriginals = new JSONObject(saved.getString("packages", "{}"));
-            if (!enabled && originals.length() == 0 && packageOriginals.length() == 0) return result("idle", 0, 0, "");
+            if (originals.length() == 0 && packageOriginals.length() == 0
+                    && (!enabled || !modes.containsValue("managed"))) return result(enabled ? "ready" : "idle", 0, 0, "");
             if (!ProductPermissions.allowed(ProductPermissions.preferences(context), "allowRoot"))
                 return result("root_required", 0, 0, io.droyagent.app.NativeLocale.text("需要 Root 授权以自动设置静默", "Root authorization is required to set silent mode automatically"));
             Map<String, Integer> apps = new HashMap<>();
@@ -57,7 +73,7 @@ final class NotificationChannelControl {
             if (!policyCurrent.getAsBoolean()) return result("superseded", 0, 0, "");
             if (!ProductPermissions.allowed(ProductPermissions.preferences(context), "allowRoot"))
                 return result("root_required", 0, 0, io.droyagent.app.NativeLocale.text("需要 Root 授权以自动设置静默", "Root authorization is required to set silent mode automatically"));
-            JSONObject read = run(new JSONObject().put("operation", "read").put("packages", requested));
+            JSONObject read = run(new JSONObject().put("operation", "read").put("packages", requested), policyCurrent);
             JSONArray changes = new JSONArray(), packageChanges = new JSONArray();
             Set<String> restoring = new HashSet<>(), restoringPackages = new HashSet<>();
             JSONObject next = new JSONObject(originals.toString()), nextPackages = new JSONObject(packageOriginals.toString());
@@ -66,10 +82,9 @@ final class NotificationChannelControl {
             for (int i = 0; i < packages.length(); i++) {
                 JSONObject app = packages.getJSONObject(i); String name = app.getString("packageName");
                 int uid = app.getInt("uid"); readPackages.add(name);
-                boolean controlled = enabled && modes.containsKey(name);
-                boolean shouldSilence = controlled && !modes.get(name).equals("allow");
-                boolean currentEnabled = app.getBoolean("enabled"), permissionRequested = requestsNotificationPermission(name);
-                boolean cannotNotify = !currentEnabled && !permissionRequested;
+                boolean shouldSilence = managed(modes, enabled, name);
+                boolean currentEnabled = app.getBoolean("enabled");
+                boolean cannotNotify = !currentEnabled;
                 JSONArray channels = app.getJSONArray("channels"); boolean allQuiet = true;
                 for (int j = 0; j < channels.length(); j++) {
                     JSONObject item = channels.getJSONObject(j); String id = item.getString("id"), key = name + "\n" + id;
@@ -80,26 +95,22 @@ final class NotificationChannelControl {
                     NotificationChannel desired;
                     if (shouldSilence) {
                         if (cannotNotify) continue;
-                        if (current.getImportance() == NotificationManager.IMPORTANCE_NONE) { next.remove(key); continue; }
+                        // A later block owns importance, but sound/vibration may still need restoration on release.
+                        if (current.getImportance() == NotificationManager.IMPORTANCE_NONE) continue;
                         if (quiet(currentState)) continue;
                         desired = NotificationChannelShell.decode(item.getString("parcel"));
                         desired.setImportance(Math.min(current.getImportance(), NotificationManager.IMPORTANCE_LOW));
                         desired.setSound(null, null); desired.enableVibration(false);
                         if (desired.canBubble()) desired.setAllowBubbles(false);
+                        String original = owned == null ? item.getString("parcel")
+                                : NotificationChannelShell.encode(restoredChannel(item.getString("parcel"), currentState, owned));
                         next.put(key, new JSONObject().put("packageName", name).put("uid", uid).put("id", id)
-                                .put("original", item.getString("parcel")).put("applied", NotificationChannelShell.state(desired)));
+                                .put("original", original).put("applied", NotificationChannelShell.state(desired)));
                         allQuiet = false;
                     } else {
                         if (owned == null) continue;
-                        NotificationChannel original = NotificationChannelShell.decode(owned.getString("original"));
-                        JSONObject appliedState = owned.getJSONObject("applied");
-                        JSONObject merged = restoredState(currentState, appliedState, NotificationChannelShell.state(original));
-                        if (NotificationChannelShell.sameState(currentState, merged)) { next.remove(key); continue; }
-                        desired = NotificationChannelShell.decode(item.getString("parcel"));
-                        desired.setImportance(merged.getInt("importance")); desired.enableVibration(merged.getBoolean("vibration"));
-                        if (java.util.Objects.equals(currentState.opt("sound"), appliedState.opt("sound")))
-                            desired.setSound(original.getSound(), original.getAudioAttributes());
-                        if (merged.getBoolean("bubbles") != desired.canBubble()) desired.setAllowBubbles(merged.getBoolean("bubbles"));
+                        desired = restoredChannel(item.getString("parcel"), currentState, owned);
+                        if (NotificationChannelShell.sameState(currentState, NotificationChannelShell.state(desired))) { next.remove(key); continue; }
                         restoring.add(key);
                     }
                     changes.put(new JSONObject().put("packageName", name).put("uid", uid).put("id", id)
@@ -108,16 +119,14 @@ final class NotificationChannelControl {
                 JSONObject ownedPackage = packageOriginals.optJSONObject(name);
                 if (ownedPackage != null && ownedPackage.optInt("uid") != uid) { nextPackages.remove(name); ownedPackage = null; }
                 Boolean desiredEnabled = null;
-                if (shouldEnable(shouldSilence, currentEnabled, permissionRequested)) {
-                    desiredEnabled = true;
-                    nextPackages.put(name, new JSONObject().put("uid", uid).put("original", currentEnabled).put("applied", true));
-                } else if (!controlled && ownedPackage != null) {
-                    if (currentEnabled == ownedPackage.getBoolean("applied")) {
-                        desiredEnabled = ownedPackage.getBoolean("original"); restoringPackages.add(name);
-                    } else nextPackages.remove(name);
+                if (ownedPackage != null) {
+                    // Older builds enabled blocked apps. Restore that choice even if takeover remains selected.
+                    desiredEnabled = restoredPackageEnabled(currentEnabled, ownedPackage);
+                    if (desiredEnabled != null) restoringPackages.add(name);
+                    else nextPackages.remove(name);
                 }
                 if (desiredEnabled != null) packageChanges.put(new JSONObject().put("packageName", name).put("uid", uid)
-                        .put("expected", currentEnabled).put("enabled", desiredEnabled).put("requireQuiet", shouldSilence));
+                        .put("expected", currentEnabled).put("enabled", desiredEnabled));
                 silent.put(name, shouldSilence && (cannotNotify || allQuiet && currentEnabled));
             }
             for (String key : keys(next)) {
@@ -145,7 +154,7 @@ final class NotificationChannelControl {
                 }
                 persist(next, nextPackages);
                 for (String name : readPackages) {
-                    boolean packageQuiet = enabled && modes.containsKey(name) && !modes.get(name).equals("allow");
+                    boolean packageQuiet = managed(modes, enabled, name);
                     for (int i = 0; i < changes.length(); i++) {
                         JSONObject change = changes.getJSONObject(i);
                         if (name.equals(change.getString("packageName")) && !applied.contains(name + "\n" + change.getString("id"))) packageQuiet = false;
@@ -178,16 +187,20 @@ final class NotificationChannelControl {
                 && state.isNull("sound") && !state.optBoolean("vibration") && !state.optBoolean("bubbles");
     }
 
-    static boolean shouldEnable(boolean shouldSilence, boolean currentEnabled, boolean permissionRequested) {
-        return shouldSilence && !currentEnabled && permissionRequested;
+    private static boolean managed(Map<String, String> modes, boolean enabled, String packageName) {
+        return enabled && "managed".equals(modes.get(packageName));
     }
 
-    private boolean requestsNotificationPermission(String packageName) throws Exception {
-        if (android.os.Build.VERSION.SDK_INT < 33) return true;
-        String[] requested = context.getPackageManager().getPackageInfo(packageName, android.content.pm.PackageManager.GET_PERMISSIONS).requestedPermissions;
-        if (requested != null) for (String permission : requested)
-            if (android.Manifest.permission.POST_NOTIFICATIONS.equals(permission)) return true;
-        return false;
+    static Boolean restoredPackageEnabled(boolean currentEnabled, JSONObject owned) throws org.json.JSONException {
+        return currentEnabled == owned.getBoolean("applied") ? owned.getBoolean("original") : null;
+    }
+
+    static int pendingRestoreCount(JSONObject originals, JSONObject packages, Map<String, String> modes,
+                                   boolean enabled) throws org.json.JSONException {
+        int count = packages.length();
+        for (String key : keys(originals))
+            if (!managed(modes, enabled, originals.getJSONObject(key).getString("packageName"))) count++;
+        return count;
     }
 
     static JSONObject restoredState(JSONObject current, JSONObject applied, JSONObject original) throws Exception {
@@ -195,6 +208,18 @@ final class NotificationChannelControl {
         for (String key : new String[]{"importance", "sound", "vibration", "bubbles"})
             if (java.util.Objects.equals(current.opt(key), applied.opt(key))) restored.put(key, original.get(key));
         return restored;
+    }
+
+    private static NotificationChannel restoredChannel(String currentParcel, JSONObject currentState, JSONObject owned) throws Exception {
+        NotificationChannel original = NotificationChannelShell.decode(owned.getString("original"));
+        JSONObject appliedState = owned.getJSONObject("applied");
+        JSONObject merged = restoredState(currentState, appliedState, NotificationChannelShell.state(original));
+        NotificationChannel result = NotificationChannelShell.decode(currentParcel);
+        result.setImportance(merged.getInt("importance")); result.enableVibration(merged.getBoolean("vibration"));
+        if (java.util.Objects.equals(currentState.opt("sound"), appliedState.opt("sound")))
+            result.setSound(original.getSound(), original.getAudioAttributes());
+        if (merged.getBoolean("bubbles") != result.canBubble()) result.setAllowBubbles(merged.getBoolean("bubbles"));
+        return result;
     }
 
     private static Set<String> keys(JSONObject object) {
@@ -212,8 +237,14 @@ final class NotificationChannelControl {
             JSONObject packages = new JSONObject();
             for (Map.Entry<String, Boolean> entry : silent.entrySet()) packages.put(entry.getKey(), entry.getValue());
             silentSnapshot = java.util.Collections.unmodifiableMap(new HashMap<>(silent));
+            int pending = pendingRestoreCount(new JSONObject(saved.getString("originals", "{}")),
+                    new JSONObject(saved.getString("packages", "{}")), requestedModes, takeoverEnabled);
+            if (pending > 0 && state.equals("root_required")) message = NativeLocale.text(
+                    "需要 Root 授权以恢复原通知设置", "Root authorization is required to restore the original notification settings");
+            else if (pending > 0) message = NativeLocale.text("原通知设置尚未恢复，可在通知整理中重试",
+                    "The original notification settings have not been restored. Retry in notification organization");
             status = new JSONObject().put("state", state).put("changed", changed).put("restored", restored)
-                    .put("packages", packages).put("message", message);
+                    .put("packages", packages).put("message", message).put("pendingRestoreCount", pending);
             return status;
         } catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }
     }
@@ -223,6 +254,8 @@ final class NotificationChannelControl {
     }
 
     private JSONObject run(JSONObject input, java.util.function.BooleanSupplier policyCurrent) throws Exception {
+        if (!policyCurrent.getAsBoolean()) throw new PolicySuperseded();
+        if (!ProductPermissions.allowed(ProductPermissions.preferences(context), "allowRoot")) throw new RootUnavailable();
         String apk = context.getApplicationInfo().sourceDir;
         String command = "CLASSPATH=" + quote(apk) + " /system/bin/app_process /system/bin io.droyagent.app.NotificationChannelShell";
         Process process;
@@ -234,10 +267,8 @@ final class NotificationChannelControl {
         Thread stdout = drain(process.getInputStream(), output, failure, process);
         Thread stderr = drain(process.getErrorStream(), new ByteArrayOutputStream(), failure, process);
         try {
-            if (input.getString("operation").equals("apply")) {
-                if (!policyCurrent.getAsBoolean()) throw new PolicySuperseded();
-                if (!ProductPermissions.allowed(ProductPermissions.preferences(context), "allowRoot")) throw new RootUnavailable();
-            }
+            if (!policyCurrent.getAsBoolean()) throw new PolicySuperseded();
+            if (!ProductPermissions.allowed(ProductPermissions.preferences(context), "allowRoot")) throw new RootUnavailable();
             try (java.io.OutputStream stream = process.getOutputStream()) { stream.write(input.toString().getBytes(StandardCharsets.UTF_8)); }
             if (!process.waitFor(30, TimeUnit.SECONDS)) throw new java.io.IOException("channel_control_timeout");
             stdout.join(1000); stderr.join(1000);

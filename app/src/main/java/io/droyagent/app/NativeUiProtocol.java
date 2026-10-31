@@ -41,6 +41,11 @@ final class NativeUiProtocol {
         return request;
     }
 
+    static void noArguments(JSONObject args) {
+        if (args.length() != 0)
+            throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("此界面操作不接受参数", "This UI action does not accept arguments"));
+    }
+
     static boolean booleanArgument(JSONObject args, String key) throws Exception {
         Object value = args.get(key);
         if (!(value instanceof Boolean)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("此设置需要开关值", "This setting requires a boolean value"));

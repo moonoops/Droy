@@ -35,7 +35,6 @@ public final class MemoryProductDeviceTest {
         assumeTrue("Requires explicit synthetic product fixture", "true".equals(InstrumentationRegistry.getArguments().getString(option)));
         instrumentation=InstrumentationRegistry.getInstrumentation(); context=instrumentation.getTargetContext();
         assertTrue("Stop existing tasks before the synthetic memory fixture",RuntimeService.canManageHistory());
-        assertTrue("Root product consent must already be enabled",ProductPermissions.allowed(ProductPermissions.preferences(context),"allowRoot"));
         for(String name:EMPTY_REQUIRED) assertFalse("Existing private memory must not enter this fixture: "+name,Files.exists(new File(context.getFilesDir(),name).toPath(),LinkOption.NOFOLLOW_LINKS));
         assertFalse("Existing memory protection must not be reset by this fixture",context.getSharedPreferences("droy_memory",Context.MODE_PRIVATE).getBoolean("privacyEverActivated",false));
         JSONObject nativeConfiguration=MemoryRuntime.get(context).historyRequest(new JSONObject().put("operation","status")).getJSONObject("configuration");
@@ -43,10 +42,10 @@ public final class MemoryProductDeviceTest {
         journal=MemoryFixtureJournal.create(context,new File(context.getCacheDir(),"memory-product-fixture-restore.json"),"product","droy_memory","history_capture");
         ownsState=true;
         for(String name:PRESERVE)journal.preserve(name);
-        File execution=new File(context.getFilesDir(),"droy-execution");assertTrue(execution.mkdirs());
-        Files.write(new File(execution,".memory-product-fixture").toPath(),journal.fixtureId().getBytes(StandardCharsets.UTF_8));
         assertTrue(new File(context.getFilesDir(),"dsh-home").mkdirs());
-        assertTrue(context.getSharedPreferences("droy_memory",Context.MODE_PRIVATE).edit().clear().commit());
+        assertTrue(context.getSharedPreferences("droy_memory",Context.MODE_PRIVATE).edit().clear()
+            .putBoolean("enabled",false).putBoolean("automaticExtraction",false).commit());
+        assertTrue(ProductPermissions.preferences(context).edit().putBoolean("allowRoot",false).commit());
         progress("fixture_prepared");
         activity=(MainActivity)instrumentation.startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));
     }
@@ -62,7 +61,7 @@ public final class MemoryProductDeviceTest {
         DeviceUi.await("Engine did not stop before durable memory restart",30000,RuntimeService::canManageHistory);
         instrumentation.runOnMainSync(()->context.startForegroundService(new Intent(context,RuntimeService.class)));
         awaitReady(180000);
-        progress("protected_restart_ready");
+        progress("rootless_restart_ready");
         JSONObject restarted=getStatus(); assertSourcesOff(restarted);
         assertEquals(space,restarted.getJSONObject("store").getString("spaceId")); assertEquals(node,restarted.getJSONObject("store").getString("nodeId"));
         JSONObject saved=post("get",new JSONObject().put("recordId",recordId)); assertEquals(first,saved.getJSONObject("payload").getString("text"));
@@ -165,24 +164,6 @@ public final class MemoryProductDeviceTest {
             return result.getJSONObject("result");
         } finally { connection.disconnect(); }
     }
-    private void cleanupSyntheticExecution(File path) throws Exception {
-        File marker=new File(path,".memory-product-fixture");
-        if(Files.isSymbolicLink(path.toPath())||!marker.isFile()||!new String(Files.readAllBytes(marker.toPath()),StandardCharsets.UTF_8).equals(journal.fixtureId()))
-            throw new IOException("Execution fixture identity is unavailable; preserved data must remain untouched");
-        String fixed=MemoryExecutionQualification.filesDirectory(context)+"/droy-execution";
-        if(!Files.isSameFile(path.toPath(),Paths.get(fixed)))throw new IOException("Execution fixture path changed");
-        int first=(android.os.Process.myUid()/100000)*100000+80000,last=first+7;
-        String command="test -d '"+fixed+"' && test ! -L '"+fixed+"' || exit 71; "
-            +"for f in '"+fixed+"'/leases/*; do test ! -s \"$f\" || exit 72; done; "
-            +"for f in /proc/[0-9]*/status; do while read -r key uid rest; do if [ \"$key\" = Uid: ]; then "
-            +"if [ \"$uid\" -ge "+first+" ] && [ \"$uid\" -le "+last+" ]; then exit 73; fi; break; fi; done < \"$f\" 2>/dev/null; done; "
-            +"rm -rf '"+fixed+"'";
-        Process root=new ProcessBuilder("su","-c",command).redirectErrorStream(true).start();root.getOutputStream().close();
-        try{if(!root.waitFor(10,java.util.concurrent.TimeUnit.SECONDS))throw new IOException("Synthetic execution cleanup timed out");
-            if(root.exitValue()!=0)throw new IOException("Synthetic execution cleanup was not confirmed; exit="+root.exitValue());}
-        finally{root.destroyForcibly();root.getInputStream().close();}
-        if(path.exists())throw new IOException("Synthetic execution directory remains");
-    }
     @After public void restore() throws Exception {
         if(!ownsState)return;
         try {
@@ -191,7 +172,6 @@ public final class MemoryProductDeviceTest {
         } finally {
             assertTrue("Never restore under a live fixture runtime",RuntimeService.canManageHistory());
             journal.restore(path->{
-                if(path.getName().equals("droy-execution")){cleanupSyntheticExecution(path);return;}
                 if(Files.isDirectory(path.toPath(),LinkOption.NOFOLLOW_LINKS))HistoryData.deleteTree(path.toPath());else Files.deleteIfExists(path.toPath());
             });
             ownsState=false;

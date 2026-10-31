@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_rich_text_limited">Showing the first part of this long message.</string>
+    <string name="native_rich_text_copy_full">Copy full message</string>
+    <string name="native_rich_text_heading">Heading level %1$d</string>
+    <string name="native_rich_text_code">Code</string>
+    <string name="native_rich_text_copy_code">Copy code</string>
+    <string name="native_rich_text_table">Table; swipe horizontally for more columns</string>
+    <string name="native_rich_text_image">Image</string>
+    <string name="native_rich_text_open_link">Open link</string>
+</resources>

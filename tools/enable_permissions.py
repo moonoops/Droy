@@ -240,7 +240,7 @@ class PermissionSetup:
         self.accessibility_component = package_name + "/io.droyagent.androiduse.DroyAccessibilityService"
         self.notification = package_name + "/io.droyagent.app.DroyNotificationService"
         self.provider = "content://" + package_name + ".permissions"
-        self.activity = package_name + "/io.droyagent.app.MainActivity"
+        self.activity = package_name + "/io.droyagent.app.NativeAppActivity"
         self.adb = adb
         self.user = user
         self.api = api
@@ -369,7 +369,7 @@ class PermissionSetup:
         # the package is installed. A waited, explicit Activity launch also
         # brings force-stopped installations into a usable foreground state.
         # An existing in-app browser can otherwise remain on top of the task.
-        # Reordering brings MainActivity forward without clearing that activity.
+        # Reordering brings NativeAppActivity forward without clearing that activity.
         launch = self.adb.shell("am", "start", "--user", self.user, "-W",
                                 "--activity-reorder-to-front", "-n", self.activity)
         activity = re.search(r"(?m)^Activity:\s*(\S+)\s*$", launch)

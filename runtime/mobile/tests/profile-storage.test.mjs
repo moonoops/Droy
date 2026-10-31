@@ -137,3 +137,33 @@ test('bundled pnpm installs a local plugin offline and keeps it across restart a
 test('missing bundled pnpm is reported instead of falling back to a different version', () => {
   assert.throws(() => mobilePackageManager({ runtime: '/fictional/missing-runtime' }), /Bundled pnpm is missing/);
 });
+
+
+test('bootstrap disables an existing upload override without touching history or other configuration', async t => {
+  const { profile, home, runtime } = await fixture(t);
+  const path = join(profile, 'cordis.patch.yml');
+  await writeFile(path, `# User settings
+- id: session-log-deepseek
+  config:
+    enabled: true
+    maxBytes: 12345
+- id: session-persistence-jsonl
+  config:
+    compression: none
+- id: fixture-variable
+  config:
+    value: !!js process.env.FICTIONAL_SETTING
+`);
+  const history = join(home, 'synthetic-session.jsonl');
+  await writeFile(history, 'synthetic local history\n');
+  await prepareMobileProfile({ home, runtime });
+  const migrated = await readFile(path, 'utf8');
+  assert.match(migrated, /enabled: false/);
+  assert.match(migrated, /maxBytes: 12345/);
+  assert.match(migrated, /session-persistence-jsonl/);
+  assert.match(migrated, /!!js process.env.FICTIONAL_SETTING/);
+  assert.match(migrated, /# User settings/);
+  assert.equal(await readFile(history, 'utf8'), 'synthetic local history\n');
+  await prepareMobileProfile({ home, runtime });
+  assert.equal(await readFile(path, 'utf8'), migrated, 'migration is idempotent');
+});

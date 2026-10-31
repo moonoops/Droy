@@ -421,8 +421,17 @@ function createTouchController(target, options = {}) {
   listen(target, 'pagehide', () => { cancelGestures(); pointers.clear(); systemPointers.clear(); });
   listen(target, 'droy-mobile-workspace-change', () => cancelGestures());
   listen(target, 'droy-mobile-session-action', sessionAction);
-  const observer = target.MutationObserver ? new target.MutationObserver(() => {
-    syncTouchSurfaces();
+  const observer = target.MutationObserver ? new target.MutationObserver(records => {
+    // Ordinary message text changes cannot add a drawer or remove its owned rows.
+    const surfaces = '[data-droy-sidebar], [data-droy-backdrop]';
+    const surfaceChanged = !records || records.some(record => record.type === 'attributes'
+      || [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType === 1
+        && (node.matches?.(surfaces) || node.querySelector?.(surfaces))));
+    const removedElement = !records || records.some(record => record.type === 'childList'
+      && [...record.removedNodes].some(node => node.nodeType === 1));
+    const detached = removedElement && [...rows.keys(), ...menuAnimations.keys()].some(element => !element.isConnected);
+    if (!surfaceChanged && !detached) return;
+    if (surfaceChanged) syncTouchSurfaces();
     for (const element of menuAnimations.keys()) if (!element.isConnected) clearMenuAnimation(element, false);
     if (!drawerOpen()) cancelGestures();
     for (const [element, entry] of rows) if (!element.isConnected) {

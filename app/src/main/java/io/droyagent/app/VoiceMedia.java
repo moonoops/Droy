@@ -12,6 +12,8 @@ import java.util.UUID;
 final class VoiceMedia {
     static final String OWNER = "droy-voice";
     private static VoiceMedia instance;
+    // Retired IDs outlive plugin disposal so late callbacks cannot restart them in this process.
+    private static final VoiceSessionOwnership ownership = new VoiceSessionOwnership();
     static synchronized VoiceMedia get(Context context) {
         if (instance == null) instance = new VoiceMedia(context.getApplicationContext());
         return instance;
@@ -26,12 +28,16 @@ final class VoiceMedia {
         synchronized (VoiceMedia.class) { current = instance; }
         return current != null && current.active();
     }
+    static boolean retiredOperation(String owner) {
+        return ownership.retired(owner);
+    }
 
     private final Context context;
     private final AudioCapture capture;
     private final AudioTranscription transcription;
     private final VoiceSpeechOutput output;
     private final SharedPreferences preferences;
+    private VoiceSessionOwnership.Lease wakeClaim;
     private String captureId = "", transcriptId = "", sessionId = "", mode = "standard", state = "idle", error = "";
     private boolean muted, resumePending;
     private String language = "auto", polledCaptureId = "";
@@ -42,6 +48,8 @@ final class VoiceMedia {
         this.context = context;
         capture = AudioCapture.get(context); transcription = AudioTranscription.get(context);
         output = new VoiceSpeechOutput(context); preferences = ProductPermissions.preferences(context);
+        VoiceSessionOwnership.Lease previous = ownership.current();
+        if (previous != null) { sessionId = previous.session; state = ownership.active(previous) ? "interrupted" : "ended"; }
         preferencesChanged = (prefs, key) -> {
             if (ProductPermissions.stopped(context) || BackgroundRuntime.explicitlyStopped(context)
                 || (!ProductPermissions.allowed(prefs, "allowAudioMicrophone") && active()))
@@ -52,11 +60,15 @@ final class VoiceMedia {
 
     synchronized JSONObject request(JSONObject args) throws Exception {
         String operation = args.getString("operation");
+        String operationOwner = VoiceSessionOwnership.owner(args.has("voiceOperationId") ? args.get("voiceOperationId") : null);
+        if (operation.equals("stop")) { ownership.retire(operationOwner); VoiceWake.retireIfCreated(operationOwner); }
+        if (Set.of("poll", "mute", "stop").contains(operation)) ownership.require(operationOwner);
+        if (Set.of("speak", "play", "stop_speaking", "clear_playback").contains(operation)) ownership.requireOutput(operationOwner);
         return switch (operation) {
             case "start" -> start(args);
             case "status" -> status();
             case "poll" -> poll(args);
-            case "stop" -> stop("user_stop");
+            case "stop" -> active() ? stop("user_stop") : status();
             case "dispose" -> dispose();
             case "mute" -> {
                 requireActive();
@@ -90,10 +102,13 @@ final class VoiceMedia {
         String nextMode = args.optString("mode", "standard"), nextSession = args.optString("sessionId");
         if (!nextMode.equals("standard")) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("本版仅开放普通语音对话", "Only standard voice chat is available in this version"));
         if (nextSession.isBlank() || nextSession.length() > 256) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("请先打开一个对话", "Please open a conversation first"));
+        String operationOwner = VoiceSessionOwnership.owner(args.has("voiceOperationId") ? args.get("voiceOperationId") : null);
         if (active()) {
+            ownership.require(operationOwner);
             if (sessionId.equals(nextSession) && mode.equals(nextMode)) return status();
             throw new IllegalStateException(io.droyagent.app.NativeLocale.text("已有语音对话进行中，请先结束", "A voice chat is already active. Please end it first"));
         }
+        if (ownership.retired(operationOwner)) { ownership.begin(operationOwner, nextSession); return status(); }
         if (nextMode.equals("standard")) {
             JSONObject preparation = transcription.request(new JSONObject().put("operation", "preparation"), OWNER);
             if (!preparation.optBoolean("ready")) throw new IllegalStateException(preparation.optString("state").equals("failed")
@@ -103,13 +118,28 @@ final class VoiceMedia {
         language = args.optString("language", "auto");
         if (!Set.of("auto", "zh", "en", "ja", "ko", "yue").contains(language))
             throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("不支持的识别语言", "Unsupported recognition language"));
-        JSONObject started = startCapture();
-        captureId = started.getString("captureId"); transcriptId = ""; sessionId = nextSession; mode = nextMode;
-        state = started.getString("state"); muted = false; resumePending = false; polledCaptureId = ""; lastSpeechMs = 0; error = "";
-        try { output.beginCommunication(); ensureTranscription(); }
+        VoiceSessionOwnership.Lease lease = ownership.begin(operationOwner, nextSession);
+        if (!ownership.active(lease)) return status();
+        sessionId = nextSession; mode = nextMode; state = "starting"; error = "";
+        try {
+            VoiceWake wake = VoiceWake.get(context);
+            if (args.has("wakeEventId")) wake.requireStartingEvent(args.getLong("wakeEventId"), operationOwner);
+            wakeClaim = wake.claimForVoice(operationOwner);
+            JSONObject started = startCapture();
+            captureId = started.getString("captureId"); transcriptId = "";
+            state = started.getString("state"); muted = false; resumePending = false; polledCaptureId = ""; lastSpeechMs = 0;
+            output.stop(); output.beginCommunication(); ensureTranscription();
+        }
         catch (Exception failure) {
-            error = failure.getMessage() == null ? io.droyagent.app.NativeLocale.text("语音对话未能开始", "Voice chat could not start") : failure.getMessage();
-            stop("start_failed"); throw failure;
+            error = failure instanceof VoiceSessionOwnership.Failure
+                ? NativeLocale.text("这次语音对话已由其他操作接管。", "Another operation owns this voice conversation.")
+                : failure.getMessage() == null ? io.droyagent.app.NativeLocale.text("语音对话未能开始", "Voice chat could not start") : failure.getMessage();
+            if (!captureId.isEmpty()) stop("start_failed");
+            else {
+                ownership.end(lease); state = "interrupted";
+                VoiceWake.releaseIfCreated(wakeClaim); wakeClaim = null;
+            }
+            throw failure;
         }
         RuntimeService.refreshBackgroundPolicy();
         return status();
@@ -216,6 +246,7 @@ final class VoiceMedia {
 
     private JSONObject status() throws Exception {
         JSONObject result = new JSONObject().put("state", state).put("mode", mode).put("sessionId", sessionId)
+            .put("voiceOperationId", ownership.owner() == null ? JSONObject.NULL : ownership.owner())
             .put("captureId", captureId).put("transcriptId", transcriptId).put("muted", muted)
             .put("speaking", output.speaking()).put("level", 0).put("sampleRate", AudioCapture.SAMPLE_RATE)
             .put("channels", 1).put("encoding", "pcm_s16le").put("capturePositionMs", 0);
@@ -262,6 +293,8 @@ final class VoiceMedia {
         finally {
             AudioCaptureService.setCameraActive(context, false);
             output.endCommunication(); resumePending = false; muted = false; state = reason.equals("user_stop") ? "ended" : "interrupted";
+            ownership.endCurrent();
+            VoiceWake.releaseIfCreated(wakeClaim); wakeClaim = null;
         }
         if (failure != null) error = failure.getMessage() == null ? io.droyagent.app.NativeLocale.text("语音停止未完成", "Speech could not finish stopping") : failure.getMessage();
         else if (!reason.equals("user_stop") && error.isEmpty()) error = io.droyagent.app.NativeLocale.text("语音对话已中断", "Voice chat was interrupted");

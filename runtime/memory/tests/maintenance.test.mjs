@@ -386,7 +386,7 @@ test('stopping or revocation rejects late model results and does not erase prote
   }) });
   await m.enqueueExtraction(source(f.state.time)); const pending = m.extractOnce(); await entered.promise;
   await m.stop(); release.resolve();
-  assert.equal((await pending).code, 'MEMORY_MAINTENANCE_CANCELLED'); assert.equal((await f.store.query()).total, 0);
+  assert.equal((await pending).code, 'MEMORY_MAINTENANCE_STOPPED'); assert.equal((await f.store.query()).total, 0);
   assert.equal(m.status().held, 1); assert.equal(forgets, 0);
   m.resume(); f.state.time += MAINTENANCE_POLICY.intervalMs;
   assert.equal((await m.extractOnce()).status, 'waiting');
@@ -521,4 +521,19 @@ test('explicit discard removes pending metadata while disabled without opening o
   f.state.enabled = false; f.state.ready = false;
   assert.equal((await m.discardExtraction(receipt.id)).status, 'discarded'); assert.equal(lazyOpens, before); assert.equal(m.status().pending, 0);
   await assert.rejects(m.retryExtraction(receipt.id), /MEMORY_DISABLED/);
+});
+
+
+test('disabling and re-enabling during ingestion preserves the normal stop reason', async t => {
+  const f = await fixture(t), entered = deferred(), release = deferred();
+  const m = f.make({ history: { readBatch: async () => {
+    entered.resolve(); await release.promise;
+    return { batchId: null, items: [], continuityId: null };
+  }, acknowledge: async () => assert.fail('Stopped ingestion must not acknowledge') } });
+  const pending = m.ingestOnce(); await entered.promise;
+  f.state.enabled = false; await m.stop('MEMORY_DISABLED');
+  f.state.enabled = true; m.resume(); release.resolve();
+  assert.equal((await pending).code, 'MEMORY_DISABLED');
+  assert.equal(m.status().lastCode, 'MEMORY_DISABLED');
+  assert.equal((await f.store.query()).total, 0);
 });

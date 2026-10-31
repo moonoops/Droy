@@ -178,7 +178,7 @@ public final class UnifiedForegroundNotificationDeviceTest {
 
         String voice = startCapture("droy-voice");
         assertEquals("The conversation capture used a generic recording title",
-                NativeLocale.text("Droy · 正在和你交谈", "Droy · Talking with you"),
+                NativeLocale.text("正在和你交谈", "Talking with you"),
                 shared().getNotification().extras.getString(Notification.EXTRA_TITLE));
         captureShade("runtime-and-voice");
         touchSharedStatusAndAssertConversation();

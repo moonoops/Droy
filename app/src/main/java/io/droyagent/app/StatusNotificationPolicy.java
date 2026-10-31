@@ -5,14 +5,15 @@ final class StatusNotificationPolicy {
     enum Audio { NONE, WAKE, VOICE, ENROLLMENT, RECORDING, PLAYBACK }
 
     static String title(boolean ready, boolean active, String phase, Audio audio, boolean location, int seed) {
-        if (active || !ready) return NotificationCopy.title(ready, active, phase, seed);
+        if (active) return NotificationCopy.title(ready, true, phase, seed);
         return switch (audio) {
-            case VOICE -> NativeLocale.text("Droy · 正在和你交谈", "Droy · Talking with you");
-            case ENROLLMENT -> NativeLocale.text("Droy · 正在录入声纹", "Droy · Enrolling your voice");
-            case RECORDING -> NativeLocale.text("Droy · 正在录音", "Droy · Recording audio");
-            case PLAYBACK -> NativeLocale.text("Droy · 正在采集应用音频", "Droy · Capturing app audio");
-            default -> location ? NativeLocale.text("Droy · 正在记录位置", "Droy · Recording location")
-                    : NotificationCopy.title(true, false, phase, seed);
+            case WAKE -> NativeLocale.text("语音唤醒已开启", "Voice wake is on");
+            case VOICE -> NativeLocale.text("正在和你交谈", "Talking with you");
+            case ENROLLMENT -> NativeLocale.text("正在录入声纹", "Enrolling your voice");
+            case RECORDING -> NativeLocale.text("正在录音", "Recording audio");
+            case PLAYBACK -> NativeLocale.text("正在采集应用音频", "Capturing app audio");
+            default -> location ? NativeLocale.text("正在记录位置", "Recording location")
+                    : NotificationCopy.title(ready, false, phase, seed);
         };
     }
 
@@ -29,7 +30,8 @@ final class StatusNotificationPolicy {
                 case VOICE -> NativeLocale.text("点按返回对话", "Tap to return to the conversation");
                 case ENROLLMENT -> NativeLocale.text("请按屏幕提示朗读", "Read the text shown on screen");
                 case RECORDING, PLAYBACK -> NativeLocale.text("可随时停止", "You can stop at any time");
-                default -> "";
+                default -> attention ? NativeLocale.text("通知整理需要设置", "Notification management needs setup")
+                    : location ? "" : NativeLocale.text("点按打开 Droy", "Tap to open Droy");
             };
         }
         if (active && audio == Audio.RECORDING) detail = append(detail, NativeLocale.text("录音中", "Recording audio"));
@@ -38,7 +40,7 @@ final class StatusNotificationPolicy {
         if (camera) detail = append(detail, NativeLocale.text("摄像头使用中", "Camera active"));
         if (location) detail = append(detail, NativeLocale.text("位置记录中", "Recording location"));
         if (paused) detail = append(detail, NativeLocale.text("手机操作已暂停", "Phone operations paused"));
-        if (!active && attention) detail = append(detail, NativeLocale.text("通知整理需要设置", "Notification management needs setup"));
+        if (!active && attention && audio != Audio.NONE) detail = append(detail, NativeLocale.text("通知整理需要设置", "Notification management needs setup"));
         return detail;
     }
 

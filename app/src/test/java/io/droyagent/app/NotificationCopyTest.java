@@ -6,6 +6,22 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public final class NotificationCopyTest {
+    @Test public void pausedAndTransitionalTitlesAreDistinctInBothLanguages() {
+        try {
+            for (String language : new String[]{"zh", "en"}) {
+                NativeLocale.mirrorProcessLanguage(language);
+                Set<String> titles = new HashSet<>();
+                for (String phase : new String[]{"executing", "pausing", "paused", "resuming", "stopping"}) {
+                    String title = NotificationCopy.title(true, true, phase, 0);
+                    assertFalse(title.isBlank());
+                    if (language.equals("en")) assertFalse(title.matches(".*[\\p{IsHan}].*"));
+                    titles.add(title);
+                }
+                assertEquals(5, titles.size());
+            }
+        } finally { NativeLocale.mirrorProcessLanguage("zh"); }
+    }
+
     @Test public void allIdleVariantsRemainIdleAfterACompletedOrInterruptedTask() {
         for (int seed : new int[]{0, 1, 2, -1, Integer.MIN_VALUE}) {
             assertEquals(NotificationCopy.title(true, false, "completed", seed),
@@ -16,7 +32,7 @@ public final class NotificationCopyTest {
         }
     }
 
-    @Test public void eachEventHasSeveralStableChoices() {
+    @Test public void statusTitlesStayStableWhileMessageSummariesKeepTheirEventChoices() {
         Set<String> titles = new HashSet<>(), important = new HashSet<>(), reminders = new HashSet<>(), ads = new HashSet<>();
         for (int seed = 0; seed < 3; seed++) {
             titles.add(NotificationCopy.title(true, true, "executing", seed));
@@ -25,7 +41,7 @@ public final class NotificationCopyTest {
             ads.add(NotificationCopy.ads(7, seed));
             assertEquals(NotificationCopy.reminder("测试应用", seed), NotificationCopy.reminder("测试应用", seed));
         }
-        assertEquals(3, titles.size());
+        assertEquals(1, titles.size());
         assertEquals(3, important.size());
         assertEquals(3, reminders.size());
         assertEquals(3, ads.size());
@@ -44,7 +60,7 @@ public final class NotificationCopyTest {
                     if (language.equals("en")) {
                         assertFalse(NotificationCopy.collecting(seed).matches(".*[\\p{IsHan}].*"));
                         assertFalse(NotificationCopy.idle(seed).matches(".*[\\p{IsHan}].*"));
-                        assertTrue(NotificationCopy.title(true, true, "waiting_input", seed).startsWith("Droy · "));
+                        assertEquals("Your confirmation is needed", NotificationCopy.title(true, true, "waiting_input", seed));
                     }
                 }
             }

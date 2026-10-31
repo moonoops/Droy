@@ -10,12 +10,14 @@ const hooks = registerHooks({ resolve(specifier, context, next) {
 const { installPetInteractions } = await import('../pet-interactions.mjs');
 hooks.deregister();
 
-function fixture() {
+function fixture(options = {}) {
   let locale = 'zh', current, route;
   const listeners = new Map(), disposers = [];
   const agent = { id: 'fictional-task', status: 'running' };
   const ctx = {
-    get: () => ({ describe: () => [{ ns: 'locale', value: { preference: locale } }] }),
+    get: name => name === 'droyTaskControl' ? options.control
+      : name === 'droyCompanions' ? { ownsSession: () => options.managed === true }
+        : ({ describe: () => [{ ns: 'locale', value: { preference: locale } }] }),
     agents: { get: id => id === agent.id ? agent : null },
     webServer: { register(value) { route = value; } },
     on(event, handler) { listeners.set(event, handler); },
@@ -52,6 +54,7 @@ test('new companion questions follow the current language and preserve question 
     f.setLocale(locale);
     const answer = f.question({ questions: [{ id: 'pick', question: '用户原始问题', options: [{ label: '原始选项' }] }] });
     const view = f.view();
+    assert.equal(view.kind, 'question');
     assert.equal(view.title, locale === 'zh' ? '需要你的回答' : 'Your answer is needed');
     assert.equal(view.message, '用户原始问题');
     assert.equal(view.options[0].label, '原始选项');
@@ -67,6 +70,7 @@ test('companion approvals select translated reasons and localize product buttons
     f.setLocale(locale);
     const approval = f.approval({ reason: 'Original user reason', displayReason: { zh: '中文确认原因', en: 'English approval reason' } });
     const view = f.view();
+    assert.equal(view.kind, 'approval');
     assert.equal(view.title, locale === 'zh' ? '需要你确认' : 'Your confirmation is needed');
     assert.equal(view.message, locale === 'zh' ? '中文确认原因' : 'English approval reason');
     assert.deepEqual(view.options.map(item => item.label), locale === 'zh' ? ['允许一次', '拒绝'] : ['Allow once', 'Reject']);
@@ -75,6 +79,46 @@ test('companion approvals select translated reasons and localize product buttons
     assert.equal(stale.value.error.message, locale === 'zh' ? '这个问题已处理，请查看最新进展' : 'This question has already been handled. Check the latest progress.');
     await f.action({ taskId: f.agent.id, action: 'answer', requestId: view.requestId, optionId: 'reject' });
     assert.equal(await approval, 'rejected');
+  }
+  f.dispose();
+});
+
+test('pause/resume/stop require an explicit safe revision and report accepted state or current CAS conflict in either language', async () => {
+  const calls = [];
+  const control = { command(input) {
+    calls.push(input);
+    if (input.expectedRevision !== 2) throw Object.assign(new Error('TASK_CONTROL_CHANGED'), { code: 'TASK_CONTROL_CHANGED' });
+    return { accepted: true, control: { taskId: input.taskId, phase: 'pausing', controlRevision: 3, active: true } };
+  }, get: () => ({ taskId: 'fictional-task', phase: 'paused', controlRevision: 2 }), revision: () => 2 };
+  const f = fixture({ control });
+  for (const locale of ['zh', 'en']) {
+    f.setLocale(locale);
+    for (const expectedRevision of [undefined, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+      assert.equal((await f.action({ taskId: f.agent.id, action: 'pause', expectedRevision })).status, 400);
+    const accepted = await f.action({ taskId: f.agent.id, action: 'pause', expectedRevision: 2 });
+    assert.equal(accepted.status, 200); assert.equal(accepted.value.accepted, true); assert.equal(accepted.value.control.controlRevision, 3);
+    const stale = await f.action({ taskId: f.agent.id, action: 'resume', expectedRevision: 1 });
+    assert.equal(stale.status, 409); assert.equal(stale.value.error.code, 'TASK_CONTROL_CHANGED');
+    assert.equal(stale.value.control.controlRevision, 2);
+    assert.equal(stale.value.error.message, locale === 'zh' ? '任务状态已更新，请按最新状态操作' : 'The task state has changed. Use the latest controls.');
+  }
+  assert.equal(calls.length, 4, 'Malformed revision requests never reach product control');
+  f.dispose();
+});
+
+test('companion questions and approvals retain their original provider without creating pet progress', async () => {
+  const f = fixture({ managed: true });
+  assert.equal(await f.question({ questions: [{ id: 'private', question: 'Fictional question', options: [] }] }), null);
+  assert.equal(await f.approval({ reason: 'Fictional approval' }), null);
+  assert.equal(f.view(), undefined);
+  for (const locale of ['zh', 'en']) {
+    f.setLocale(locale);
+    for (const action of ['cancel', 'pause', 'resume', 'stop', 'answer']) {
+      const result = await f.action({ taskId: f.agent.id, action, expectedRevision: 0, requestId: 'old', optionId: 'allow' });
+      assert.equal(result.status, 409);
+      assert.equal(result.value.error.code, 'COMPANION_SESSION_MANAGED');
+      assert.equal(result.value.error.message, locale === 'zh' ? '请在伙伴对话中停止处理' : 'Stop this work from its companion conversation.');
+    }
   }
   f.dispose();
 });

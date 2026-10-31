@@ -3,6 +3,7 @@ import { scopeTarget } from '@deepseek-ai/dsh-scope';
 import { requireMobileSession } from './auth.mjs';
 import { petText } from './pet-text.mjs';
 import { resolveMobileLocale } from './locale.mjs';
+import { isUserSession } from './task-ownership.mjs';
 
 const text = (locale, zh, en) => locale === 'zh' ? zh : en;
 
@@ -91,12 +92,13 @@ export function installPetInteractions(ctx, progress) {
   }
 
   async function present(kind, request, next) {
-    if (disposed || relayed.has(request) || !request.agent || request.signal?.aborted) return next();
+    if (disposed || relayed.has(request) || !request.agent || request.signal?.aborted
+      || !isUserSession(ctx, request.agent.id)) return next();
     const agent = request.agent;
     const taskId = String(agent.id), requestId = randomUUID();
     const locale = resolveMobileLocale(ctx);
     const presentation = kind === 'question' ? questionPresentation(request, locale) : approvalPresentation(request, locale);
-    const view = { requestId, title: presentation.title, message: presentation.message,
+    const view = { requestId, kind, title: presentation.title, message: presentation.message,
       inline: presentation.inline, ...(presentation.questions ? { questions: presentation.questions } : {}), options: presentation.choices.map(({ id, label }) => ({ id, label })) };
     const withdrawal = new AbortController();
     const signal = request.signal ? AbortSignal.any([request.signal, withdrawal.signal]) : withdrawal.signal;
@@ -147,9 +149,29 @@ export function installPetInteractions(ctx, progress) {
 
   function act(data) {
     const locale = resolveMobileLocale(ctx);
+    if (!isUserSession(ctx, data.taskId)) return { status: 409, code: 'COMPANION_SESSION_MANAGED',
+      message: text(locale, '请在伙伴对话中停止处理', 'Stop this work from its companion conversation.') };
+    const control = ctx.get('droyTaskControl');
+    if (['pause', 'resume', 'stop'].includes(data.action)) {
+      if (typeof control?.command !== 'function') return { status: 503, code: 'TASK_CONTROL_UNAVAILABLE',
+        message: text(locale, '任务控制服务尚未就绪，请稍后重试', 'Task controls are not ready. Try again shortly.') };
+      try { return { status: 200, ...control.command(data) }; }
+      catch (error) {
+        const code = /^[A-Z][A-Z0-9_]{2,80}$/u.test(error?.code ?? '') ? error.code : 'TASK_CONTROL_FAILED';
+        return { status: code === 'TASK_CONTROL_INVALID_INPUT' ? 400 : 409, code,
+          message: code === 'TASK_CONTROL_CHANGED'
+            ? text(locale, '任务状态已更新，请按最新状态操作', 'The task state has changed. Use the latest controls.')
+            : text(locale, '暂时无法执行此任务操作，请查看最新状态后重试', 'This task action is unavailable. Check the latest state and try again.'),
+          control: control.get(data.taskId) };
+      }
+    }
     const agent = ctx.agents.get(data.taskId);
     if (!agent) return { status: 409, code: 'TASK_ENDED', message: text(locale, '这个任务已结束，请回到任务查看', 'This task has ended. Open the task to review it.') };
     if (data.action === 'cancel') {
+      if (typeof control?.command === 'function' && !ctx.get('droyCompanions')?.ownsSession(data.taskId)) {
+        const controllerId = control.get(data.taskId)?.taskId ?? data.taskId;
+        return act({ taskId: controllerId, action: 'stop', expectedRevision: control.revision(controllerId) });
+      }
       if (agent.status !== 'running') return { status: 409, code: 'TASK_IDLE', message: text(locale, '这个任务当前没有正在执行的步骤', 'This task has no step currently running.') };
       agent.cancel({ kind: 'user' });
       return { status: 200 };
@@ -180,13 +202,15 @@ export function installPetInteractions(ctx, progress) {
     try { data = JSON.parse(Buffer.concat(parts).toString('utf8')); }
     catch { res.writeHead(400); res.end(); return; }
     if (!data || typeof data.taskId !== 'string' || !data.taskId || data.taskId.length > 160
-      || !['answer', 'cancel'].includes(data.action)
+      || !['answer', 'cancel', 'pause', 'resume', 'stop'].includes(data.action)
+      || (['pause', 'resume', 'stop'].includes(data.action) && (!Number.isSafeInteger(data.expectedRevision) || data.expectedRevision < 0))
       || (data.action === 'answer' && (typeof data.requestId !== 'string' || (typeof data.optionId !== 'string' && !Array.isArray(data.answers))))) {
       res.writeHead(400); res.end(); return;
     }
     const result = act(data);
     res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify(result.status === 200 ? { ok: true }
-      : { ok: false, error: { code: result.code, message: result.message } }));
+    res.end(JSON.stringify(result.status === 200 ? { ok: true,
+      ...(result.accepted !== undefined ? { accepted: result.accepted, control: result.control } : {}) }
+      : { ok: false, error: { code: result.code, message: result.message }, ...(result.control ? { control: result.control } : {}) }));
   } });
 }

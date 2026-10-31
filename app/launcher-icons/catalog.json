@@ -1,0 +1,16 @@
+{
+  "origin": "AI-generated original Droy artwork",
+  "background": "warm-white cotton card stock, approximately #EEE6D9",
+  "adaptiveViewportDp": 108,
+  "icons": [
+    {"source": "01-closeup.png", "resource": "mipmap/ic_launcher_closeup", "contentDp": 72, "sha256": "4b8f1ef0b60f9e6ffd2b8071640146d54206afcfb31474d0b18a65c062aed820"},
+    {"source": "02-sunglasses.png", "resource": "mipmap/ic_launcher_sunglasses", "contentDp": 72, "sha256": "b455f14355eccd724830a1824d84fc2fc540b4a225ea901bc431faea6a6fb83f"},
+    {"source": "03-headphones.png", "resource": "mipmap/ic_launcher_headphones", "contentDp": 72, "sha256": "abbc73ac7c61d23c9c4753b4b3dd64f0facc7fafbe4f5702e931e8b4f8d5f31f"},
+    {"source": "04-programmer.png", "resource": "mipmap/ic_launcher_programmer", "contentDp": 72, "sha256": "838c3319634c765637b9faad3fb67887b1bd00a783908dccebca70ac4aee26bb"},
+    {"source": "05-hat-scarf.png", "resource": "mipmap/ic_launcher_hat_scarf", "contentDp": 72, "sha256": "3ee350bb1eeee388a30798c6ae07f127f10259bec71f771865c3f397d71157d7"},
+    {"source": "06-sleep-curled.png", "resource": "mipmap/ic_launcher_sleep_curled", "contentDp": 60, "sha256": "470d16e45d2bf203641de9312e3f8de52145f47ebb9dd26e05c2211e4ac3fbae"},
+    {"source": "07-sleep-side.png", "resource": "mipmap/ic_launcher_sleep_side", "contentDp": 60, "sha256": "77b80e57ed9fbc96613ea96a347c9b90caee521963628e5ab63b5add02550d75"},
+    {"source": "08-sleep-belly-up.png", "resource": "mipmap/ic_launcher_sleep_belly_up", "contentDp": 60, "sha256": "7fcbc7e20b581aa3da1d10da084898a7ce1f3a5e62cf666c9819035b117bba85"},
+    {"source": "09-sleep-slumped.png", "resource": "mipmap/ic_launcher_sleep_slumped", "contentDp": 60, "sha256": "f4ab1c50cfb2e6330d2214f6d16bc3fee76f84b0672ee1186e3f2a523a263139"}
+  ]
+}

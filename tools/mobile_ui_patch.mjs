@@ -77,7 +77,7 @@ export function patchLayout(source) {
 \t\t\t\tcols.sidebar
 \t\t\t]);`,
     `const renderedSidebarCollapsed = mobile ? false : sidebarCollapsed;
-\t\t\tconst sidebarWidth = mobile ? Math.min(320, Math.max(0, viewport - 48)) : cols.sidebar;
+\t\t\tconst sidebarWidth = mobile ? viewport : cols.sidebar;
 \t\t\tconst sidebar = (0, react.useMemo)(() => renderSlot("sidebar", {
 \t\t\t\tcollapsed: renderedSidebarCollapsed,
 \t\t\t\twidth: sidebarWidth
@@ -90,7 +90,7 @@ export function patchLayout(source) {
     'if (document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined" || d.layoutInfo.viewportWidth < 1024) d.layoutInfo.narrowExpanded = !d.layoutInfo.narrowExpanded;');
   source = replaceOnce(source,
     'gridTemplateColumns: `${cols.sidebar}px minmax(${cols.rightbar === 0 ? 0 : 400}px, 1fr) minmax(0px, ${rightbarMax}px)`',
-    'gridTemplateColumns: `${mobile ? 0 : cols.sidebar}px minmax(${cols.rightbar === 0 ? 0 : 400}px, 1fr) minmax(0px, ${rightbarMax}px)`,\n\t\t\t\t\t...(mobile ? {"--dsh-frame-leading-clearance":"56px", "--droy-drawer-width":`${Math.min(320, Math.max(0, viewport - 48))}px`} : {})');
+    'gridTemplateColumns: `${mobile ? 0 : cols.sidebar}px minmax(${cols.rightbar === 0 ? 0 : 400}px, 1fr) minmax(0px, ${rightbarMax}px)`,\n\t\t\t\t\t...(mobile ? {"--dsh-frame-leading-clearance":"56px", "--droy-drawer-width":`${viewport}px`} : {})');
   source = replaceOnce(source,
     '"data-sidebar-collapsed": sidebarCollapsed || void 0,',
     '"data-droy-frame": mobile || void 0,\n\t\t\t\t"data-droy-drawer-open": mobile && !sidebarCollapsed || void 0,\n\t\t\t\t"data-sidebar-collapsed": sidebarCollapsed || void 0,');
@@ -99,9 +99,8 @@ export function patchLayout(source) {
     `className: AppFrame_module_css_default.sidebarCol,
 \t\t\t\t\t\t"data-droy-sidebar": mobile || void 0,
 \t\t\t\t\t\tref: drawerRef,
-\t\t\t\t\t\trole: mobile && !sidebarCollapsed ? "dialog" : void 0,
-\t\t\t\t\t\t"aria-modal": mobile && !sidebarCollapsed ? "true" : void 0,
-\t\t\t\t\t\t"aria-label": mobile ? ((document.documentElement.lang || "zh").startsWith("zh") ? "会话菜单" : "Conversation menu") : void 0,
+\t\t\t\t\t\trole: mobile && !sidebarCollapsed ? "region" : void 0,
+\t\t\t\t\t\t"aria-label": mobile ? ((document.documentElement.lang || "zh").startsWith("zh") ? "对话与空间" : "Conversations and spaces") : void 0,
 \t\t\t\t\t\tinert: mobile && sidebarCollapsed ? "" : void 0,
 \t\t\t\t\t\t"aria-hidden": mobile && sidebarCollapsed || void 0,
 \t\t\t\t\t\ttabIndex: mobile ? -1 : void 0,
@@ -113,22 +112,10 @@ export function patchLayout(source) {
   source = replaceOnce(source,
     '(CenterColumn, { children: main })',
     '(CenterColumn, { children: main, inert: mobile && !sidebarCollapsed })');
-  source = replaceOnce(source,
-    'children: leading\n',
-    `children: mobile ? (0, react_jsx_runtime.jsx)("button", {
-\t\t\t\t\t\t\ttype: "button", className: "droy-menu-button", "data-droy-menu": true,
-\t\t\t\t\t\t\t"aria-label": (document.documentElement.lang || "zh").startsWith("zh") ? "打开菜单" : "Open menu", "aria-expanded": false, onClick: () => actions.toggleSidebar(),
-\t\t\t\t\t\t\tchildren: (0, react_jsx_runtime.jsx)("svg", {width:24,height:24,viewBox:"0 0 24 24",fill:"none","aria-hidden":true,
-\t\t\t\t\t\t\t\tchildren:(0,react_jsx_runtime.jsx)("path",{d:"M4 8h16M4 16h11",stroke:"currentColor",strokeWidth:1.8,strokeLinecap:"round"})})
-\t\t\t\t\t\t}) : leading
-`);
+  source = replaceOnce(source, 'children: leading\n', 'children: mobile ? null : leading\n');
   source = replaceOnce(source,
     '!sidebarCollapsed && (0, react_jsx_runtime.jsx)(DragHandle, {',
-    `mobile && (0, react_jsx_runtime.jsx)("button", {
-\t\t\t\t\t\t"data-droy-backdrop": true, className:"droy-drawer-backdrop", tabIndex:-1, "aria-hidden":true,
-\t\t\t\t\t\tonClick:() => actions.toggleSidebar()
-\t\t\t\t\t}),
-\t\t\t\t\t!mobile && !sidebarCollapsed && (0, react_jsx_runtime.jsx)(DragHandle, {`);
+    '!mobile && !sidebarCollapsed && (0, react_jsx_runtime.jsx)(DragHandle, {');
   return source;
 }
 
@@ -141,6 +128,7 @@ export function patchSettings(source) {
     'const documentController = ctx.remote.$host.isLoopback && !document.documentElement.hasAttribute("data-droy-mobile") && typeof window.DroyNative === "undefined" ? new SettingsDocumentStore(ctx, ctx.configForms.describe()) : void 0;');
   source = replaceFunction(source, 'SettingsRoot', text => {
     text = replaceOnce(text, 'const { close, openSection } = actions;', `const { close, openSection } = actions;
+            const mobile = document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined";
             const [droySetupTarget, setDroySetupTarget] = (0, react.useState)(null);
             (0, react.useLayoutEffect)(() => {
                 const refresh = () => setDroySetupTarget(document.querySelector('[data-droy-setup-model-settings]'));
@@ -152,6 +140,11 @@ export function patchSettings(source) {
     text = replaceOnce(text, 'return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [',
       `return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
                 droySetupTarget && (0, react_dom.createPortal)(renderSlot("settings.section", {}, { only: "models" }), droySetupTarget),`);
+    // sidebar.settings owns the settings store consumer and both portals. Remove
+    // only its old launcher row; unmounting the slot also disables global entry.
+    text = replaceOnce(text,
+      '(0, react_jsx_runtime.jsxs)("div", {\n\t\t\t\t\tclassName: clsx(SettingsRoot_module_css_default.triggerRow,',
+      '!mobile && (0, react_jsx_runtime.jsxs)("div", {\n\t\t\t\t\tclassName: clsx(SettingsRoot_module_css_default.triggerRow,');
     text = replaceOnce(text, 'const onboardingStep = requestedOnboarding !== void 0 ?',
       'const onboardingStep = (document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined") && requestedOnboarding === void 0 ? void 0 : requestedOnboarding !== void 0 ?');
     text = replaceOnce(text, 'const { close, openSection } = actions;',
@@ -265,10 +258,28 @@ function replaceFunction(source, name, update) {
   return source.slice(0, start) + updated + source.slice(end);
 }
 
+export function droyWorkspaceKind(workspace, companionIds = [], defaultWorkspaceId = null) {
+  if (!workspace) return 'ungrouped';
+  if (companionIds.includes(workspace.workspaceId)) return 'companion';
+  if (defaultWorkspaceId !== null && workspace.workspaceId === defaultWorkspaceId) return 'default';
+  return 'user';
+}
+
 export function patchWorkspace(source) {
   if (source.includes('data-droy-session-row')) throw new Error('Mobile UI patch anchor: workspace already adapted');
   source = replaceOnce(source, 'let react = require("react");', `let react = require("react");
 		${touchPredicate}
+		${droyWorkspaceKind.toString().replace('export ', '')}
+		const droyWorkspaceRanks = {user:0,default:1,ungrouped:2,companion:3};
+		function useDroyWorkspaceRevision() {
+			const [revision, setRevision] = (0, react.useState)(0);
+			(0, react.useEffect)(() => {
+				const update = () => setRevision(value => value + 1);
+				window.addEventListener("droy-workspace-order-change", update);
+				return () => window.removeEventListener("droy-workspace-order-change", update);
+			}, []);
+			return revision;
+		}
 		function useDroyDraftList(list) {
 			const [revision, setRevision] = (0, react.useState)(0);
 			(0, react.useEffect)(() => {
@@ -320,6 +331,25 @@ export function patchWorkspace(source) {
   source = replaceOnce(source, '"session.new": "新会话",', '"session.new": "新会话",\n\t\t\t"session.draft": "未发送草稿",');
   source = replaceOnce(source, '"session.new": "New Session",', '"session.new": "New Session",\n\t\t\t"session.draft": "Unsent draft",');
   source = replaceFunction(source, 'WorkspaceBrowser', text => replaceOnce(text, 'const list = useSessions((state) => state);', 'const list = useDroyDraftList(useSessions((state) => state));'));
+  source = replaceFunction(source, 'WorkspaceBrowser', text => {
+    text = replaceOnce(text, 'const storedWorkspaces = useWorkspaces((state) => state.items);', `const storedWorkspaces = useWorkspaces((state) => state.items);
+            const droyWorkspaceRevision = useDroyWorkspaceRevision();`);
+    return replaceOnce(text, 'title: workspaceDisplayTitle(workspace.title, defaultWorkspaceName)\n\t\t\t})), [storedWorkspaces, defaultWorkspaceName]);', `title: workspaceDisplayTitle(workspace.title, defaultWorkspaceName),
+                droyWorkspaceKind: droyWorkspaceKind(workspace, window.DroyMobile?.companionWorkspaceIds?.() || [], window.DroyMobile?.defaultWorkspaceId?.() ?? null)
+            })).sort((a,b) => document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined"
+                ? droyWorkspaceRanks[a.droyWorkspaceKind] - droyWorkspaceRanks[b.droyWorkspaceKind] : 0), [storedWorkspaces, defaultWorkspaceName, droyWorkspaceRevision]);`);
+  });
+  source = replaceFunction(source, 'deriveGroups', text => replaceOnce(text, 'return groups;', `if (!document.documentElement.hasAttribute("data-droy-mobile") && typeof window.DroyNative === "undefined") return groups;
+            const kinds = new Map(workspaces.map(workspace => [workspace.workspaceId, workspace.droyWorkspaceKind || droyWorkspaceKind(workspace, window.DroyMobile?.companionWorkspaceIds?.() || [], window.DroyMobile?.defaultWorkspaceId?.() ?? null)]));
+            return groups.map(group => ({...group,droyWorkspaceKind:kinds.get(group.workspaceId) || "ungrouped"}))
+                .sort((a,b) => droyWorkspaceRanks[a.droyWorkspaceKind] - droyWorkspaceRanks[b.droyWorkspaceKind]);`));
+  source = replaceFunction(source, 'WorkspacePickFlow', text => {
+    text = replaceOnce(text, 'const workspaceSnapshot = useWorkspaces((state) => state);', `const workspaceSnapshot = useWorkspaces((state) => state);
+            useDroyWorkspaceRevision();`);
+    return replaceOnce(text, 'const workspaces = workspaceSnapshot.items;', `const workspaces = [...workspaceSnapshot.items].sort((a,b) => document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined"
+                ? droyWorkspaceRanks[droyWorkspaceKind(a, window.DroyMobile?.companionWorkspaceIds?.() || [], window.DroyMobile?.defaultWorkspaceId?.() ?? null)] - droyWorkspaceRanks[droyWorkspaceKind(b, window.DroyMobile?.companionWorkspaceIds?.() || [], window.DroyMobile?.defaultWorkspaceId?.() ?? null)] : 0);`);
+  });
+  source = replaceFunction(source, 'ProjectRowItem', text => replaceOnce(text, '"data-row-key": `workspace:${group.key}`,', '"data-row-key": `workspace:${group.key}`,\n                "data-droy-workspace-row": group.workspaceId || "ungrouped",\n                "data-droy-workspace-kind": group.droyWorkspaceKind,'));
   source = replaceFunction(source, 'SessionNodeItem', text => {
     // A keyboard/back event changes the last input, not the mounted phone layout.
     text = replaceOnce(text, 'const row = node;', 'const row = node;\n\t\t\tconst touch = document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined";');
@@ -475,11 +505,19 @@ export function patchWorkspace(source) {
 
 export function patchConversation(source) {
   if (source.includes('data-droy-composer-add')) throw new Error('Mobile UI patch anchor: conversation already adapted');
+  // Lexical commits the saved DOM selection during setRootElement while editable,
+  // which can implicitly reopen Android IME without calling HTMLElement.focus.
+  // Keep attach read-only; this component's next layout effect restores the real
+  // editable prop before paint. The pinned composer has no editable listeners or
+  // Lexical slots that would turn the temporary flag into a business-side update.
+  source = replaceFunction(source, 'ComposerContentEditable', text => replaceOnce(text,
+    'if (editor === null || el === null) return;\n\t\t\t\teditor.setRootElement(el);',
+    'if (editor === null || el === null) return;\n\t\t\t\tif (document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined") editor.setEditable(false);\n\t\t\t\teditor.setRootElement(el);'));
   source = replaceOnce(source, 'className: ContextMeter_module_css_default.root,',
     'className: ContextMeter_module_css_default.root,\n\t\t\t\t"data-droy-context-meter": true,');
   source = replaceOnce(source, 'className: clsx(ConversationRoot_module_css_default.composerStack, hero && ConversationRoot_module_css_default.composerHero),',
     'className: clsx(ConversationRoot_module_css_default.composerStack, hero && ConversationRoot_module_css_default.composerHero),\n\t\t\t\t"data-droy-composer-hero": hero || void 0,');
-  // Large fonts and landscape can make the whole hero taller than the IME's
+  // Large fonts can make the whole hero taller than the IME's
   // remaining viewport. Reuse its resize observer to reveal the focused input.
   source = replaceOnce(source, 'scroller.style.setProperty("--dsh-conversation-viewport-height", `${scroller.clientHeight}px`);',
     `scroller.style.setProperty("--dsh-conversation-viewport-height", \`\${scroller.clientHeight}px\`);
@@ -558,8 +596,10 @@ export function patchConversation(source) {
 			}, []);
 			(0, react.useEffect)(() => { if (pickerOpen) window.DroyTouch?.menuOpened?.("workspace-picker"); }, [pickerOpen]);`);
   source = replaceOnce(source, 'setPickerOpen(false);\n\t\t\t\t\t\t\tsetPendingWorkspaceId(workspaceId);', 'setPickerOpen(false);\n\t\t\t\t\t\t\tif (workspaceId === (pendingWorkspaceId ?? sessionWorkspace?.workspaceId)) return;\n\t\t\t\t\t\t\tsetPendingWorkspaceId(workspaceId);');
+  // A mounted mobile view is navigation, even after hardware-keyboard or mouse
+  // events changed the last input modality. Only explicit composer intent opens IME.
   source = replaceOnce(source, 'if (locked || editor === null) return;\n\t\t\t\tfocusDraftEditor(editor, revealSelection);',
-    'if (locked || editor === null || isDroyTouchInteraction()) return;\n\t\t\t\tfocusDraftEditor(editor, revealSelection);');
+    'if (locked || editor === null || document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined") return;\n\t\t\t\tfocusDraftEditor(editor, revealSelection);');
   source = replaceOnce(source, `if (editor !== null) focusDraftEditor(editor, revealSelection);
 				toggleCommandMenu?.(keyboard.caretSpan());`, `if (editor !== null && !isDroyTouchInteraction()) focusDraftEditor(editor, revealSelection);
 				toggleCommandMenu?.(keyboard.caretSpan());`);
@@ -647,10 +687,23 @@ export function patchInputTrigger(source) {
 
 export function patchSidebar(source) {
   if (source.includes('data-droy-drawer-close')) throw new Error('Mobile UI patch anchor: sidebar already adapted');
-  source = replaceOnce(source, 'className: clsx(SidebarRoot_module_css_default.iconButton, SidebarRoot_module_css_default.toggle),',
-    'className: clsx(SidebarRoot_module_css_default.iconButton, SidebarRoot_module_css_default.toggle),\n\t\t\t\t\t"data-droy-drawer-close": true,');
-  return replaceOnce(source, 'className: SidebarRoot_module_css_default.logoRow,',
-    'className: SidebarRoot_module_css_default.logoRow,\n\t\t\t\t\t\t"data-droy-drawer-header": true,');
+  source = replaceFunction(source, 'SidebarRoot', text => {
+    text = replaceOnce(text, 'const panels = usePanels((snapshot) => snapshot);', `const mobile = document.documentElement.hasAttribute("data-droy-mobile") || typeof window.DroyNative !== "undefined";
+            const droyCopy = {zh:{title:"对话与空间",back:"返回任务"},en:{title:"Conversations and spaces",back:"Back to Tasks"}}[(document.documentElement.lang || "zh").startsWith("zh") ? "zh" : "en"];
+            const panels = usePanels((snapshot) => snapshot);`);
+    text = replaceOnce(text, 'darwinDesktop && (0, react_jsx_runtime.jsx)("div", {', '!mobile && darwinDesktop && (0, react_jsx_runtime.jsx)("div", {');
+    text = replaceOnce(text, '(0, react_jsx_runtime.jsxs)("div", {\n\t\t\t\t\t\tclassName: SidebarRoot_module_css_default.logoRow,', `mobile ? (0, react_jsx_runtime.jsxs)("header", {
+                        className:"droy-conversations-header", "data-droy-drawer-header":true,
+                        children:[(0, react_jsx_runtime.jsx)("button", {type:"button", "data-droy-drawer-close":true,
+                            "aria-label":droyCopy.back, onClick:toggleSidebar,
+                            children:(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconChevronLeftOutlineRegular,{size:24,"aria-hidden":true})}),
+                            (0, react_jsx_runtime.jsx)("strong",{children:droyCopy.title}),
+                            (0, react_jsx_runtime.jsx)("span",{"aria-hidden":true})]
+                    }) : (0, react_jsx_runtime.jsxs)("div", {
+                        className: SidebarRoot_module_css_default.logoRow,`);
+    return text;
+  });
+  return source;
 }
 
 export function patchSidebarRight(source) {

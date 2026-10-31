@@ -1,6 +1,9 @@
 import { cp, lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { resolveBuiltinPackage } from './versions.mjs';
+const { parseDocument, isMap, isSeq } = createRequire(resolveBuiltinPackage('yaml'))('yaml');
 
 const bundles = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@droyagent/mobile'];
 const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
@@ -137,6 +140,32 @@ async function bindBundledPackage(profile, manifest, runtime, name) {
   }
 }
 
+// Run before the engine loads persisted overrides. Local session persistence is unrelated.
+async function disableSessionLogUpload(path) {
+  const text = await readFile(path, 'utf8');
+  const document = parseDocument(text, { customTags: [{ tag: 'tag:yaml.org,2002:js', resolve: value => value }] });
+  if (document.errors.length) throw new Error('Cannot read mobile profile overrides');
+  let changed = false;
+  function visit(node) {
+    if (isSeq(node)) { for (const item of node.items) visit(item); return; }
+    if (!isMap(node)) return;
+    if (node.get('id') === 'session-log-deepseek') {
+      const config = node.get('config', true);
+      if (config !== undefined && !isMap(config)) throw new Error('Session log upload override must be a mapping');
+      if (!config || config.get('enabled') !== false) {
+        node.setIn(['config', 'enabled'], false); changed = true;
+      }
+    }
+    for (const pair of node.items) visit(pair.value);
+  }
+  visit(document.contents);
+  if (!changed) return;
+  const staged = path + '-' + randomUUID();
+  await writeFile(staged, String(document), { flag: 'wx', mode: 0o600 });
+  try { await rename(staged, path); }
+  finally { await rm(staged, { force: true }); }
+}
+
 export async function prepareMobileProfile({ home, runtime }) {
   if (!home || !runtime) throw new Error('Droy profile requires its home and runtime directories');
   const profile = join(resolve(home), 'profiles', 'mobile');
@@ -150,6 +179,7 @@ export async function prepareMobileProfile({ home, runtime }) {
   // explicit link dependency also prevents pnpm from pruning it on installs.
   for (const name of bundledPackages) await bindBundledPackage(profile, manifest, runtime, name);
   await createOnce(join(profile, 'cordis.patch.yml'), '[]\n');
+  await disableSessionLogUpload(join(profile, 'cordis.patch.yml'));
   await createOnce(join(profile, 'pnpm-workspace.yaml'), workspace);
   await mkdir(join(resolve(home), 'workspace'), { recursive: true, mode: 0o700 });
   return profile;

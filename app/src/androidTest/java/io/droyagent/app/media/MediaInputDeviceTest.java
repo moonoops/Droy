@@ -196,6 +196,28 @@ public final class MediaInputDeviceTest {
         assertNull(failure[0]);
     }
 
+    @Test public void companionImportRetainsItsOwnerAndWorkCannotConsumeOrRebindIt() throws Exception {
+        String id = UUID.randomUUID().toString();
+        Uri image = picture();
+        try {
+            JSONObject result = store.importUrisForOperation(id, "album", "im:kaka", List.of(image), "", true, 10, "companion");
+            assertEquals("companion", result.getString("consumer"));
+            JSONObject restored = find(new MediaInputStore(context).list(), id);
+            assertEquals("companion", restored.getString("consumer"));
+            assertEquals("im:kaka", restored.getString("targetSessionId"));
+            assertThrows(java.io.IOException.class, () -> store.bind(id, "fixture-work", null));
+            assertThrows(java.io.IOException.class, () -> store.removeItems(id, new JSONArray()));
+            assertThrows(java.io.IOException.class, () -> store.complete(id));
+            assertThrows(java.io.IOException.class, () -> store.bind(id, "im:maimai", null, null, null, "companion"));
+            assertThrows(java.io.IOException.class, () -> store.importUrisForOperation(id, "album", "im:maimai", List.of(image), "", true, 10, "companion"));
+            assertEquals("im:kaka", find(store.list(), id).getString("targetSessionId"));
+            store.bind(id, "im:kaka", true, null, null, "companion");
+            assertTrue(find(store.list(), id).getBoolean("textApplied"));
+        } finally {
+            if (new File(store.root(), id + "/manifest.json").isFile()) store.complete(id, "companion");
+        }
+    }
+
     private Uri picture() throws Exception {
         ContentValues values = new ContentValues();
         values.put(MediaStore.Images.Media.DISPLAY_NAME, "fixture-" + UUID.randomUUID() + ".png");

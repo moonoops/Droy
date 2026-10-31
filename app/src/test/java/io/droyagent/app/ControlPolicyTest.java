@@ -5,6 +5,20 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.Assert.*;
 
 public class ControlPolicyTest {
+    @Test public void cancelledWaitCannotUnlockTheDeviceBeforeItsActualCallbackCompletes() {
+        ControlPolicy policy = new ControlPolicy(); policy.enable();
+        ControlPolicy.Ticket ticket = policy.begin("task", "old");
+        java.util.concurrent.CompletableFuture<Void> actual = new java.util.concurrent.CompletableFuture<>();
+        ticket.track("main_callback", "callback", actual); policy.finish(ticket); policy.end("task");
+        assertThrows(IllegalStateException.class, () -> policy.begin("other-task", "new"));
+        actual.complete(null);
+        assertNotNull(policy.begin("other-task", "new"));
+    }
+    @Test public void knownTaskCannotBypassItsNativeScopeUsingAnUnscopedRequest() {
+        NativeTaskControl scopes = new NativeTaskControl(); scopes.open("task", "run");
+        ControlPolicy policy = new ControlPolicy(() -> 0, scopes); policy.enable();
+        assertEquals("TASK_SCOPE_REQUIRED", assertThrows(NativeTaskControl.Rejected.class, () -> policy.begin("task", "call")).code);
+    }
     @Test public void cancellationBeforeRegistrationRejectsLateRequestEvenAfterReenable() {
         ControlPolicy policy = new ControlPolicy(); policy.enable();
         policy.cancel("task", "late"); policy.end("task"); policy.enable();

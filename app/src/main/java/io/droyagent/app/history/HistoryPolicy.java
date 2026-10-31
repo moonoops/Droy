@@ -16,14 +16,14 @@ public final class HistoryPolicy {
     public static final long LOCATION_RETENTION_MS = 7L * 24 * 60 * 60 * 1000;
     public static final long ACTIVITY_RETENTION_MS = 30L * 24 * 60 * 60 * 1000;
     private static final Set<String> FIELDS = Set.of("enabled", "paused", "activityEnabled", "pageTextEnabled",
-        "deviceStateEnabled", "locationEnabled", "allowedPackages", "excludedPackages");
-    public final boolean enabled, paused, activityEnabled, pageTextEnabled, deviceStateEnabled, locationEnabled;
+        "deviceStateEnabled", "locationEnabled", "allowedPackages", "excludedPackages", "allApplications");
+    public final boolean enabled, paused, activityEnabled, pageTextEnabled, deviceStateEnabled, locationEnabled, allApplications;
     public final Set<String> allowedPackages, excludedPackages;
 
     private HistoryPolicy(JSONObject value) throws JSONException {
         for (java.util.Iterator<String> keys = value.keys(); keys.hasNext();)
             if (!FIELDS.contains(keys.next())) throw new IllegalArgumentException("HISTORY_INVALID_SETTING");
-        enabled = bool(value, "enabled"); paused = bool(value, "paused");
+        enabled = bool(value, "enabled"); paused = bool(value, "paused"); allApplications = bool(value, "allApplications");
         activityEnabled = bool(value, "activityEnabled"); pageTextEnabled = bool(value, "pageTextEnabled");
         deviceStateEnabled = bool(value, "deviceStateEnabled"); locationEnabled = bool(value, "locationEnabled");
         allowedPackages = packages(value, "allowedPackages"); excludedPackages = packages(value, "excludedPackages");
@@ -38,17 +38,17 @@ public final class HistoryPolicy {
         }
         return parse(combined);
     }
-    public boolean wantsCapture() { return !paused && (locationEnabled || enabled && (activityEnabled || pageTextEnabled || deviceStateEnabled)); }
+    public boolean wantsCapture() { return !paused && enabled && (locationEnabled || activityEnabled || pageTextEnabled || deviceStateEnabled); }
     public boolean expandsConsentFrom(HistoryPolicy previous) {
         return wantsCapture() && ((enabled && !previous.enabled || previous.paused) || activityEnabled && !previous.activityEnabled
             || pageTextEnabled && !previous.pageTextEnabled || deviceStateEnabled && !previous.deviceStateEnabled
-            || locationEnabled && !previous.locationEnabled || !previous.allowedPackages.containsAll(allowedPackages)
+            || allApplications && !previous.allApplications || locationEnabled && !previous.locationEnabled || !previous.allowedPackages.containsAll(allowedPackages)
             || !excludedPackages.containsAll(previous.excludedPackages));
     }
     public boolean allowsPackage(String name, String ownPackage) {
         return name != null && !name.equals(ownPackage) && !name.equals("com.android.systemui")
             && !name.equals("android") && !name.contains("permissioncontroller")
-            && allowedPackages.contains(name) && !excludedPackages.contains(name);
+            && (allApplications || allowedPackages.contains(name) && !excludedPackages.contains(name));
     }
     public boolean allowsPage(String name, String ownPackage, boolean unlocked, boolean inputMethod, boolean browser) {
         // Browser private mode/origin cannot be reliably established from a generic window event.
@@ -57,7 +57,7 @@ public final class HistoryPolicy {
     public JSONObject toJson() throws JSONException {
         return new JSONObject().put("enabled", enabled).put("paused", paused).put("activityEnabled", activityEnabled)
             .put("pageTextEnabled", pageTextEnabled).put("deviceStateEnabled", deviceStateEnabled)
-            .put("locationEnabled", locationEnabled).put("allowedPackages", new JSONArray(allowedPackages))
+            .put("locationEnabled", locationEnabled).put("allApplications", allApplications).put("allowedPackages", new JSONArray(allowedPackages))
             .put("excludedPackages", new JSONArray(excludedPackages));
     }
     private static boolean bool(JSONObject value, String key) throws JSONException {

@@ -29,6 +29,33 @@ public final class MediaInputPolicy {
         return value;
     }
 
+    public static String consumer(String value) {
+        if (value == null) return "work";
+        if (!value.equals("work") && !value.equals("companion") && !value.equals("profile"))
+            throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("附件入口无效", "Invalid attachment destination"));
+        return value;
+    }
+
+    /** The IM identity is explicit so a work import can never claim a partner's draft. */
+    public static String targetSession(String consumer, String value) {
+        String destination = consumer(consumer);
+        if (destination.equals("profile")) {
+            if (!"user".equals(value))
+                throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("个人信息附件目标无效", "Invalid personal information attachment destination"));
+            return value;
+        }
+        if (destination.equals("companion")) {
+            if (value == null || !value.startsWith("im:") || !io.droyagent.app.CompanionIdentity.isValid(value.substring(3)))
+                throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("目标伙伴无效", "Invalid target companion"));
+            return value;
+        }
+        if (value == null) return null;
+        session(value);
+        if (value.startsWith("im:"))
+            throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("伙伴附件需要明确的聊天入口", "Companion attachments require an explicit chat destination"));
+        return value;
+    }
+
     public static String draftHash(String value) {
         if (value == null || !value.matches("[a-f0-9]{64}")) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("草稿校验值无效", "Invalid draft checksum"));
         return value;

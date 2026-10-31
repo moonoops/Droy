@@ -10,6 +10,7 @@ import { PET_ACTION_GROUPS, inspectActionAtlas, actionPrompt, brandLogoPrompt, v
 import { encodePng, decodePng } from '../png.mjs';
 
 const input = { name: '测试猫', description: '纯黑黄色眼睛的小猫，左耳戴一个蓝色耳环', personality: '温柔，话少，有一点傲娇，关心我' };
+const builtInRoot = new URL('../../../app/src/main/assets/pet/', import.meta.url);
 function png(rows = 1, still = false, opaque = false) {
   const width = 256, height = Math.max(256, rows * 64), channels = 4;
   const pixels = Buffer.alloc(width * height * 4);
@@ -47,7 +48,7 @@ async function fixture(t, generator = mockGenerator(), personaGenerator = mockPe
   const home = await mkdtemp(join(tmpdir(), 'droy-pet-generation-'));
   const defaultLogoFile = join(home, 'default-brand-logo.png');
   await writeFile(defaultLogoFile, png());
-  const service = createPetCreationService({ home, generator, personaGenerator, defaultLogoFile });
+  const service = createPetCreationService({ home, generator, personaGenerator, defaultLogoFile, builtInRoot });
   t.after(async () => { service.dispose(); await service.waitForIdle(); await rm(home, { recursive: true, force: true }); });
   return { home, service, generator };
 }
@@ -264,6 +265,44 @@ test('concurrent creation is refused while the first model request remains activ
   release(); await service.waitForIdle();
 });
 
+test('pendingWork observes the same queued creation and generation Promises through final draft persistence without cancellation', async t => {
+  const available = Promise.withResolvers(), entered = Promise.withResolvers(), generating = Promise.withResolvers(), image = Promise.withResolvers();
+  const generator = mockGenerator(), original = generator.availability; let checks = 0, signal;
+  generator.availability = async () => { if (++checks === 1) { entered.resolve(); await available.promise; } return original(); };
+  generator.generate = async value => { signal = value.signal; generating.resolve(); await image.promise; return png(); };
+  const { service, home } = await fixture(t, generator);
+  assert.deepEqual(service.pendingWork(), []);
+  const caller = service.create(input); await entered.promise;
+  const queued = service.pendingWork(); assert.ok(Object.isFrozen(queued)); assert.deepEqual(queued, [caller]);
+  assert.equal(service.pendingWork()[0], caller);
+  let idle = false; const waiting = service.waitForIdle().then(() => { idle = true; });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(idle, false);
+  available.resolve(); const receipt = await caller; await generating.promise;
+  assert.match(receipt.status, /^generating_/);
+  const pending = service.pendingWork(); assert.equal(pending.length, 1); assert.notEqual(pending[0], caller);
+  assert.equal(service.pendingWork()[0], pending[0]); assert.equal(signal.aborted, false); assert.equal(idle, false);
+  image.resolve(); await waiting;
+  assert.deepEqual(service.pendingWork(), []);
+  const saved = JSON.parse(await readFile(join(home, 'pets', receipt.id, 'draft.json'), 'utf8'));
+  assert.equal(saved.status, 'reference_ready'); assert.equal(saved.referenceReady, true);
+  assert.equal(signal.aborted, false);
+});
+
+test('failed generation and rejected creation remove their real handles after the existing durable failure path completes', async t => {
+  const generating = Promise.withResolvers(), image = Promise.withResolvers(), generator = mockGenerator();
+  generator.generate = async () => { generating.resolve(); return image.promise; };
+  const { service, home } = await fixture(t, generator);
+  const receipt = await service.create(input); await generating.promise;
+  const pending = service.pendingWork()[0]; assert.ok(pending instanceof Promise);
+  image.reject(new Error('synthetic-private-image-failure')); await pending; await service.waitForIdle();
+  assert.deepEqual(service.pendingWork(), []);
+  const saved = JSON.parse(await readFile(join(home, 'pets', receipt.id, 'draft.json'), 'utf8'));
+  assert.equal(saved.status, 'error'); assert.equal(JSON.stringify(saved).includes('synthetic-private-image-failure'), false);
+  const invalid = service.create({ ...input, description: '' });
+  assert.equal(service.pendingWork()[0], invalid); await assert.rejects(invalid); await service.waitForIdle();
+  assert.deepEqual(service.pendingWork(), []);
+});
+
 test('OpenAI adapter binds credentials to official origin, asks for alpha, and uses edit reference', async () => {
   const calls = [];
   const adapter = createOpenAiPetGenerator({ resolveKey: async () => 'fictional-image-key', env: {}, fetchImpl: async (url, options) => {
@@ -299,7 +338,7 @@ test('all creation routes require authenticated local session before accessing d
   const home = await mkdtemp(join(tmpdir(), 'droy-pet-routes-')), routes = new Map();
   t.after(() => rm(home, { recursive: true, force: true }));
   const ctx = { webServer: { register(route) { routes.set(route.path, route.handler); } }, effect() {}, logger: { warn() {} } };
-  installPetGeneration(ctx, { home, generator: mockGenerator({ available: false }), personaGenerator: mockPersonaGenerator() });
+  installPetGeneration(ctx, { home, generator: mockGenerator({ available: false }), personaGenerator: mockPersonaGenerator(), builtInRoot });
   for (const [url, handler] of routes) {
     const req = Readable.from([]); Object.assign(req, { url, method: url.endsWith('create') ? 'POST' : 'GET', headers: { host: 'evil.example' } });
     let status, result;
@@ -316,7 +355,7 @@ test('logo route serves only authenticated local PNGs with no-store and rejects 
   const ctx = { webServer: { register(route) { routes.set(route.path, route.handler); } }, effect() {}, logger: { warn() {} } };
   const generator = mockGenerator(), original = generator.generate;
   generator.generate = args => args.prompt.includes('mobile app and in-app brand logo') ? png(2) : original(args);
-  const service = installPetGeneration(ctx, { home, generator, personaGenerator: mockPersonaGenerator(), defaultLogoFile });
+  const service = installPetGeneration(ctx, { home, generator, personaGenerator: mockPersonaGenerator(), defaultLogoFile, builtInRoot });
   t.after(async () => {
     service.dispose(); await service.waitForIdle(); await rm(home, { recursive: true, force: true });
     if (previousToken === undefined) delete process.env.DROY_WEB_TOKEN; else process.env.DROY_WEB_TOKEN = previousToken;

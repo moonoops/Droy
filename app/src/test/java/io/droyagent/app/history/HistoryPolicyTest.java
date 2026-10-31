@@ -12,14 +12,15 @@ public class HistoryPolicyTest {
         assertFalse(policy.wantsCapture()); assertFalse(policy.locationEnabled);
         assertFalse(policy.pageTextEnabled); assertTrue(policy.allowedPackages.isEmpty());
     }
-    @Test public void activityRequiresItsSwitchButLocationIsIndependent() throws Exception {
+    @Test public void masterSwitchControlsActivityAndLocation() throws Exception {
         HistoryPolicy policy = HistoryPolicy.defaults().patch(new JSONObject().put("activityEnabled", true));
         assertFalse(policy.wantsCapture());
         policy = policy.patch(new JSONObject().put("enabled", true)); assertTrue(policy.wantsCapture());
         assertFalse(policy.patch(new JSONObject().put("paused", true)).wantsCapture());
         assertFalse(policy.patch(new JSONObject().put("enabled", false)).wantsCapture());
         HistoryPolicy locationOnly = HistoryPolicy.defaults().patch(new JSONObject().put("locationEnabled", true));
-        assertTrue(locationOnly.wantsCapture()); assertFalse(locationOnly.enabled);
+        assertFalse(locationOnly.wantsCapture()); assertFalse(locationOnly.enabled);
+        assertTrue(locationOnly.patch(new JSONObject().put("enabled", true)).wantsCapture());
         assertFalse(locationOnly.patch(new JSONObject().put("paused", true)).wantsCapture());
     }
     @Test public void exclusionsWinAndBrowserBodyCannotBeInferredSafe() throws Exception {
@@ -47,6 +48,18 @@ public class HistoryPolicyTest {
         assertFalse(policy.patch(new JSONObject().put("paused", true)).expandsConsentFrom(policy));
         assertTrue(policy.patch(new JSONObject().put("pageTextEnabled", true)).expandsConsentFrom(policy));
         assertTrue(policy.patch(new JSONObject().put("allowedPackages", new JSONArray().put("example.app"))).expandsConsentFrom(policy));
+    }
+    @Test public void allApplicationsRequiresExplicitExpansionAndKeepsSensitiveExclusions() throws Exception {
+        HistoryPolicy old = HistoryPolicy.defaults().patch(new JSONObject().put("enabled", true)
+            .put("pageTextEnabled", true).put("allowedPackages", new JSONArray().put("example.allowed")));
+        assertFalse(old.allowsPackage("example.new", "io.droyagent.app.dev"));
+        HistoryPolicy all = old.patch(new JSONObject().put("allApplications", true));
+        assertTrue(all.expandsConsentFrom(old));
+        assertTrue(all.allowsPackage("example.new", "io.droyagent.app.dev"));
+        assertFalse(all.allowsPackage("io.droyagent.app.dev", "io.droyagent.app.dev"));
+        assertFalse(all.allowsPage("example.new", "io.droyagent.app.dev", true, true, false));
+        assertFalse(all.allowsPage("example.new", "io.droyagent.app.dev", true, false, true));
+        assertTrue(HistoryPolicy.parse(all.toJson()).allApplications);
     }
     @Test public void utf8LimitKeepsChineseAndEmojiBoundaries() {
         String input = "早饭🐈记录";

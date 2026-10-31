@@ -1,0 +1,30 @@
+<resources>
+    <string name="pet_overlay_idle_description">Droy 宠物。单击互动，连续轻点查看状态，拖动调整位置。</string>
+    <string name="pet_overlay_working_description">Droy 宠物。单击查看当前任务操作，拖动调整位置。</string>
+    <string name="pet_overlay_question_description">Droy 宠物。单击展开或收起问题，拖动调整位置，已填回答会保留。</string>
+    <string name="pet_overlay_open_panel">查看 Droy 消息</string>
+    <string name="pet_overlay_no_work">Droy暂时没有工作</string>
+    <string name="pet_overlay_open_app">打开 Droy</string>
+    <string name="pet_overlay_open_full_task">打开完整任务</string>
+    <string name="pet_overlay_working">Droy正在处理任务</string>
+    <string name="pet_overlay_pausing">正在暂停任务…</string>
+    <string name="pet_overlay_paused">任务已暂停，等你继续</string>
+    <string name="pet_overlay_resuming">正在继续任务…</string>
+    <string name="pet_overlay_stopping">正在停止任务…</string>
+    <string name="pet_overlay_pause">暂停任务</string>
+    <string name="pet_overlay_resume">继续任务</string>
+    <string name="pet_overlay_stop">停止任务</string>
+    <string name="pet_overlay_question_needed">有问题等你回应</string>
+    <string name="pet_overlay_question_multiple">可多选，也可补充回答</string>
+    <string name="pet_overlay_question_single">可单选，也可填写回答</string>
+    <string name="pet_overlay_question_multiple_choices">可多选</string>
+    <string name="pet_overlay_question_single_choice">请选择一项</string>
+    <string name="pet_overlay_question_custom">填写你的回答</string>
+    <string name="pet_overlay_custom_hint">补充你的想法…</string>
+    <string name="pet_overlay_answer_hint">填写你的回答…</string>
+    <string name="pet_overlay_custom_description">%1$s，手动填写回答</string>
+    <string name="pet_overlay_leave_unanswered">跳过</string>
+    <string name="pet_overlay_leave_unanswered_description">本次提问留空并继续</string>
+    <string name="pet_overlay_send_answer">发送回答</string>
+    <string name="pet_overlay_answer_incomplete">请回答每个问题，或跳过本次提问。</string>
+</resources>

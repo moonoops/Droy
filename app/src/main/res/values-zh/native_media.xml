@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_media_busy">请先完成当前选择</string>
+    <string name="native_media_paused">操作已暂停，请在权限设置中恢复</string>
+    <string name="native_media_picker_failed">无法打开文件选择器</string>
+    <string name="native_media_too_many">每条消息最多添加10个附件</string>
+    <string name="native_media_too_large">单个文件不能超过20 MiB</string>
+    <string name="native_media_read_failed">无法读取此文件</string>
+    <string name="native_media_upload_failed">上传失败</string>
+    <string name="native_media_owner_unavailable">原会话已不可用</string>
+    <string name="native_media_open_failed">无法打开此文件</string>
+    <string name="native_media_no_viewer">没有可打开此文件的应用</string>
+    <string name="native_media_playback_failed">无法播放此音频</string>
+    <string name="native_media_interrupted">上传已中断，请重试</string>
+    <string name="native_media_storage_failed">无法保存媒体状态</string>
+    <string name="native_media_unmatched_result">无法恢复此次选择</string>
+    <string name="native_media_uploading">正在上传…</string>
+    <string name="native_media_opening">正在打开…</string>
+    <string name="native_media_preparing_audio">正在准备音频…</string>
+    <string name="native_media_playing">正在播放音频</string>
+    <string name="native_media_stop_playback">停止播放</string>
+    <string name="native_media_retry">重试</string>
+    <string name="native_media_cancel">取消</string>
+    <string name="native_media_dismiss">关闭</string>
+    <string name="native_media_importing">正在导入…</string>
+    <string name="native_media_cleanup_failed">部分本地附件未能清理</string>
+    <string name="native_share_text_too_long">分享文字最多支持 100000 个字符</string>
+    <string name="native_share_title">发送预览</string>
+    <string name="native_share_destination">发送到</string>
+    <string name="native_share_workbench">任务</string>
+    <string name="native_share_message">消息</string>
+    <string name="native_share_send">发送</string>
+    <string name="native_share_sent">已发送</string>
+    <string name="native_share_image">图片</string>
+    <string name="native_share_file">文件</string>
+    <string name="native_share_remove_attachment">移除附件</string>
+    <string name="native_share_creation_unconfirmed">会话创建尚未确认。请重新核对，或保留内容新建草稿。</string>
+    <string name="native_share_batch_too_large">这些附件超过消息上限</string>
+    <string name="native_share_busy">请先处理待确认的发送</string>
+    <string name="native_share_interrupted">发送已中断。重试将核对同一次发送。</string>
+    <string name="native_share_unavailable">分享内容不可用</string>
+    <string name="native_share_failed">发送结果未确认，请重试</string>
+    <string name="native_share_inbox_full">待处理分享过多，请先处理已有分享</string>
+</resources>

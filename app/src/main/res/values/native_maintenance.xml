@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_maintenance_waiting">Waiting for tasks to finish before deleting</string>
+    <string name="native_maintenance_cleaning">Deleting companion</string>
+    <string name="native_maintenance_failed">Deletion could not finish</string>
+</resources>

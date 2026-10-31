@@ -4,6 +4,46 @@ import { createExecutionProgress } from '../execution-progress.mjs';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test('durable controls retain their revision over SDK idle/cancel, with child question identity separate from control owner', async () => {
+  const sent = [], progress = createExecutionProgress(async row => sent.push(row), () => assert.fail());
+  const child = { id: 'child-task' };
+  progress.control(child.id, { taskId: 'parent-task', phase: 'pausing', active: true, summary: 'Pausing.', controlRevision: 1 });
+  progress.sessionEvent(child, { type: 'turn/end', data: { reason: { kind: 'aborted' } } });
+  progress.status(child, 'idle'); await settle();
+  assert.equal(sent.at(-1).phase, 'pausing'); assert.equal(sent.at(-1).active, true);
+  assert.equal(sent.at(-1).taskId, child.id); assert.equal(sent.at(-1).controlTaskId, 'parent-task');
+  progress.control(child.id, { taskId: 'parent-task', phase: 'paused', active: true, summary: 'Paused.', controlRevision: 2 });
+  progress.sessionEvent(child, { type: 'step/start', data: {} }); await settle();
+  assert.equal(sent.at(-1).phase, 'paused'); assert.equal(sent.at(-1).controlRevision, 2);
+  progress.control(child.id, { taskId: 'parent-task', phase: 'pausing', active: true, summary: 'Old.', controlRevision: 1 }); await settle();
+  assert.equal(sent.at(-1).phase, 'paused');
+  progress.control(child.id, { taskId: 'parent-task', phase: 'resuming', active: true, summary: 'Checking.', controlRevision: 3 });
+  progress.waiting(child.id, { kind: 'approval', requestId: 'resume-approval', message: 'Confirm read.', options: [], inline: false }); await settle();
+  assert.equal(sent.at(-1).phase, 'resuming');
+  assert.equal(sent.at(-1).pending.kind, 'approval'); assert.equal(sent.at(-1).pending.requestId, 'resume-approval');
+  progress.control(child.id, { taskId: 'parent-task', phase: 'running', active: true, controlRevision: 4 });
+  progress.waiting(child.id, null); await settle();
+  assert.equal(sent.at(-1).phase, 'thinking'); assert.equal(sent.at(-1).controlRevision, 4);
+  assert.equal(sent.at(-1).controlTaskId, 'parent-task');
+  progress.control(child.id, { taskId: 'parent-task', phase: 'stopped', active: false, summary: 'Stopped.', controlRevision: 5 });
+  progress.sessionEvent(child, { type: 'tool/result', data: {} }); await settle();
+  assert.equal(sent.at(-1).phase, 'stopped'); assert.equal(sent.at(-1).active, false);
+  progress.dispose();
+});
+
+test('child history cannot discard a held parent revision and a completed tombstone remains inactive until a new run', async () => {
+  const sent = [], progress = createExecutionProgress(async row => sent.push(row), () => assert.fail());
+  progress.control('child', { taskId: 'child', phase: 'running', active: true, controlRevision: 8 }); await settle();
+  progress.control('child', { taskId: 'parent', phase: 'paused', active: true, summary: 'Paused.', controlRevision: 1 }); await settle();
+  assert.equal(sent.at(-1).phase, 'paused'); assert.equal(sent.at(-1).controlRevision, 1); assert.equal(sent.at(-1).controlTaskId, 'parent');
+  progress.control('child', { taskId: 'parent', phase: 'completed', active: false, summary: 'Ended.', controlRevision: 2 });
+  progress.status({ id: 'child' }, 'idle'); await settle();
+  assert.equal(sent.at(-1).active, false); assert.equal(sent.at(-1).phase, 'completed');
+  progress.control('child', { taskId: 'parent', phase: 'running', active: true, controlRevision: 3 }); await settle();
+  assert.equal(sent.at(-1).phase, 'thinking'); assert.equal(sent.at(-1).controlRevision, 3);
+  progress.dispose();
+});
+
 test('companion activity reflects actual task events without leaking tool arguments', async () => {
   const sent = [], session = { id: 'companion-stage' };
   const progress = createExecutionProgress(async row => sent.push(row), () => assert.fail());
@@ -38,6 +78,7 @@ test('a ten-second thought is not an error and a real retry cancels that announc
   progress.sessionEvent(session, { type: 'step/start', data: {} }); await settle();
   callbacks.at(-1)(); await settle();
   assert.equal(sent.at(-1).activityKind, 'thinking');
+  assert.equal(sent.at(-1).summaryKind, 'slow');
   assert.equal(sent.at(-1).summary, 'Thinking it through. You can stop the task at any time.');
   progress.sessionEvent(session, { type: 'step/start', data: {} });
   progress.sessionEvent(session, { type: 'llm/retry', data: {} }); await settle();
@@ -45,6 +86,7 @@ test('a ten-second thought is not an error and a real retry cancels that announc
   callbacks.at(-1)(); await settle();
   assert.equal(sent.at(-1), retry);
   assert.equal(retry.activityKind, undefined);
+  assert.equal(retry.summaryKind, 'error');
   assert.match(retry.summary, /request failed/);
   locale = 'zh';
   progress.sessionEvent(session, { type: 'tool/call', data: { name: 'android_observe' } });
@@ -123,7 +165,7 @@ test('existing session events report execution stages and retain cancellation as
   progress.removed(session);
   await settle();
   assert.deepEqual(sent.map(row => row.phase), ['thinking', 'executing', 'verifying', 'thinking', 'interrupted']);
-  assert.deepEqual(sent.at(-1), { taskId: session.id, phase: 'interrupted', active: false, summary: '本轮执行已停止，点我查看任务', pending: null });
+  assert.deepEqual(sent.at(-1), { taskId: session.id, phase: 'interrupted', active: false, summary: '本轮执行已停止，点我查看任务', pending: null, controlTaskId: session.id, controlRevision: 0 });
   assert.equal(JSON.stringify(sent).includes('private'), false);
 });
 
@@ -312,9 +354,89 @@ test('a real request retry clears stale action copy without a model or inferred 
   progress.publicSummary(session.id, '正在打开应用', 'executing');
   progress.sessionEvent(session, { type: 'llm/retry', data: { failure: { message: 'private provider detail' } } }); await settle();
   assert.equal(sent.at(-1).summary, '模型请求失败，正在等待重试，可停止任务');
+  assert.equal(sent.at(-1).summaryKind, 'error');
   assert.equal(sent.at(-1).active, true);
   assert.equal(JSON.stringify(sent).includes('private'), false);
   progress.sessionEvent(session, { type: 'tool/call', data: { name: 'android_observe' } }); await settle();
   assert.equal(sent.at(-1).phase, 'executing');
+  assert.equal(sent.at(-1).summaryKind, 'working');
+  progress.dispose();
+});
+
+test('only an actual model retry marks an error and pending input keeps priority in both languages', async () => {
+  for (const locale of ['zh', 'en']) {
+    const sent = [], session = { id: `retry-kind-${locale}` };
+    const progress = createExecutionProgress(async row => sent.push(row), () => assert.fail(), undefined, () => locale);
+    progress.publicSummary(session.id, '用户原文包含错误两个字', 'thinking'); await settle();
+    assert.equal(sent.at(-1).summary, '用户原文包含错误两个字');
+    assert.equal(sent.at(-1).summaryKind, undefined);
+    progress.toolFailure(session.id, 'recoverable', { code: 'stale_snapshot' });
+    progress.sessionEvent(session, { type: 'tool/result', data: { message: { toolCallId: 'recoverable', isError: true } } });
+    await settle();
+    assert.equal(sent.at(-1).summaryKind, 'working');
+    progress.sessionEvent(session, { type: 'llm/retry', data: { failure: { message: 'private provider detail' } } });
+    await settle();
+    assert.equal(sent.at(-1).summaryKind, 'error');
+    assert.equal(sent.at(-1).activityKind, undefined);
+    assert.equal(sent.at(-1).summary, locale === 'zh' ? '模型请求失败，正在等待重试，可停止任务'
+      : 'The model request failed. Waiting to retry; you can stop the task.');
+    progress.waiting(session.id, { requestId: 'question', message: '用户原始问题', options: [], inline: false }); await settle();
+    progress.sessionEvent(session, { type: 'llm/retry', data: {} }); await settle();
+    assert.equal(sent.at(-1).phase, 'waiting_input');
+    assert.equal(sent.at(-1).summary, '用户原始问题');
+    assert.equal(sent.at(-1).summaryKind, undefined);
+    assert.equal(sent.at(-1).activityKind, undefined);
+    progress.waiting(session.id, null); await settle();
+    assert.equal(sent.at(-1).summaryKind, 'error');
+    progress.sessionEvent(session, { type: 'turn/end', data: { reason: { kind: 'aborted' } } }); await settle();
+    assert.equal(sent.at(-1).active, false);
+    assert.equal(sent.at(-1).summaryKind, undefined);
+    assert.equal(JSON.stringify(sent).includes('private'), false);
+    progress.dispose();
+  }
+});
+
+test('companion-owned work never publishes task progress through any event or recovery entry', async () => {
+  const sent = [], timers = [];
+  const managed = new Set(['companion-chat', 'companion-work']);
+  const progress = createExecutionProgress(async row => sent.push(row), () => assert.fail(),
+    { setTimeout(callback) { timers.push(callback); return timers.length; }, clearTimeout() {} }, () => 'en', id => !managed.has(id));
+  for (const id of managed) {
+    const session = { id };
+    progress.bind(id, { taskId: id, phase: 'paused', active: true, controlRevision: 1 });
+    progress.control(id, { taskId: id, phase: 'paused', active: true, controlRevision: 1 });
+    progress.status(session, 'running');
+    for (const [type, data] of [
+      ['turn/start', {}], ['step/start', {}], ['llm/retry', {}],
+      ['tool/call', { name: 'companion_reply' }], ['tool/result', { message: { isError: true } }],
+      ['turn/end', { reason: { kind: 'completed' } }],
+    ]) progress.sessionEvent(session, { type, data });
+    progress.publicSummary(id, 'Fictional internal work.', 'thinking');
+    progress.waiting(id, { requestId: 'private-question', message: 'Private question', options: [] });
+    progress.toolFailure(id, 'private-tool', new Error('private'));
+    progress.status(session, 'idle'); progress.removed(session);
+  }
+  await settle();
+  assert.deepEqual(sent, []);
+  assert.deepEqual(timers, []);
+  progress.status({ id: 'user-task' }, 'running'); await settle();
+  assert.equal(sent.length, 1); assert.equal(sent[0].taskId, 'user-task');
+  progress.dispose();
+});
+
+test('late ownership resolution clears queued progress and slow-response callbacks', async () => {
+  const sent = [], callbacks = []; let publicTask = true, release;
+  const progress = createExecutionProgress(row => { sent.push(row); return new Promise(resolve => { release = resolve; }); },
+    () => assert.fail(), { setTimeout(callback) { callbacks.push(callback); return callbacks.length; }, clearTimeout() {} },
+    () => 'en', () => publicTask);
+  const session = { id: 'resolved-companion' };
+  progress.status(session, 'running');
+  progress.sessionEvent(session, { type: 'step/start', data: {} });
+  publicTask = false;
+  callbacks[0]();
+  release(); await settle();
+  assert.equal(sent.length, 1, 'Already sent progress cannot be recalled; no queued stage or timer may follow');
+  progress.control(session.id, { taskId: session.id, phase: 'completed', active: false, controlRevision: 2 });
+  await settle(); assert.equal(sent.length, 1);
   progress.dispose();
 });

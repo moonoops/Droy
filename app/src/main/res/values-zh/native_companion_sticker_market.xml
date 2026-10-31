@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_companion_market_title">图库市场</string>
+    <string name="native_companion_market_entry">浏览图库市场</string>
+    <string name="native_companion_market_entry_scope">联网寻找图包并下载到当前聊天。伙伴也可以自行查找、下载表情。</string>
+    <string name="native_companion_market_save_first">请先保存图包选择，再打开图库市场。</string>
+    <string name="native_companion_market_scope">下载后加入共享素材库，并为%1$s启用。支持 PNG、JPEG、静态 WebP 和 GIF 动图，其他动图格式会跳过。图包名称和描述保留来源原文。</string>
+    <string name="native_companion_market_search_label">图包名称或描述</string>
+    <string name="native_companion_market_search">搜索图库市场</string>
+    <string name="native_companion_market_loading">正在加载图包…</string>
+    <string name="native_companion_market_empty">没有找到匹配的图包。</string>
+    <string name="native_companion_market_install">下载并启用</string>
+    <string name="native_companion_market_installing">正在下载…</string>
+    <string name="native_companion_market_downloaded">已启用</string>
+    <string name="native_companion_market_pack_count">%1$d 张图片</string>
+    <string name="native_companion_market_pack_unknown_count">下载后确认张数</string>
+    <string name="native_companion_market_pack_size">%1$d 张图片 · %2$s</string>
+    <string name="native_companion_market_license">许可：%1$s</string>
+    <string name="native_companion_market_license_unknown">未提供</string>
+    <string name="native_companion_market_installed">已下载并启用%1$s，共%2$d张图片。</string>
+    <string name="native_companion_market_installed_static">已下载并启用%1$s，共%2$d张图片，跳过%3$d张暂不支持的动图。</string>
+    <string name="native_companion_market_retry">重试</string>
+    <string name="native_companion_market_runtime_unavailable">本地服务暂不可用或正在维护，请在服务就绪后重试。</string>
+    <string name="native_companion_market_error_network">无法连接表情来源，请检查网络后重试。</string>
+    <string name="native_companion_market_error_timeout">表情请求超时，请重试。</string>
+    <string name="native_companion_market_error_not_found">这个图包已不可用，请重新搜索图库市场。</string>
+    <string name="native_companion_market_error_checksum">下载的图包校验失败，请重试。</string>
+    <string name="native_companion_market_error_large">图包超出下载或导入限制，请选择较小的图包。</string>
+    <string name="native_companion_market_error_unsupported">这个图包没有支持的图片。支持静态 PNG、JPEG、WebP 和 GIF。</string>
+    <string name="native_companion_market_error_invalid">表情来源返回的图包或数据无效。</string>
+    <string name="native_companion_market_error_generic">表情操作未完成，请重试。</string>
+</resources>

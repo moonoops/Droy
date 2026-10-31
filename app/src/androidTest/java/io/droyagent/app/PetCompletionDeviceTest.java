@@ -41,6 +41,7 @@ public final class PetCompletionDeviceTest {
     private static final String[] PREF_KEYS = {"petEnabled", "petExternalDisplay", "petInternalDisplay", "returnToDroyOnCompletion"};
     private final Map<String, Object> originalPreferences = new HashMap<>();
     private final Map<Field, Object> originalProgress = new HashMap<>();
+    private final Map<String, Long> originalControlRevisions = new HashMap<>();
     private Instrumentation instrumentation;
     private UiAutomation automation;
     private Context context;
@@ -68,10 +69,13 @@ public final class PetCompletionDeviceTest {
         for (String key : PREF_KEYS) if (saved.containsKey(key)) originalPreferences.put(key, saved.get(key));
         preferencesOwned = true;
         synchronized (ToolProgress.class) {
-            for (String name : new String[]{"currentTask", "currentPhase", "summary", "summaryKind", "pending", "active", "startedAt", "activeTasks"}) {
+            for (String name : new String[]{"currentTask", "currentControlTask", "currentPhase", "summary", "summaryKind", "activityKind", "pending", "active", "startedAt", "activeTasks", "controlRevision"}) {
                 Field field = ToolProgress.class.getDeclaredField(name); field.setAccessible(true);
                 originalProgress.put(field, field.get(null));
             }
+            Field revisions = ToolProgress.class.getDeclaredField("controlRevisions"); revisions.setAccessible(true);
+            @SuppressWarnings("unchecked") Map<String, Long> current = (Map<String, Long>)revisions.get(null);
+            originalControlRevisions.putAll(current);
         }
         ToolProgress.interruptAll();
         assertTrue(preferences.edit().putBoolean("petEnabled", false).putString("petExternalDisplay", "off").putString("petInternalDisplay", "off").remove("returnToDroyOnCompletion").commit());
@@ -116,6 +120,9 @@ public final class PetCompletionDeviceTest {
             }
             synchronized (ToolProgress.class) {
                 for (Map.Entry<Field, Object> entry : originalProgress.entrySet()) entry.getKey().set(null, entry.getValue());
+                Field revisions = ToolProgress.class.getDeclaredField("controlRevisions"); revisions.setAccessible(true);
+                @SuppressWarnings("unchecked") Map<String, Long> current = (Map<String, Long>)revisions.get(null);
+                current.clear(); current.putAll(originalControlRevisions);
             }
             if (originalHistory != null) assertHistoryPreserved(historySnapshot());
         }
@@ -124,11 +131,18 @@ public final class PetCompletionDeviceTest {
     @Test public void existingTaskReturnsWithPetOffAfterBackgroundGracePeriodAndRespectsSwitch() throws Exception {
         WebView originalWeb = ui.web();
         assertFalse(preferences.getBoolean("petEnabled", true));
-        assertFalse("Missing preference must leave completion in the background", preferences.getBoolean("returnToDroyOnCompletion", false));
+        assertFalse("The fixture must exercise an unsaved completion preference", preferences.contains("returnToDroyOnCompletion"));
         goHomeBeyondGracePeriod();
         postProgress("thinking", true);
         postProgress("completed", false);
-        assertRemainsOutsideDroy("The default completion return interrupted the foreground app");
+        DeviceUi.await("Default completion did not return to Droy", 10000, this::activityFocused);
+        DeviceUi.await("Default completion returned to another conversation", 10000, this::selectedTaskVisible);
+        assertSame("Default completion recreated the existing WebView", originalWeb, ui.web());
+        assertTrue(preferences.edit().putBoolean("returnToDroyOnCompletion", false).commit());
+        goHomeBeyondGracePeriod();
+        postProgress("thinking", true);
+        postProgress("completed", false);
+        assertRemainsOutsideDroy("An explicitly disabled completion return interrupted the foreground app");
         assertTrue(preferences.edit().putBoolean("returnToDroyOnCompletion", true).commit());
         goHomeBeyondGracePeriod();
         postProgress("thinking", true);

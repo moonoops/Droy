@@ -27,7 +27,7 @@ public final class ShareReceiveActivity extends Activity {
         panel.addView(new ProgressBar(this));
         TextView message = new TextView(this); message.setText(io.droyagent.app.NativeLocale.text("正在导入分享内容…", "Importing shared content…")); message.setTextSize(17); message.setPadding(0, 24, 0, 0);
         panel.addView(message); setContentView(panel);
-        // Rotation does not restart a granted stream copy in this small receiving surface.
+        // Window resizing does not restart a granted stream copy in this receiving surface.
         Intent incoming = getIntent();
         new Thread(() -> receive(incoming), "droy-share-receive").start();
     }
@@ -37,7 +37,7 @@ public final class ShareReceiveActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle out) { out.putString("mediaReceiveId", receiveId); super.onSaveInstanceState(out); }
 
     private void receive(Intent incoming) {
-        MediaInputStore store = new MediaInputStore(this);
+        MediaInputStore store = MediaInputStore.nativeDrafts(this);
         JSONObject result;
         try {
             String action = incoming.getAction();
@@ -60,17 +60,26 @@ public final class ShareReceiveActivity extends Activity {
             try { result = store.error("share", null, failure); }
             catch (Exception writeFailure) {
                 runOnUiThread(() -> {
-                    android.widget.Toast.makeText(this, failure.getMessage() == null ? io.droyagent.app.NativeLocale.text("分享导入失败", "Share import failed") : failure.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+                    android.widget.Toast.makeText(this, io.droyagent.app.NativeLocale.text("分享导入失败", "Share import failed"), android.widget.Toast.LENGTH_LONG).show();
                     finish();
                 });
                 return;
             }
         }
         String id = result.optString("id");
+        try {
+            io.droyagent.app.nativeui.media.NativeShareInbox.enqueue(this, id);
+        } catch (Exception failure) {
+            runOnUiThread(() -> {
+                android.widget.Toast.makeText(this, io.droyagent.app.NativeLocale.text("分享暂未导入，请处理待发送内容后重试", "Handle pending shares, then try importing again"), android.widget.Toast.LENGTH_LONG).show();
+                finish();
+            });
+            return;
+        }
         runOnUiThread(() -> {
             if (isDestroyed()) return;
             // Do not forward untrusted flags, components or extras from the sender.
-            Intent chat = new Intent().setClassName(getPackageName(), "io.droyagent.app.MainActivity")
+            Intent chat = new Intent().setClassName(getPackageName(), "io.droyagent.app.NativeAppActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT).putExtra("mediaImportId", id);
             startActivity(chat); finish();
         });

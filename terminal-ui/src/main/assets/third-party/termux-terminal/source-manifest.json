@@ -1,0 +1,274 @@
+{
+  "repository": "https://github.com/termux/termux-app",
+  "tag": "v0.118.3",
+  "commit": "5b657c6adf4304e5198951ce815fe0205dcac29c",
+  "licenseSourceSha256": "a8992ad867b1b4ea442693acb2e1ee829a814758e79a099bd8243a04ae383304",
+  "files": [
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/KeyHandler.java",
+      "localPath": "src/main/java/com/termux/terminal/KeyHandler.java",
+      "upstreamSha256": "543043c05d38450a4a805422b02ac77085bfa727e0cdb088353b7996c0b1856f",
+      "localSha256": "543043c05d38450a4a805422b02ac77085bfa727e0cdb088353b7996c0b1856f",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/Logger.java",
+      "localPath": "src/main/java/com/termux/terminal/Logger.java",
+      "upstreamSha256": "7ab53c7ee035e9658a60525c93613e6b8126db36abc46f8cdbc5fdf49032a04f",
+      "localSha256": "7ab53c7ee035e9658a60525c93613e6b8126db36abc46f8cdbc5fdf49032a04f",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/TerminalBuffer.java",
+      "localPath": "src/main/java/com/termux/terminal/TerminalBuffer.java",
+      "upstreamSha256": "cffbc9f96d861627e2e2680c116da8d69b3927f9c0ffa450f270d5f6fe175f1d",
+      "localSha256": "cffbc9f96d861627e2e2680c116da8d69b3927f9c0ffa450f270d5f6fe175f1d",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/TerminalColorScheme.java",
+      "localPath": "src/main/java/com/termux/terminal/TerminalColorScheme.java",
+      "upstreamSha256": "a303825f79925387b2a70087b640fdb097c723cfb8e341b7d82c958d73eb4563",
+      "localSha256": "a303825f79925387b2a70087b640fdb097c723cfb8e341b7d82c958d73eb4563",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/TerminalColors.java",
+      "localPath": "src/main/java/com/termux/terminal/TerminalColors.java",
+      "upstreamSha256": "27cc579af682cab7e6a30bdd166630d596e6215d33ab6b50c58dd55d3fb6867a",
+      "localSha256": "27cc579af682cab7e6a30bdd166630d596e6215d33ab6b50c58dd55d3fb6867a",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/TerminalEmulator.java",
+      "localPath": "src/main/java/com/termux/terminal/TerminalEmulator.java",
+      "upstreamSha256": "6c0ab4df53f73dc38ff0db0f112b467595642746fe8e03f681c87eef5e1e8fe8",
+      "localSha256": "6c0ab4df53f73dc38ff0db0f112b467595642746fe8e03f681c87eef5e1e8fe8",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/TerminalOutput.java",
+      "localPath": "src/main/java/com/termux/terminal/TerminalOutput.java",
+      "upstreamSha256": "f844b820e8a344e97bdbf421251daf9312dbf3f69a367b084bd920ed8a4898bc",
+      "localSha256": "f844b820e8a344e97bdbf421251daf9312dbf3f69a367b084bd920ed8a4898bc",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/TerminalRow.java",
+      "localPath": "src/main/java/com/termux/terminal/TerminalRow.java",
+      "upstreamSha256": "280c12d7f6e750413f8a2748e2827d4f5dbe5932cabd079b3ef4e2e441f01830",
+      "localSha256": "280c12d7f6e750413f8a2748e2827d4f5dbe5932cabd079b3ef4e2e441f01830",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/TerminalSessionClient.java",
+      "localPath": "src/main/java/com/termux/terminal/TerminalSessionClient.java",
+      "upstreamSha256": "853c3816ea1fc827895cea8191628482e1845e888a33d6c7da7e7ddac63af1b9",
+      "localSha256": "72a85b08e081b6fd233c856edaa23179f4d9d581ad0561821ba567e4680410cd",
+      "modified": true
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/TextStyle.java",
+      "localPath": "src/main/java/com/termux/terminal/TextStyle.java",
+      "upstreamSha256": "234faa9646aca6b04329998106d9b29aac757abdc7e0400f2a3ed90c95a07297",
+      "localSha256": "234faa9646aca6b04329998106d9b29aac757abdc7e0400f2a3ed90c95a07297",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/main/java/com/termux/terminal/WcWidth.java",
+      "localPath": "src/main/java/com/termux/terminal/WcWidth.java",
+      "upstreamSha256": "68fc84a28813b13e4a1dfec8d9acbd9d7bd2a6cea62fe2f38319d1eca6cca776",
+      "localSha256": "68fc84a28813b13e4a1dfec8d9acbd9d7bd2a6cea62fe2f38319d1eca6cca776",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-view/src/main/java/com/termux/view/GestureAndScaleRecognizer.java",
+      "localPath": "src/main/java/com/termux/view/GestureAndScaleRecognizer.java",
+      "upstreamSha256": "0df6451d1187ffe2d4c9aa5496cdcc04c96f75839cc990e70b40afaf0bd6e071",
+      "localSha256": "0df6451d1187ffe2d4c9aa5496cdcc04c96f75839cc990e70b40afaf0bd6e071",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-view/src/main/java/com/termux/view/TerminalRenderer.java",
+      "localPath": "src/main/java/com/termux/view/TerminalRenderer.java",
+      "upstreamSha256": "3511efd82b87db856404191d584fc2e9526e4da303edbd6a5efff111571f3b74",
+      "localSha256": "3511efd82b87db856404191d584fc2e9526e4da303edbd6a5efff111571f3b74",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-view/src/main/java/com/termux/view/TerminalView.java",
+      "localPath": "src/main/java/com/termux/view/TerminalView.java",
+      "upstreamSha256": "8395c02329a36bdf9608e941349da50002d3a1dd6245cc289393a6a65e1a761a",
+      "localSha256": "ccded6ca0632014807258228d45f2e98f00ec882615f94540899f9f55f10f160",
+      "modified": true
+    },
+    {
+      "upstreamPath": "terminal-view/src/main/java/com/termux/view/TerminalViewClient.java",
+      "localPath": "src/main/java/com/termux/view/TerminalViewClient.java",
+      "upstreamSha256": "8f8e647e734e7a888104511979f00084e2e5fc0a887ebbd56c601fd4c314a795",
+      "localSha256": "d19e1b1380b26466d8b98e80d1a5318ad19df0692089446b5d827353a4ed4792",
+      "modified": true
+    },
+    {
+      "upstreamPath": "terminal-view/src/main/java/com/termux/view/textselection/CursorController.java",
+      "localPath": "src/main/java/com/termux/view/textselection/CursorController.java",
+      "upstreamSha256": "6a7331f375881be9b24d34467900ec84a232ca07feeff69575b3b642abdc3e60",
+      "localSha256": "6a7331f375881be9b24d34467900ec84a232ca07feeff69575b3b642abdc3e60",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-view/src/main/java/com/termux/view/textselection/TextSelectionCursorController.java",
+      "localPath": "src/main/java/com/termux/view/textselection/TextSelectionCursorController.java",
+      "upstreamSha256": "006925df97af953197310ac8369c6a9591e0dfa76bf89bbb5ee7ff401e2d9188",
+      "localSha256": "0982add066af6542b7c0ee84704d1d9e9222aaae24bff8ef507496a72501f116",
+      "modified": true
+    },
+    {
+      "upstreamPath": "terminal-view/src/main/java/com/termux/view/textselection/TextSelectionHandleView.java",
+      "localPath": "src/main/java/com/termux/view/textselection/TextSelectionHandleView.java",
+      "upstreamSha256": "1f7258ebbd5ab29f7b8ef9ce74c5191a86a6b04cd5806bcb05cf5065843e16fe",
+      "localSha256": "9be1364cc1cc03bf8227f8a6ad16f84bf3fac78cbbde4964a2be8e97f469317a",
+      "modified": true
+    },
+    {
+      "upstreamPath": "terminal-view/src/main/res/drawable/text_select_handle_left_material.xml",
+      "localPath": "src/main/res/drawable/text_select_handle_left_material.xml",
+      "upstreamSha256": "3ce66a831646933bea6adc67ed8d4b8dfd3bb86b992b1ea789b0ba577add4551",
+      "localSha256": "3ce66a831646933bea6adc67ed8d4b8dfd3bb86b992b1ea789b0ba577add4551",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-view/src/main/res/drawable/text_select_handle_right_material.xml",
+      "localPath": "src/main/res/drawable/text_select_handle_right_material.xml",
+      "upstreamSha256": "977579c11e9c28ef74af25ab61b8f39f812006e8ac5d2a9c5bf185a2456d522f",
+      "localSha256": "977579c11e9c28ef74af25ab61b8f39f812006e8ac5d2a9c5bf185a2456d522f",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/ApcTest.java",
+      "localPath": "src/test/java/com/termux/terminal/ApcTest.java",
+      "upstreamSha256": "7eb7731e2d9324fa2165af4d5168940d58432d0f30d061e54cc8c6bfc9958467",
+      "localSha256": "7eb7731e2d9324fa2165af4d5168940d58432d0f30d061e54cc8c6bfc9958467",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/ControlSequenceIntroducerTest.java",
+      "localPath": "src/test/java/com/termux/terminal/ControlSequenceIntroducerTest.java",
+      "upstreamSha256": "95ec55f2657b89e02b230b50eb6bdfbe31228daea06b1399d7639e4bed73665d",
+      "localSha256": "95ec55f2657b89e02b230b50eb6bdfbe31228daea06b1399d7639e4bed73665d",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/CursorAndScreenTest.java",
+      "localPath": "src/test/java/com/termux/terminal/CursorAndScreenTest.java",
+      "upstreamSha256": "e554a7a24ab5f01397f6aa2cec2549b2c5f9c47b4afe3de04d33e6fa40052989",
+      "localSha256": "e554a7a24ab5f01397f6aa2cec2549b2c5f9c47b4afe3de04d33e6fa40052989",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/DecSetTest.java",
+      "localPath": "src/test/java/com/termux/terminal/DecSetTest.java",
+      "upstreamSha256": "3174a6edd4fa0892cdd5dba2a65919380cf3c21026771c50fdd78daf106c5db3",
+      "localSha256": "3174a6edd4fa0892cdd5dba2a65919380cf3c21026771c50fdd78daf106c5db3",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/DeviceControlStringTest.java",
+      "localPath": "src/test/java/com/termux/terminal/DeviceControlStringTest.java",
+      "upstreamSha256": "73f1653c3a870d5625e3dce15155f2c2bedaf34f6b6df1611eed5c21b13ad0ee",
+      "localSha256": "73f1653c3a870d5625e3dce15155f2c2bedaf34f6b6df1611eed5c21b13ad0ee",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/HistoryTest.java",
+      "localPath": "src/test/java/com/termux/terminal/HistoryTest.java",
+      "upstreamSha256": "6fd8cf8691577904718a80ccbebfdf7eb5713c853747385a26ab20e738846cad",
+      "localSha256": "6fd8cf8691577904718a80ccbebfdf7eb5713c853747385a26ab20e738846cad",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/KeyHandlerTest.java",
+      "localPath": "src/test/java/com/termux/terminal/KeyHandlerTest.java",
+      "upstreamSha256": "666a1930f99ef796b3b9d7b3095e697066a7ef93387e41e10395538d0316caaa",
+      "localSha256": "666a1930f99ef796b3b9d7b3095e697066a7ef93387e41e10395538d0316caaa",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/OperatingSystemControlTest.java",
+      "localPath": "src/test/java/com/termux/terminal/OperatingSystemControlTest.java",
+      "upstreamSha256": "cf499c1b945c5b8818520427e33a21ccde7503825a433927495a4b9ec53ee101",
+      "localSha256": "cf499c1b945c5b8818520427e33a21ccde7503825a433927495a4b9ec53ee101",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/RectangularAreasTest.java",
+      "localPath": "src/test/java/com/termux/terminal/RectangularAreasTest.java",
+      "upstreamSha256": "ddc73cd7fe9fdd17a609f9db114b71a84755fa8255577a54369cfda3552f381b",
+      "localSha256": "ddc73cd7fe9fdd17a609f9db114b71a84755fa8255577a54369cfda3552f381b",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/ResizeTest.java",
+      "localPath": "src/test/java/com/termux/terminal/ResizeTest.java",
+      "upstreamSha256": "b98b533cf0883b8372372cb6ceee3024a9ba49d5cc78b3601ddc9eca7e5ada74",
+      "localSha256": "b98b533cf0883b8372372cb6ceee3024a9ba49d5cc78b3601ddc9eca7e5ada74",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/ScreenBufferTest.java",
+      "localPath": "src/test/java/com/termux/terminal/ScreenBufferTest.java",
+      "upstreamSha256": "07bd3e39c7f9a2c586b11eeec9defdda48a70bd4d7a16f70c022f2158324b1d0",
+      "localSha256": "07bd3e39c7f9a2c586b11eeec9defdda48a70bd4d7a16f70c022f2158324b1d0",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/ScrollRegionTest.java",
+      "localPath": "src/test/java/com/termux/terminal/ScrollRegionTest.java",
+      "upstreamSha256": "baa55a3896e824f49ceea1209dca11594673772ab01e7827fab34ad89b55df95",
+      "localSha256": "baa55a3896e824f49ceea1209dca11594673772ab01e7827fab34ad89b55df95",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/TerminalRowTest.java",
+      "localPath": "src/test/java/com/termux/terminal/TerminalRowTest.java",
+      "upstreamSha256": "8ed2ad25ae865df2157297004f3f80ec0204f7cca78483ade1b63f19021af83c",
+      "localSha256": "8ed2ad25ae865df2157297004f3f80ec0204f7cca78483ade1b63f19021af83c",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/TerminalTest.java",
+      "localPath": "src/test/java/com/termux/terminal/TerminalTest.java",
+      "upstreamSha256": "5ca659957f3ddb2caddaca79e19c8735e272034528b4983d0dc5e497ab1cf08a",
+      "localSha256": "5ca659957f3ddb2caddaca79e19c8735e272034528b4983d0dc5e497ab1cf08a",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/TerminalTestCase.java",
+      "localPath": "src/test/java/com/termux/terminal/TerminalTestCase.java",
+      "upstreamSha256": "dd90af1538c976b3f5b81c6eb8ffd581ed1af892f0a6119242f75016fb77be45",
+      "localSha256": "9a2fee49ddd9257a04945b20c06921caaa591e87ba9fedcaa3a9ce8d028c2976",
+      "modified": true
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/TextStyleTest.java",
+      "localPath": "src/test/java/com/termux/terminal/TextStyleTest.java",
+      "upstreamSha256": "fc015cea35d7bedb1099d8ee640ce0159b8e5f2406011ed7ed0d40e3475684d5",
+      "localSha256": "fc015cea35d7bedb1099d8ee640ce0159b8e5f2406011ed7ed0d40e3475684d5",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/UnicodeInputTest.java",
+      "localPath": "src/test/java/com/termux/terminal/UnicodeInputTest.java",
+      "upstreamSha256": "1db2811125113952891af88201effc4c00c73387fb4f9dbe19820f7c17e6d31a",
+      "localSha256": "1db2811125113952891af88201effc4c00c73387fb4f9dbe19820f7c17e6d31a",
+      "modified": false
+    },
+    {
+      "upstreamPath": "terminal-emulator/src/test/java/com/termux/terminal/WcWidthTest.java",
+      "localPath": "src/test/java/com/termux/terminal/WcWidthTest.java",
+      "upstreamSha256": "d3be57d984a8bc3e15aa3b1c2490b9438da9993df63ab89f06eb0ae76e504324",
+      "localSha256": "d3be57d984a8bc3e15aa3b1c2490b9438da9993df63ab89f06eb0ae76e504324",
+      "modified": false
+    }
+  ]
+}

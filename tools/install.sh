@@ -126,7 +126,7 @@ else
     fi
 fi
 if [ "$launch" = true ]; then
-    if launch_output=$("$adb_command" -s "$device_serial" shell am start -W -n "$package_name/io.droyagent.app.MainActivity" 2>&1); then
+    if launch_output=$("$adb_command" -s "$device_serial" shell am start -W -n "$package_name/io.droyagent.app.NativeAppActivity" 2>&1); then
         printf '%s\n' "$launch_output"
     else
         printf '%s\n' "$launch_output" >&2

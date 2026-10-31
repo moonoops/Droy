@@ -6,7 +6,10 @@ import { createServer } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { requireMobileSession } from '../../auth.mjs';
 const installed = createRequire(new URL('../../../dsh/package.json', import.meta.url));
+const localMemory = createRequire(new URL('../../../memory/package.json', import.meta.url));
 const hooks = registerHooks({ resolve(specifier, context, next) {
+  if (specifier === '@droyagent/memory' || specifier.startsWith('@droyagent/memory/'))
+    return { url: pathToFileURL(localMemory.resolve(specifier)).href, shortCircuit: true };
   if (specifier === 'zod' || specifier.startsWith('@deepseek-ai/')) return { url: pathToFileURL(installed.resolve(specifier)).href, shortCircuit: true };
   return next(specifier, context);
 } });

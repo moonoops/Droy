@@ -437,3 +437,37 @@ test('catalog hydration restores a saved target once it appears and releases sub
   assert.equal(workspaceListeners.size, 0);
   controller.dispose(); f.controller.dispose();
 });
+
+test('companion picker results and failures never enter the work import controller', async () => {
+  const f = fixture([
+    row({ id: 'kaka-photo', source: 'album', consumer: 'companion', targetSessionId: 'im:kaka', text: '' }),
+    row({ id: 'maimai-error', source: 'camera', consumer: 'companion', targetSessionId: 'im:maimai', error: 'Camera interrupted', items: [] }),
+    row({ id: 'kaka-album', source: 'camera', consumer: 'companion', targetSessionId: 'im:kaka', albumSaved: false, albumError: 'Not saved', items: [] }),
+  ]);
+  await f.controller.refresh();
+  assert.equal(f.controller.getSnapshot().imports.length, 0);
+  assert.equal(f.controller.getSnapshot().dialogId, null);
+  assert.equal(f.controller.getSnapshot().error, null);
+  assert.equal(f.controller.getSnapshot().notice, null);
+  assert.equal(f.controller.pendingRows().length, 0);
+  assert.equal(f.attachments, 0);
+  assert.equal(f.opens.length, 0);
+  assert.equal(f.createCount, 0);
+  assert.equal(f.calls.every(call => call.operation === 'list'), true);
+  assert.equal(f.imports.length, 3, 'only the companion adapter may complete these imports');
+  f.controller.dispose();
+});
+
+test('explicit work imports and legacy imports remain available while companion imports are ignored', async () => {
+  const f = fixture([
+    row({ id: 'legacy-share', source: 'share', text: 'Legacy share', items: [] }),
+    row({ id: 'work-photo', source: 'album', consumer: 'work', targetSessionId: 'existing', text: '' }),
+    row({ id: 'companion-photo', source: 'album', consumer: 'companion', targetSessionId: 'im:maimai', text: '' }),
+  ]);
+  await f.controller.refresh();
+  assert.equal(f.controller.getSnapshot().imports.map(item => item.id).join(), 'legacy-share,work-photo');
+  assert.equal(f.attachments, 1);
+  assert.equal(f.handles.has('im:maimai'), false);
+  assert.equal(f.calls.some(call => call.id === 'companion-photo'), false);
+  f.controller.dispose();
+});

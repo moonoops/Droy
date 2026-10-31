@@ -12,10 +12,10 @@ export function patchSystemPrompt(source) {
   source = "import { finalizeMobileAssembly, resolveMobileLocale } from '@droyagent/mobile/prompt';\n" + source;
   source = replaceOnce(source,
     'if (completeSection === void 0 && !runtimeContextSuppressed) return transformed;',
-    'if (completeSection === void 0 && !runtimeContextSuppressed) return finalizeMobileAssembly(transformed, undefined, resolveMobileLocale(this.ctx));');
+    'if (completeSection === void 0 && !runtimeContextSuppressed) return finalizeMobileAssembly(transformed, undefined, resolveMobileLocale(this.ctx), this.ctx.get("droyCompanions")?.isRestrictedAgent(context.agent) === true);');
   return replaceOnce(source,
     '\t\treturn {\n\t\t\t...transformed,\n\t\t\tsections: completeSection === void 0 ? transformed.sections : [completeSection],\n\t\t\tcontexts: runtimeContextSuppressed ? transformed.contexts.filter((entry) => requiredContexts.has(entry.name)) : transformed.contexts\n\t\t};',
-    '\t\treturn finalizeMobileAssembly({\n\t\t\t...transformed,\n\t\t\tsections: completeSection === void 0 ? transformed.sections : [completeSection],\n\t\t\tcontexts: runtimeContextSuppressed ? transformed.contexts.filter((entry) => requiredContexts.has(entry.name)) : transformed.contexts\n\t\t}, completeSection?.name, resolveMobileLocale(this.ctx));');
+    '\t\treturn finalizeMobileAssembly({\n\t\t\t...transformed,\n\t\t\tsections: completeSection === void 0 ? transformed.sections : [completeSection],\n\t\t\tcontexts: runtimeContextSuppressed ? transformed.contexts.filter((entry) => requiredContexts.has(entry.name)) : transformed.contexts\n\t\t}, completeSection?.name, resolveMobileLocale(this.ctx), this.ctx.get("droyCompanions")?.isRestrictedAgent(context.agent) === true);');
 }
 
 /** Titles use a separate LLM request, so the ordinary agent prompt cannot govern them. */

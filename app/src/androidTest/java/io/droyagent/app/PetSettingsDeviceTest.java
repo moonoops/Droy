@@ -223,25 +223,25 @@ public final class PetSettingsDeviceTest {
                 () -> !ui.truth("!!document.querySelector('[data-droy-settings-panel]')"));
     }
 
-    @Test public void completionReturnPreferenceIsDefaultOffAndEditableWithPetOff() throws Exception {
+    @Test public void completionReturnPreferenceIsDefaultOnAndEditableWithPetOff() throws Exception {
         String row = "[data-droy-general=returnToDroyOnCompletion]";
         String toggle = row + " [role=switch]";
         assertTrue(modeSelected("petExternalDisplay", "off") && modeSelected("petInternalDisplay", "off"));
-        assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='false'"));
-        assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(row) + ").textContent.includes('任务完成后总是返回DroyAPP')"));
-        ui.tap(toggle);
-        DeviceUi.await("Completion return switch did not save the enabled preference", 5000,
-            () -> preferences.getBoolean("returnToDroyOnCompletion", false)
-                && ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='true'"));
-        ui.tap("[data-droy-settings-back]");
-        DeviceUi.await("The settings Back touch did not return to the conversation", 5000,
-            () -> !ui.truth("!!document.querySelector('[data-droy-settings-panel]')||!!document.querySelector('[data-droy-drawer-open=true]')"));
-        openGeneral();
         assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='true'"));
+        assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(row) + ").textContent.includes('任务完成后总是返回DroyAPP')"));
         ui.tap(toggle);
         DeviceUi.await("Completion return switch did not save the disabled preference", 5000,
             () -> !preferences.getBoolean("returnToDroyOnCompletion", true)
                 && ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='false'"));
+        ui.tap("[data-droy-settings-back]");
+        DeviceUi.await("The settings Back touch did not return to the conversation", 5000,
+            () -> !ui.truth("!!document.querySelector('[data-droy-settings-panel]')||!!document.querySelector('[data-droy-drawer-open=true]')"));
+        openGeneral();
+        assertTrue(ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='false'"));
+        ui.tap(toggle);
+        DeviceUi.await("Completion return switch did not save the enabled preference", 5000,
+            () -> preferences.getBoolean("returnToDroyOnCompletion", false)
+                && ui.truth("document.querySelector(" + JSONObject.quote(toggle) + ").getAttribute('aria-checked')==='true'"));
         assertTrue("The completion-return setting must not enable the pet", modeSelected("petExternalDisplay", "off") && modeSelected("petInternalDisplay", "off"));
         ui.evaluate("document.querySelector(" + JSONObject.quote(row) + ").scrollIntoView({block:'center',behavior:'instant'})");
         capture("completion-return-settings");
@@ -256,11 +256,8 @@ public final class PetSettingsDeviceTest {
         assertTrue(ui.truth("document.querySelector('[data-droy-pet-studio]').textContent.includes('性格与说话习惯')"));
         assertTrue("Applying an appearance must explain which identity and history are retained", ui.truth("document.querySelector('[data-droy-pet-studio]').textContent.includes('保留伙伴姓名和已有对话')"));
         assertTrue("Empty appearance must not dispatch generation", ui.truth("document.querySelector('[data-droy-action=createPet]').disabled"));
-        boolean landscape = activity.getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
         ui.tap("#droy-pet-create-name"); awaitKeyboardSettled(true); instrumentation.sendStringSync("Fixture Companion");
-        if (landscape) { ui.pressBack(); awaitKeyboardSettled(false); }
         ui.tap("#droy-pet-description"); awaitKeyboardSettled(true); instrumentation.sendStringSync("A small black cat");
-        if (landscape) { ui.pressBack(); awaitKeyboardSettled(false); }
         ui.showKeyboard("#droy-pet-personality");
         DeviceUi.await("Personality field cannot be focused", 5000,
             () -> ui.truth("document.activeElement===document.querySelector('#droy-pet-personality')"));
@@ -268,8 +265,6 @@ public final class PetSettingsDeviceTest {
         awaitKeyboardSettled(true);
         String create = "[data-droy-action=createPet]";
         capture("pet-keyboard-before-scroll");
-        // A landscape IME can occupy the entire form; Android Back must restore the same draft.
-        if (landscape) { ui.pressBack(); awaitKeyboardSettled(false); }
         gestureDiagnostic("before-scroll", -1, null);
         // Scroll as a user does while an IME is open; scrollIntoView can pan the WebView itself.
         for (int attempt = 0; attempt < 16; attempt++) {
@@ -279,7 +274,7 @@ public final class PetSettingsDeviceTest {
                 android.view.View root = activity.getWindow().getDecorView();
                 int[] location = new int[2]; root.getLocationOnScreen(location);
                 available[0] = root.getWidth();
-                // Landscape navigation also reserves side edges; keep the entire swipe inside app-owned space.
+                // Keep the entire swipe inside app-owned space and outside system gesture edges.
                 android.graphics.Insets insets = root.getRootWindowInsets().getInsets(WindowInsets.Type.ime()
                     | WindowInsets.Type.navigationBars() | WindowInsets.Type.systemGestures());
                 available[1] = location[1] + root.getHeight() - insets.bottom;
@@ -328,9 +323,8 @@ public final class PetSettingsDeviceTest {
                 fail("Android touch did not reach the final creation action; before=" + beforeHit + "; bounds=" + buttonBounds + "; web=" + java.util.Arrays.toString(webGeometry) + "; safe events=" + ui.evaluate("window.__petCreateEvents")
                     + "; target=" + ui.evaluate("document.querySelector('[data-droy-action=createPet]').getBoundingClientRect().toJSON()"));
             }
-            if (landscape) ui.hideKeyboard();
-            awaitKeyboardSettled(!landscape);
-            capture(landscape ? "pet-personality-after-keyboard-back" : "pet-personality-keyboard");
+            awaitKeyboardSettled(true);
+            capture("pet-personality-keyboard");
         } finally {
             ui.evaluate("document.removeEventListener('pointerdown',window.__petBlockCreate,true);document.removeEventListener('click',window.__petBlockCreate,true);delete window.__petBlockCreate;delete window.__petCreateHit;delete window.__petCreateEvents");
         }

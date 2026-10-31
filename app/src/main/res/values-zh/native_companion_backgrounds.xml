@@ -1,0 +1,10 @@
+<resources>
+    <string name="native_companion_background_paper_light">纸纹·浅色</string>
+    <string name="native_companion_background_paper_dark">纸纹·深色</string>
+    <string name="native_companion_background_mist_light">柔雾·浅色</string>
+    <string name="native_companion_background_mist_dark">柔雾·深色</string>
+    <string name="native_companion_background_leaves_light">树影·浅色</string>
+    <string name="native_companion_background_leaves_dark">树影·深色</string>
+    <string name="native_companion_background_lines_light">线描·浅色</string>
+    <string name="native_companion_background_lines_dark">线描·深色</string>
+</resources>

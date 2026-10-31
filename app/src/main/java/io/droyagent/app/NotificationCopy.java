@@ -1,35 +1,21 @@
 package io.droyagent.app;
 
-/** A seed belongs to an event, so routine refreshes do not keep changing its wording. */
+/** Status titles stay stable; conversational notification summaries retain their event wording. */
 final class NotificationCopy {
     private NotificationCopy() {}
 
     static String title(boolean ready, boolean active, String phase, int seed) {
-        if (!ready) return choose(seed,
-                NativeLocale.text("Droy · 正在启动", "Droy · Starting"),
-                NativeLocale.text("Droy · 马上就来", "Droy · Getting ready"),
-                NativeLocale.text("Droy · 正在做准备", "Droy · Preparing to help"));
-        if (!active) return choose(seed,
-                NativeLocale.text("Droy · 待命", "Droy · Ready"),
-                NativeLocale.text("Droy · 正在无所事事", "Droy · Taking a little break"),
-                NativeLocale.text("Droy · 随时听你安排", "Droy · Ready when you are"));
+        if (!ready) return NativeLocale.text("正在启动", "Starting");
+        if (!active) return NativeLocale.text("后台运行中", "Running in background");
         return switch (phase) {
-            case "waiting_input" -> choose(seed,
-                    NativeLocale.text("Droy · 需要你的回应", "Droy · Your response is needed"),
-                    NativeLocale.text("Droy · 等你拿个主意", "Droy · Waiting for your decision"),
-                    NativeLocale.text("Droy · 有件事想问你", "Droy · A question for you"));
-            case "waiting" -> choose(seed,
-                    NativeLocale.text("Droy · 等待中", "Droy · Waiting"),
-                    NativeLocale.text("Droy · 正在等候时机", "Droy · Waiting for the right moment"),
-                    NativeLocale.text("Droy · 等条件满足就继续", "Droy · Waiting to continue"));
-            case "blocked" -> choose(seed,
-                    NativeLocale.text("Droy · 任务需要处理", "Droy · Task needs attention"),
-                    NativeLocale.text("Droy · 遇到一点阻碍", "Droy · Something is in the way"),
-                    NativeLocale.text("Droy · 需要你搭把手", "Droy · Could use your help"));
-            default -> choose(seed,
-                    NativeLocale.text("Droy · 正在处理任务", "Droy · Working on your task"),
-                    NativeLocale.text("Droy · 正在认真忙碌", "Droy · Busy helping you"),
-                    NativeLocale.text("Droy · 正在替你办事", "Droy · Taking care of your task"));
+            case "waiting_input" -> NativeLocale.text("需要你的确认", "Your confirmation is needed");
+            case "waiting" -> NativeLocale.text("等待条件满足", "Waiting to continue");
+            case "blocked" -> NativeLocale.text("任务需要处理", "Task needs attention");
+            case "pausing" -> NativeLocale.text("正在暂停任务", "Pausing your task");
+            case "paused" -> NativeLocale.text("任务已暂停", "Task paused");
+            case "resuming" -> NativeLocale.text("正在继续任务", "Resuming your task");
+            case "stopping" -> NativeLocale.text("正在停止任务", "Stopping your task");
+            default -> NativeLocale.text("正在处理任务", "Working on your task");
         };
     }
 

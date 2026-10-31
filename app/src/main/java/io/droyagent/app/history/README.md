@@ -4,7 +4,7 @@ This package adapts Android events for Droy personal memory. `HistorySpool` is a
 
 ## Lifecycle
 
-The trusted host creates `HistoryCapture` with verified execution-privacy readiness. Source preferences default off; location has an independent switch, and pause stops every source. `MemoryRuntime` ties eligibility to product authorization and the current qualified Node host.
+The trusted host creates `HistoryCapture` with memory-service readiness. Source preferences default off; location has an independent switch, and pause stops every source. `MemoryRuntime` ties eligibility to product authorization and the current Node host. Personal memory does not require Root.
 
 `configure`, `start`, `stop` and `refreshAuthorization` invalidate stale callback tickets. `readBatch` returns a durable batch until `acknowledge(batchId)` succeeds. A lost reply may be retried; unknown acknowledgements do not establish deletion.
 
@@ -15,6 +15,6 @@ A durable `continuityId` changes on pause, stop, overflow or restart. Consumers 
 - Activity records describe observed windows, not attention or user action. Events predating current consent are rejected.
 - Page capture excludes Droy, system permission pages, keyboards and browser content. Sensitive, editable or incompletely inspected trees suppress the page; projected text is bounded and deduplicated.
 - Location requires its own Android permissions and visible foreground-service notification. The source retains Android's mock-location marker and does not call an external geocoder.
-- Stopping or losing the qualified runtime stops capture. Disabling sources restores the normal runtime idle policy.
+- Stopping or losing the memory runtime stops capture. Disabling sources restores the normal runtime idle policy.
 
-First protection activation uses the APK-owned probe and protected restart. The durable protection latch remains after memory is disabled; missing private stores cannot be silently reinitialized. See [memory integration](../../../../../../../../runtime/memory/INTEGRATION.md) for host boundaries.
+Activation uses App-private storage and the ordinary App security model. The durable privacy state remains after memory is disabled; missing private stores cannot be silently reinitialized. See [memory integration](../../../../../../../../runtime/memory/INTEGRATION.md) for host boundaries.

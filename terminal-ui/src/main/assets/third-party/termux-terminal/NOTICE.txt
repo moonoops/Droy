@@ -1,0 +1,17 @@
+This distribution includes selected Terminal Emulator for Android code from
+termux/termux-app v0.118.3, commit
+5b657c6adf4304e5198951ce815fe0205dcac29c.
+
+Only selected terminal-emulator and terminal-view Java, resource and test files
+are included. The upstream root license identifies that terminal code as an
+Apache License 2.0 exception. The original license statement and the full Apache
+License 2.0 are included alongside this notice. Original source comments are
+retained.
+
+Droy contributors modified the session/client seam for remote-only rendering,
+input batching, lifecycle cleanup, localized selection labels and selection
+handle tinting. The local process/JNI implementation is not included.
+Modification year: 2026.
+
+Repository: https://github.com/termux/termux-app
+Original project: https://github.com/jackpal/Android-Terminal-Emulator

@@ -22,7 +22,8 @@ public class RootMemoryBackendTest {
                 catch (Exception failure) { throw new RuntimeException(failure); }
             });
             operation.get(3, TimeUnit.SECONDS);
-            assertFalse("The blocked wrapper must be stopped", child.isAlive());
+            // Process destruction is asynchronous even after cancellation has returned.
+            assertTrue("The blocked wrapper must be stopped", child.waitFor(1, TimeUnit.SECONDS));
         } finally {
             child.destroyForcibly(); worker.shutdownNow();
         }
@@ -40,7 +41,7 @@ public class RootMemoryBackendTest {
                 catch (Exception failure) { throw new RuntimeException(failure); }
             });
             operation.get(3, TimeUnit.SECONDS);
-            assertFalse(child.isAlive());
+            assertTrue("The timed-out wrapper must be stopped", child.waitFor(1, TimeUnit.SECONDS));
         } finally { child.destroyForcibly(); worker.shutdownNow(); }
     }
 }

@@ -67,10 +67,8 @@ public final class ProactiveNotificationSettingsDeviceTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         ui = new DeviceUi(instrumentation, activity);
         ui.awaitPage();
-        if ("true".equals(InstrumentationRegistry.getArguments().getString("layoutLandscape"))) {
-            DeviceUi.await("The requested landscape condition did not reach the real WebView", 10000,
-                    () -> ui.truth("innerWidth>innerHeight"));
-        }
+        DeviceUi.await("The settings WebView did not reach portrait orientation", 10000,
+                () -> ui.truth("innerHeight>innerWidth"));
         if (ui.nativeNavigationState().getBoolean("webFailure")) {
             capture("native-web-failure");
             fail("The settings UI requires a supported system WebView; the native failure page is visible");
@@ -126,7 +124,10 @@ public final class ProactiveNotificationSettingsDeviceTest {
     }
 
     @Test public void channelsAndTargetsPersistWhilePluginCanBeDisabledAndReenabled() throws Exception {
-        assertFalse("An absent completion preference must default off", checked(RETURN));
+        assertTrue("An absent completion preference must default on", checked(RETURN));
+        setPreference(RETURN, "returnToDroyOnCompletion", false);
+        closeAndReopenGeneral();
+        assertFalse("The explicitly disabled completion preference was lost", checked(RETURN));
         setPreference(RETURN, "returnToDroyOnCompletion", true);
         closeAndReopenGeneral();
         assertTrue("The explicitly enabled completion preference was lost", checked(RETURN));

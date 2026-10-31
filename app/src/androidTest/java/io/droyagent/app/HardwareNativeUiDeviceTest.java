@@ -55,7 +55,6 @@ public class HardwareNativeUiDeviceTest {
     private Activity activity;
     private DeviceUi touch;
     private boolean rotationOwned;
-    private Boolean landscape;
 
     @Before public void setUp() throws Exception {
         instrumentation = InstrumentationRegistry.getInstrumentation(); context = instrumentation.getTargetContext();
@@ -74,11 +73,8 @@ public class HardwareNativeUiDeviceTest {
             .putBoolean("allowDeviceDataRead", true).putBoolean("allowDeviceDataWrite", true)
             .putString("themeColorScheme", colorScheme).commit());
         touch = new DeviceUi(instrumentation, null);
-        String orientation = InstrumentationRegistry.getArguments().getString("hardwareUiLandscape");
-        if (orientation != null) {
-            assertTrue("Unsupported native hardware orientation", orientation.equals("true") || orientation.equals("false"));
-            landscape = Boolean.valueOf(orientation);
-        }
+        assertTrue(touch.automation().setRotation(UiAutomation.ROTATION_FREEZE_0));
+        rotationOwned = true;
     }
 
     @After public void tearDown() throws Exception {
@@ -192,11 +188,6 @@ public class HardwareNativeUiDeviceTest {
     private void launch(Class<? extends Activity> type, Intent intent) throws Exception {
         finish(); activity = instrumentation.startActivitySync(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         assertEquals(type, activity.getClass()); instrumentation.waitForIdleSync();
-        if (landscape != null) {
-            assertTrue(touch.automation().setRotation(landscape ? UiAutomation.ROTATION_FREEZE_90 : UiAutomation.ROTATION_FREEZE_0));
-            rotationOwned = true;
-        }
-        // Rotation recreates these native activities; follow the resumed instance.
         Activity[] resumed = {null}; long[] resumedSince = {0};
         DeviceUi.await("The native page did not receive layout and window focus", 5000, () -> {
             AtomicReference<Boolean> ready = new AtomicReference<>(false);
@@ -205,8 +196,8 @@ public class HardwareNativeUiDeviceTest {
                 for (Activity candidate : androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
                         .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED)) {
                     if (candidate.getClass() != type || candidate.isDestroyed() || candidate.isFinishing()) continue;
-                    boolean oriented = landscape == null || candidate.getResources().getConfiguration().orientation == (landscape
-                        ? android.content.res.Configuration.ORIENTATION_LANDSCAPE : android.content.res.Configuration.ORIENTATION_PORTRAIT);
+                    boolean oriented = candidate.getResources().getConfiguration().orientation
+                        == android.content.res.Configuration.ORIENTATION_PORTRAIT;
                     if (oriented && candidate.hasWindowFocus() && candidate.getWindow().getDecorView().getWidth() > 0) {
                         found = true;
                         if (candidate != resumed[0]) { resumed[0] = candidate; resumedSince[0] = SystemClock.elapsedRealtime(); }
@@ -396,8 +387,7 @@ public class HardwareNativeUiDeviceTest {
         assertTrue("The native evidence frame did not commit", committed.await(5, TimeUnit.SECONDS));
         Bitmap screenshot = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES).takeScreenshot();
         assertNotNull("Android did not provide a public native-page screenshot", screenshot);
-        if (landscape != null) assertEquals("Native evidence orientation differs from the requested fixture", landscape,
-            Boolean.valueOf(screenshot.getWidth() > screenshot.getHeight()));
+        assertTrue("Native evidence left portrait orientation", screenshot.getHeight() > screenshot.getWidth());
         File directory = new File(context.getExternalFilesDir(null), "hardware-native-ui-evidence");
         assertTrue(directory.isDirectory() || directory.mkdirs());
         try (FileOutputStream output = new FileOutputStream(new File(directory, name))) { assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, output)); }

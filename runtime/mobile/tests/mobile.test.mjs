@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const token = 'fictional-test-session-token-12345678';
 const request = extra => ({headers:{host:'127.0.0.1:3030',cookie:`droy_session=${token}`,...extra}});
+const toolStarted = () => new Promise(resolve => setImmediate(resolve));
 test('cookie is required on all routes and tied to loopback origin', () => {
   assert.equal(authorized(request(),token),true);
   for(const headers of [{cookie:''},{cookie:`droy_session=wrong`},{cookie:`droy_session=${token}; droy_session=${token}`},{host:'attacker.test:3030'},{origin:'https://attacker.test'},{origin:'null'}]) assert.equal(authorized(request(headers),token),false);
@@ -46,11 +47,12 @@ test('an unresponsive tool has a total budget even while the engine signal remai
     return {ok:true,json:async()=>({ok:true,result:{}})};
   }});
   const pending=bridge.call('tap',{}, {agent:{id:'s'},callId:'timed-out',signal:controller.signal});
+  await toolStarted();
   t.mock.timers.tick(16000);
   await assert.rejects(pending,error=>error.code==='action_timeout'&&error.details.outcomeUnknown===true);
   assert.equal(controller.signal.aborted,false);
-  assert.deepEqual(calls.map(c=>c.path),['/tool','/cancel']);
-  assert.equal(calls[0].body.budgetMs,15000);
+  assert.deepEqual(calls.map(c=>c.path),['/permissions/preflight','/tool','/cancel']);
+  assert.equal(calls[1].body.budgetMs,15000);
 });
 test('a condition wait retains its requested budget and is cancelled without replay',async t=>{
   t.mock.timers.enable({apis:['setTimeout']});
@@ -61,12 +63,13 @@ test('a condition wait retains its requested budget and is cancelled without rep
     return {ok:true,json:async()=>({ok:true,result:{}})};
   }});
   const pending=bridge.call('wait_for',{timeoutMs:60000}, {agent:{id:'s'},callId:'long-wait',signal:controller.signal});
+  await toolStarted();
   t.mock.timers.tick(16000);
-  assert.equal(calls.length,1);
-  assert.equal(calls[0].body.budgetMs,61500);
+  assert.equal(calls.length,2);
+  assert.equal(calls[1].body.budgetMs,61500);
   controller.abort(new Error('user stopped'));
   await assert.rejects(pending,/user stopped/);
-  assert.deepEqual(calls.map(c=>c.path),['/tool','/cancel']);
+  assert.deepEqual(calls.map(c=>c.path),['/permissions/preflight','/tool','/cancel']);
 });
 test('unacknowledged cancellation and native rejection preserve actionable outcomes',async()=>{
   const controller=new AbortController();
@@ -110,13 +113,14 @@ test('a short sequence shares one deadline and cancellation never repeats its st
   const steps=[{action:'input_text',target:{nodeId:'n1'},text:'练习面包'},{action:'tap',target:{text:'搜索'},afterCondition:{text:'搜索结果'}}];
   const pending=bridge.call('sequence',{snapshotId:'current',packageName:'com.example.fixture',steps},
     {agent:{id:'s'},callId:'sequence-cancel',signal:controller.signal});
+  await toolStarted();
   t.mock.timers.tick(16000);
-  assert.equal(calls.length,1);
-  assert.equal(calls[0].body.budgetMs,30000);
-  assert.deepEqual(calls[0].body.args.steps,steps);
+  assert.equal(calls.length,2);
+  assert.equal(calls[1].body.budgetMs,30000);
+  assert.deepEqual(calls[1].body.args.steps,steps);
   controller.abort(new Error('user stopped'));
   await assert.rejects(pending,/user stopped/);
-  assert.deepEqual(calls.map(call=>call.path),['/tool','/cancel']);
+  assert.deepEqual(calls.map(call=>call.path),['/permissions/preflight','/tool','/cancel']);
 });
 test('PNG codec verifies pixels, corrupt bytes, limits, and request resizing',()=>{
   const source={width:4,height:3,channels:4,pixels:Buffer.from(Array.from({length:48},(_,i)=>i*3))};

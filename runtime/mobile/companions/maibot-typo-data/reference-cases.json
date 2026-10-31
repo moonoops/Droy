@@ -1,0 +1,1879 @@
+{
+  "source": "MaiBot fe88ec6b: unchanged typo_generator.py, jieba 0.42.1, pypinyin 0.55.0",
+  "cases": [
+    {
+      "seed": 0,
+      "input": "你好啊，我今天好开心",
+      "text": "你好啊，我今天好开新",
+      "correction": "心"
+    },
+    {
+      "seed": 1,
+      "input": "这个事情有点意思",
+      "text": "这个事情有点意思",
+      "correction": null
+    },
+    {
+      "seed": 2,
+      "input": "我去吃饭了，等会回来",
+      "text": "我去吃饭了，等会回来",
+      "correction": null
+    },
+    {
+      "seed": 3,
+      "input": "你说的没错，我也是这样想的",
+      "text": "你说的没错，我也是这样响的",
+      "correction": "想"
+    },
+    {
+      "seed": 4,
+      "input": "他应该已经到北京了",
+      "text": "他应该已经到北京了",
+      "correction": null
+    },
+    {
+      "seed": 5,
+      "input": "明天再说吧，现在困了",
+      "text": "明天再说巴，现在困了",
+      "correction": "吧"
+    },
+    {
+      "seed": 6,
+      "input": "买这个东西是不是不太好",
+      "text": "买这个东西是不是不太好",
+      "correction": null
+    },
+    {
+      "seed": 7,
+      "input": "我知道了，不过为什么呢",
+      "text": "我知到了，不过为什么呢",
+      "correction": "道"
+    },
+    {
+      "seed": 8,
+      "input": "我喜欢蓝色，也喜欢晴天",
+      "text": "我喜欢蓝色，也喜欢情天",
+      "correction": "晴"
+    },
+    {
+      "seed": 9,
+      "input": "好，知道啦",
+      "text": "好，之道啦",
+      "correction": "知"
+    },
+    {
+      "seed": 10,
+      "input": "你好啊，我今天好开心",
+      "text": "你好啊，我津天好开心",
+      "correction": null
+    },
+    {
+      "seed": 11,
+      "input": "这个事情有点意思",
+      "text": "这个市情有点意思",
+      "correction": "事"
+    },
+    {
+      "seed": 12,
+      "input": "我去吃饭了，等会回来",
+      "text": "我去吃饭了，等会回来",
+      "correction": null
+    },
+    {
+      "seed": 13,
+      "input": "你说的没错，我也是这样想的",
+      "text": "你说的没错，我也是这样想的",
+      "correction": null
+    },
+    {
+      "seed": 14,
+      "input": "他应该已经到北京了",
+      "text": "他英该已经到北京了",
+      "correction": "应"
+    },
+    {
+      "seed": 15,
+      "input": "明天再说吧，现在困了",
+      "text": "明天再说吧，现在困了",
+      "correction": null
+    },
+    {
+      "seed": 16,
+      "input": "买这个东西是不是不太好",
+      "text": "买这个东息是不是不态好",
+      "correction": null
+    },
+    {
+      "seed": 17,
+      "input": "我知道了，不过为什么呢",
+      "text": "我知道了，不过为神么呢",
+      "correction": null
+    },
+    {
+      "seed": 18,
+      "input": "我喜欢蓝色，也喜欢晴天",
+      "text": "我喜欢兰色，也喜欢晴天",
+      "correction": "蓝"
+    },
+    {
+      "seed": 19,
+      "input": "好，知道啦",
+      "text": "号，知到啦",
+      "correction": "好"
+    },
+    {
+      "seed": 20,
+      "input": "你好啊，我今天好开心",
+      "text": "你好啊，我今天好开心",
+      "correction": null
+    },
+    {
+      "seed": 21,
+      "input": "这个事情有点意思",
+      "text": "这个事情有点意思",
+      "correction": null
+    },
+    {
+      "seed": 22,
+      "input": "我去吃饭了，等会回来",
+      "text": "我去吃饭了，等会回来",
+      "correction": null
+    },
+    {
+      "seed": 23,
+      "input": "你说的没错，我也是这样想的",
+      "text": "你说的没错，我也是这样想的",
+      "correction": null
+    },
+    {
+      "seed": 24,
+      "input": "他应该已经到北京了",
+      "text": "他应该已经到北京了",
+      "correction": null
+    },
+    {
+      "seed": 25,
+      "input": "明天再说吧，现在困了",
+      "text": "明天在说吧，现在困了",
+      "correction": null
+    },
+    {
+      "seed": 26,
+      "input": "买这个东西是不是不太好",
+      "text": "买这个东西是不是不太好",
+      "correction": null
+    },
+    {
+      "seed": 27,
+      "input": "我知道了，不过为什么呢",
+      "text": "我知道了，不过为什么呢",
+      "correction": null
+    },
+    {
+      "seed": 28,
+      "input": "我喜欢蓝色，也喜欢晴天",
+      "text": "我喜欢蓝色，也喜欢晴天",
+      "correction": null
+    },
+    {
+      "seed": 29,
+      "input": "好，知道啦",
+      "text": "好，知道啦",
+      "correction": null
+    },
+    {
+      "seed": 30,
+      "input": "你好啊，我今天好开心",
+      "text": "你好啊，我今天好开心",
+      "correction": null
+    },
+    {
+      "seed": 31,
+      "input": "这个事情有点意思",
+      "text": "这个事情有点意思",
+      "correction": null
+    },
+    {
+      "seed": 32,
+      "input": "我去吃饭了，等会回来",
+      "text": "我去吃泛了，等会回来",
+      "correction": null
+    },
+    {
+      "seed": 33,
+      "input": "你说的没错，我也是这样想的",
+      "text": "你说的没错，我也是这样想的",
+      "correction": null
+    },
+    {
+      "seed": 34,
+      "input": "他应该已经到北京了",
+      "text": "他应该意经到北京了",
+      "correction": "已"
+    },
+    {
+      "seed": 35,
+      "input": "明天再说吧，现在困了",
+      "text": "明天再说吧，现在困了",
+      "correction": null
+    },
+    {
+      "seed": 36,
+      "input": "买这个东西是不是不太好",
+      "text": "买这个东西是不是不太好",
+      "correction": null
+    },
+    {
+      "seed": 37,
+      "input": "我知道了，不过为什么呢",
+      "text": "我直道了，不过为什么呢",
+      "correction": "知"
+    },
+    {
+      "seed": 38,
+      "input": "我喜欢蓝色，也喜欢晴天",
+      "text": "我喜欢蓝色，也喜欢晴天",
+      "correction": null
+    },
+    {
+      "seed": 39,
+      "input": "好，知道啦",
+      "text": "好，织道啦",
+      "correction": "知"
+    },
+    {
+      "seed": 40,
+      "input": "你好啊，我今天好开心",
+      "text": "你好啊，我今天好开心",
+      "correction": null
+    },
+    {
+      "seed": 41,
+      "input": "这个事情有点意思",
+      "text": "这个事情有点意思",
+      "correction": null
+    },
+    {
+      "seed": 42,
+      "input": "我去吃饭了，等会回来",
+      "text": "我去吃泛了，等会回来",
+      "correction": "饭"
+    },
+    {
+      "seed": 43,
+      "input": "你说的没错，我也是这样想的",
+      "text": "你说的没措，我也是这样想的",
+      "correction": null
+    },
+    {
+      "seed": 44,
+      "input": "他应该已经到北京了",
+      "text": "他应该已经到北京了",
+      "correction": null
+    },
+    {
+      "seed": 45,
+      "input": "明天再说吧，现在困了",
+      "text": "明天再说吧，现在困了",
+      "correction": null
+    },
+    {
+      "seed": 46,
+      "input": "买这个东西是不是不太好",
+      "text": "买这个东西是不是不太好",
+      "correction": null
+    },
+    {
+      "seed": 47,
+      "input": "我知道了，不过为什么呢",
+      "text": "我知道了，不过为什么呢",
+      "correction": null
+    },
+    {
+      "seed": 48,
+      "input": "我喜欢蓝色，也喜欢晴天",
+      "text": "我喜欢兰色，也喜欢庆天",
+      "correction": null
+    },
+    {
+      "seed": 49,
+      "input": "好，知道啦",
+      "text": "好，知到拉",
+      "correction": null
+    },
+    {
+      "seed": 50,
+      "input": "你好啊，我今天好开心",
+      "text": "你好啊，我今天好开心",
+      "correction": null
+    },
+    {
+      "seed": 51,
+      "input": "这个事情有点意思",
+      "text": "这个事情有点意思",
+      "correction": null
+    },
+    {
+      "seed": 52,
+      "input": "我去吃饭了，等会回来",
+      "text": "我去吃饭了，等会回来",
+      "correction": null
+    },
+    {
+      "seed": 53,
+      "input": "你说的没错，我也是这样想的",
+      "text": "你说的没措，我也是这样想的",
+      "correction": null
+    },
+    {
+      "seed": 54,
+      "input": "他应该已经到北京了",
+      "text": "他应该以经到北京了",
+      "correction": null
+    },
+    {
+      "seed": 55,
+      "input": "明天再说吧，现在困了",
+      "text": "名天再说巴，现在困了",
+      "correction": null
+    },
+    {
+      "seed": 56,
+      "input": "买这个东西是不是不太好",
+      "text": "买这个东西是不是不太好",
+      "correction": null
+    },
+    {
+      "seed": 57,
+      "input": "我知道了，不过为什么呢",
+      "text": "我知道了，不过为什么呢",
+      "correction": null
+    },
+    {
+      "seed": 58,
+      "input": "我喜欢蓝色，也喜欢晴天",
+      "text": "我喜欢蓝色，也席欢擎天",
+      "correction": "晴天"
+    },
+    {
+      "seed": 59,
+      "input": "好，知道啦",
+      "text": "好，知道啦",
+      "correction": null
+    },
+    {
+      "seed": 60,
+      "input": "你好啊，我今天好开心",
+      "text": "你好啊，我今天好开心",
+      "correction": null
+    },
+    {
+      "seed": 61,
+      "input": "这个事情有点意思",
+      "text": "这个是情有点意思",
+      "correction": "事"
+    },
+    {
+      "seed": 62,
+      "input": "我去吃饭了，等会回来",
+      "text": "我去吃范了，等会回来",
+      "correction": "饭"
+    },
+    {
+      "seed": 63,
+      "input": "你说的没错，我也是这样想的",
+      "text": "你说的没错，我也是这样想的",
+      "correction": null
+    },
+    {
+      "seed": 64,
+      "input": "他应该已经到北京了",
+      "text": "他英盖已经到北京了",
+      "correction": null
+    },
+    {
+      "seed": 65,
+      "input": "明天再说吧，现在困了",
+      "text": "名天再说八，现在困了",
+      "correction": "明"
+    },
+    {
+      "seed": 66,
+      "input": "买这个东西是不是不太好",
+      "text": "买这个东西是不是不太好",
+      "correction": null
+    },
+    {
+      "seed": 67,
+      "input": "我知道了，不过为什么呢",
+      "text": "我治道了，不过为什么呢",
+      "correction": null
+    },
+    {
+      "seed": 68,
+      "input": "我喜欢蓝色，也喜欢晴天",
+      "text": "我喜欢蓝色，也喜欢擎天",
+      "correction": "晴天"
+    },
+    {
+      "seed": 69,
+      "input": "好，知道啦",
+      "text": "好，之道啦",
+      "correction": null
+    },
+    {
+      "seed": 70,
+      "input": "你好啊，我今天好开心",
+      "text": "你好阿，我今天好开心",
+      "correction": "啊"
+    },
+    {
+      "seed": 71,
+      "input": "这个事情有点意思",
+      "text": "这个事情有点意思",
+      "correction": null
+    },
+    {
+      "seed": 72,
+      "input": "我去吃饭了，等会回来",
+      "text": "我去吃饭了，等会回来",
+      "correction": null
+    },
+    {
+      "seed": 73,
+      "input": "你说的没错，我也是这样想的",
+      "text": "你说的没错，我也是这样想的",
+      "correction": null
+    },
+    {
+      "seed": 74,
+      "input": "他应该已经到北京了",
+      "text": "他应该以经到北京了",
+      "correction": "已"
+    },
+    {
+      "seed": 75,
+      "input": "明天再说吧，现在困了",
+      "text": "名天再说吧，现在困了",
+      "correction": "明"
+    },
+    {
+      "seed": 76,
+      "input": "买这个东西是不是不太好",
+      "text": "卖这个东西是不是不太好",
+      "correction": null
+    },
+    {
+      "seed": 77,
+      "input": "我知道了，不过为什么呢",
+      "text": "我知到了，不过为什么呢",
+      "correction": null
+    },
+    {
+      "seed": 78,
+      "input": "我喜欢蓝色，也喜欢晴天",
+      "text": "我喜欢蓝色，也喜欢晴天",
+      "correction": null
+    },
+    {
+      "seed": 79,
+      "input": "好，知道啦",
+      "text": "好，知到啦",
+      "correction": "道"
+    }
+  ],
+  "segmentation": [
+    {
+      "input": "南京市长江大桥",
+      "words": [
+        "南京市",
+        "长江大桥"
+      ]
+    },
+    {
+      "input": "我来到北京清华大学",
+      "words": [
+        "我",
+        "来到",
+        "北京",
+        "清华大学"
+      ]
+    },
+    {
+      "input": "他来到了网易杭研大厦",
+      "words": [
+        "他",
+        "来到",
+        "了",
+        "网易",
+        "杭研",
+        "大厦"
+      ]
+    },
+    {
+      "input": "小明硕士毕业于中国科学院计算所",
+      "words": [
+        "小明",
+        "硕士",
+        "毕业",
+        "于",
+        "中国科学院",
+        "计算所"
+      ]
+    },
+    {
+      "input": "这是一个新奇的咔咔麦麦词汇",
+      "words": [
+        "这是",
+        "一个",
+        "新奇",
+        "的",
+        "咔",
+        "咔麦麦",
+        "词汇"
+      ]
+    },
+    {
+      "input": "乒乓球拍卖完了",
+      "words": [
+        "乒乓球",
+        "拍卖",
+        "完",
+        "了"
+      ]
+    },
+    {
+      "input": "研究生命起源",
+      "words": [
+        "研究",
+        "生命",
+        "起源"
+      ]
+    },
+    {
+      "input": "你今天吃什么呀",
+      "words": [
+        "你",
+        "今天",
+        "吃",
+        "什么",
+        "呀"
+      ]
+    },
+    {
+      "input": "不包容但善良，偶尔吐槽",
+      "words": [
+        "不",
+        "包容",
+        "但",
+        "善良",
+        "，",
+        "偶尔",
+        "吐槽"
+      ]
+    },
+    {
+      "input": "我想试试Droy v0.0.3，哈哈",
+      "words": [
+        "我",
+        "想",
+        "试试",
+        "Droy",
+        " ",
+        "v0.0",
+        ".",
+        "3",
+        "，",
+        "哈哈"
+      ]
+    },
+    {
+      "input": "状态：API_key_23 123.45% https://example.com",
+      "words": [
+        "状态",
+        "：",
+        "API",
+        "_",
+        "key",
+        "_",
+        "23",
+        " ",
+        "123.45%",
+        " ",
+        "https",
+        ":",
+        "/",
+        "/",
+        "example",
+        ".",
+        "com"
+      ]
+    }
+  ],
+  "wordCandidates": [
+    {
+      "word": "银行",
+      "pinyin": [
+        "yin2",
+        "hang2"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "长大",
+      "pinyin": [
+        "zhang3",
+        "da4"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "重庆",
+      "pinyin": [
+        "chong2",
+        "qing4"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "音乐",
+      "pinyin": [
+        "yin1",
+        "yue4"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "快乐",
+      "pinyin": [
+        "kuai4",
+        "le4"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "你好",
+      "pinyin": [
+        "ni3",
+        "hao3"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "事情",
+      "pinyin": [
+        "shi4",
+        "qing2"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "知道",
+      "pinyin": [
+        "zhi1",
+        "dao4"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "北京",
+      "pinyin": [
+        "bei3",
+        "jing1"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "晴天",
+      "pinyin": [
+        "qing2",
+        "tian1"
+      ],
+      "candidates": [
+        "擎天"
+      ]
+    },
+    {
+      "word": "打球",
+      "pinyin": [
+        "da3",
+        "qiu2"
+      ],
+      "candidates": []
+    },
+    {
+      "word": "马上",
+      "pinyin": [
+        "ma3",
+        "shang4"
+      ],
+      "candidates": []
+    }
+  ],
+  "postProcessing": [
+    {
+      "seed": 0,
+      "input": [
+        [
+          "你好啊，我今天好开心",
+          "，"
+        ],
+        [
+          "这个事情有点意思",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "你好啊，我今天好开心",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "这个事情有点意思",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 1,
+      "input": [
+        [
+          "这个事情有点意思",
+          "，"
+        ],
+        [
+          "我去吃饭了，等会回来",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "这个事情有点意思",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "我去吃饭了，等会回来",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 2,
+      "input": [
+        [
+          "我去吃饭了，等会回来",
+          "，"
+        ],
+        [
+          "你说的没错，我也是这样想的",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我去吃饭了，等会回来",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "你说的没错，我也是这样想的",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 3,
+      "input": [
+        [
+          "你说的没错，我也是这样想的",
+          "，"
+        ],
+        [
+          "他应该已经到北京了",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "你说的没错，我也是这样响的",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "想",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        },
+        {
+          "text": "他应该以经到北京了",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 4,
+      "input": [
+        [
+          "他应该已经到北京了",
+          "，"
+        ],
+        [
+          "明天再说吧，现在困了",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "他应该已经到北京了",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "明天在说吧，现在困了",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 5,
+      "input": [
+        [
+          "明天再说吧，现在困了",
+          "，"
+        ],
+        [
+          "买这个东西是不是不太好",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "明天再说巴，现在困了",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "吧",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        },
+        {
+          "text": "买这个东西是不是不太好",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 6,
+      "input": [
+        [
+          "买这个东西是不是不太好",
+          "，"
+        ],
+        [
+          "我知道了，不过为什么呢",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "买这个东西是不是不太好",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "我知道了，不过为神么呢",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 7,
+      "input": [
+        [
+          "我知道了，不过为什么呢",
+          "，"
+        ],
+        [
+          "我喜欢蓝色，也喜欢晴天",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我知到了，不过为什么呢",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "道",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        },
+        {
+          "text": "我喜欢蓝色，也喜欢晴天",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 8,
+      "input": [
+        [
+          "我喜欢蓝色，也喜欢晴天",
+          "，"
+        ],
+        [
+          "好，知道啦",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我喜欢蓝色，也喜欢晴天",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "好，知道啦",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 9,
+      "input": [
+        [
+          "好，知道啦",
+          "，"
+        ],
+        [
+          "你好啊，我今天好开心",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "好，之道啦",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "知",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        },
+        {
+          "text": "你好啊，我今天好开心",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 10,
+      "input": [
+        [
+          "你好啊，我今天好开心",
+          "，"
+        ],
+        [
+          "这个事情有点意思",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "你好啊，我津天好开心",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "这个事情有典意思",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        },
+        {
+          "text": "点",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        }
+      ]
+    },
+    {
+      "seed": 11,
+      "input": [
+        [
+          "这个事情有点意思",
+          "，"
+        ],
+        [
+          "我去吃饭了，等会回来",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "这个市情有点意思",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "事",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        },
+        {
+          "text": "我去吃饭了，等会回来",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 12,
+      "input": [
+        [
+          "我去吃饭了，等会回来",
+          "，"
+        ],
+        [
+          "你说的没错，我也是这样想的",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我去吃饭了，等会回来",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "你说的没错，我也是这样想的",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 13,
+      "input": [
+        [
+          "你说的没错，我也是这样想的",
+          "，"
+        ],
+        [
+          "他应该已经到北京了",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "你说的没错，我也是这样想的",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "他应该以经到北京了",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        },
+        {
+          "text": "已",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        }
+      ]
+    },
+    {
+      "seed": 14,
+      "input": [
+        [
+          "他应该已经到北京了",
+          "，"
+        ],
+        [
+          "明天再说吧，现在困了",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "他英该已经到北京了",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "应",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        },
+        {
+          "text": "明天再说吧，现在困了",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 15,
+      "input": [
+        [
+          "明天再说吧，现在困了",
+          "，"
+        ],
+        [
+          "买这个东西是不是不太好",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "明天再说吧，现在困了",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "买这个东西是不是不太好",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 16,
+      "input": [
+        [
+          "买这个东西是不是不太好",
+          "，"
+        ],
+        [
+          "我知道了，不过为什么呢",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "买这个东息是不是不态好",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "我知道了，不过为什么呢",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 17,
+      "input": [
+        [
+          "我知道了，不过为什么呢",
+          "，"
+        ],
+        [
+          "我喜欢蓝色，也喜欢晴天",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我知道了，不过为神么呢",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "我喜欢蓝色，也喜欢清天",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 18,
+      "input": [
+        [
+          "我喜欢蓝色，也喜欢晴天",
+          "，"
+        ],
+        [
+          "好，知道啦",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我喜欢兰色，也喜欢晴天",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "蓝",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        },
+        {
+          "text": "好，知道拉",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        },
+        {
+          "text": "啦",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        }
+      ]
+    },
+    {
+      "seed": 19,
+      "input": [
+        [
+          "好，知道啦",
+          "，"
+        ],
+        [
+          "你好啊，我今天好开心",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "好，知道啦",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "你好啊，我今天好开心",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 20,
+      "input": [
+        [
+          "你好啊，我今天好开心",
+          "，"
+        ],
+        [
+          "这个事情有点意思",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "你好啊，我今天好开心",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "这个事情有点意思",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 21,
+      "input": [
+        [
+          "这个事情有点意思",
+          "，"
+        ],
+        [
+          "我去吃饭了，等会回来",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "这个事情有点意思",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "我去吃饭了，等会回来",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 22,
+      "input": [
+        [
+          "我去吃饭了，等会回来",
+          "，"
+        ],
+        [
+          "你说的没错，我也是这样想的",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我去吃饭了，等会回来",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "你说的没错，我也是这样想的",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 23,
+      "input": [
+        [
+          "你说的没错，我也是这样想的",
+          "，"
+        ],
+        [
+          "他应该已经到北京了",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "你说的没错，我也是这样想的",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "他应该以经到北京了",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 24,
+      "input": [
+        [
+          "他应该已经到北京了",
+          "，"
+        ],
+        [
+          "明天再说吧，现在困了",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "他应该已经到北京了",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "名天载说吧，现在困了",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        },
+        {
+          "text": "再",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        }
+      ]
+    },
+    {
+      "seed": 25,
+      "input": [
+        [
+          "明天再说吧，现在困了",
+          "，"
+        ],
+        [
+          "买这个东西是不是不太好",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "明天在说吧，现在困了",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "买这个东西是不是不太好",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 26,
+      "input": [
+        [
+          "买这个东西是不是不太好",
+          "，"
+        ],
+        [
+          "我知道了，不过为什么呢",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "买这个东西是不是不太好",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "我之道了，不过为神么呢",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        },
+        {
+          "text": "知",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        }
+      ]
+    },
+    {
+      "seed": 27,
+      "input": [
+        [
+          "我知道了，不过为什么呢",
+          "，"
+        ],
+        [
+          "我喜欢蓝色，也喜欢晴天",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我知道了，不过为什么呢",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "我喜欢蓝色，也喜欢晴天",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 28,
+      "input": [
+        [
+          "我喜欢蓝色，也喜欢晴天",
+          "，"
+        ],
+        [
+          "好，知道啦",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我喜欢蓝色，也喜欢晴天",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "好，知道拉",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 29,
+      "input": [
+        [
+          "好，知道啦",
+          "，"
+        ],
+        [
+          "你好啊，我今天好开心",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "好，知道啦",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "你好啊，我今天好开心",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 30,
+      "input": [
+        [
+          "你好啊，我今天好开心",
+          "，"
+        ],
+        [
+          "这个事情有点意思",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "你好啊，我今天好开心",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "这个是情有点意思",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 31,
+      "input": [
+        [
+          "这个事情有点意思",
+          "，"
+        ],
+        [
+          "我去吃饭了，等会回来",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "这个事情有点意思",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "我去吃饭了，等会回来",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 32,
+      "input": [
+        [
+          "我去吃饭了，等会回来",
+          "，"
+        ],
+        [
+          "你说的没错，我也是这样想的",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我去吃泛了，等会回来",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "你说的没错，我也是这样想的",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 33,
+      "input": [
+        [
+          "你说的没错，我也是这样想的",
+          "，"
+        ],
+        [
+          "他应该已经到北京了",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "你说的没错，我也是这样想的",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "他应该已经到北京了",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 34,
+      "input": [
+        [
+          "他应该已经到北京了",
+          "，"
+        ],
+        [
+          "明天再说吧，现在困了",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "他应该意经到北京了",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "已",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        },
+        {
+          "text": "明天再说吧，现在困了",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 35,
+      "input": [
+        [
+          "明天再说吧，现在困了",
+          "，"
+        ],
+        [
+          "买这个东西是不是不太好",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "明天再说吧，现在困了",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "买这个东析是不是不太好",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 36,
+      "input": [
+        [
+          "买这个东西是不是不太好",
+          "，"
+        ],
+        [
+          "我知道了，不过为什么呢",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "买这个东西是不是不太好",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "我知道了，不过为什么呢",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 37,
+      "input": [
+        [
+          "我知道了，不过为什么呢",
+          "，"
+        ],
+        [
+          "我喜欢蓝色，也喜欢晴天",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我直道了，不过为什么呢",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "知",
+          "quote_previous": true,
+          "separator": "",
+          "is_correction": true
+        },
+        {
+          "text": "我喜欢兰色，也喜欢情天",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 38,
+      "input": [
+        [
+          "我喜欢蓝色，也喜欢晴天",
+          "，"
+        ],
+        [
+          "好，知道啦",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "我喜欢蓝色，也喜欢晴天",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "好，知道啦",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    },
+    {
+      "seed": 39,
+      "input": [
+        [
+          "好，知道啦",
+          "，"
+        ],
+        [
+          "你好啊，我今天好开心",
+          ""
+        ]
+      ],
+      "output": [
+        {
+          "text": "好，知道啦",
+          "quote_previous": false,
+          "separator": "，",
+          "is_correction": false
+        },
+        {
+          "text": "你好啊，我今天好开心",
+          "quote_previous": false,
+          "separator": "",
+          "is_correction": false
+        }
+      ]
+    }
+  ]
+}

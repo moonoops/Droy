@@ -1,0 +1,14 @@
+<resources>
+    <string name="cnotice_language_update_failed">通知语言更新失败</string>
+    <string name="cnotice_channel">伙伴消息</string>
+    <string name="cnotice_quiet_channel">伙伴静默消息</string>
+    <string name="cnotice_you">你</string>
+    <string name="cnotice_open">打开对话</string>
+    <string name="cnotice_mark_read">标为已读</string>
+    <string name="cnotice_private">收到一条伙伴消息</string>
+    <string name="cnotice_read_failed">未能标为已读，请打开对话重试。</string>
+    <plurals name="cnotice_unread">
+        <item quantity="one">%1$d 条未读消息</item>
+        <item quantity="other">%1$d 条未读消息</item>
+    </plurals>
+</resources>

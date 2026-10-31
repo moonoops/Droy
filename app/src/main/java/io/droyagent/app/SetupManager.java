@@ -14,6 +14,8 @@ import androidx.webkit.WebViewFeature;
 import io.droyagent.androiduse.DroyAccessibilityService;
 import io.droyagent.androiduse.FileGrantStore;
 import io.droyagent.androiduse.ShizukuAccess;
+import io.droyagent.app.nativeui.permissions.NativeAuthorizationPolicy;
+import io.droyagent.app.nativeui.permissions.NativePermissionPolicyStore;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -48,7 +50,7 @@ final class SetupManager {
         boolean legacy = !setup.getBoolean("initializing", false)
             && hasLegacyState(product.getAll().isEmpty(), hasFiles(new File(context.getFilesDir(), "dsh-home")));
         if (!legacy) {
-            commit(setup.edit().putBoolean("initializing", true));
+            commit(setup.edit().putBoolean("initializing", true).putBoolean("nativeFirstUseEligible", true));
             SharedPreferences.Editor defaults = product.edit();
             for (String key : capabilityKeys(context)) defaults.putBoolean(key, false);
             defaults.putBoolean(ProductPermissions.STOPPED, true);
@@ -136,6 +138,13 @@ final class SetupManager {
         return value;
     }
 
+    static boolean rootEnabledAfterUpdate(boolean current, JSONObject value) throws Exception {
+        String mode = value.optString("mode", "custom");
+        boolean next = mode.equals("custom") ? current : mode.equals("all") || mode.equals("assistant") && ASSISTANT.contains("allowRoot");
+        JSONObject capabilities = value.optJSONObject("capabilities");
+        return capabilities != null && capabilities.has("allowRoot") ? capabilities.getBoolean("allowRoot") : next;
+    }
+
     static synchronized JSONObject update(Context context, JSONObject input) throws Exception {
         initialize(context);
         JSONObject value = validatedUpdate(input, capabilityKeys(context));
@@ -146,6 +155,19 @@ final class SetupManager {
         if (capabilities != null) for (String key : keys(capabilities))
             capabilitiesChanged |= ProductPermissions.allowed(product, key) != capabilities.getBoolean(key);
         boolean choicesChanged = value.has("mode") || capabilitiesChanged;
+        if (capabilities != null && !value.has("mode")) {
+            boolean any = false, enabling = false;
+            for (String key : capabilityKeys(context)) {
+                boolean enabled = capabilities.has(key) ? capabilities.getBoolean(key) : ProductPermissions.allowed(product, key);
+                any |= enabled;
+                enabling |= capabilities.has(key) && enabled;
+            }
+            if (enabling || !any) {
+                boolean stopped = !any;
+                choicesChanged |= ProductPermissions.stopped(context) != stopped;
+                settings.putBoolean(ProductPermissions.STOPPED, stopped);
+            }
+        }
         if (value.has("mode")) {
             String mode = value.getString("mode");
             installation.putString("mode", mode).putBoolean("modeSelected", true);
@@ -166,6 +188,11 @@ final class SetupManager {
         if (value.has("source")) installation.putString("source", value.getString("source"));
         if (value.has("shizukuChoice")) installation.putString("shizukuChoice", value.getString("shizukuChoice"));
         if (choicesChanged) installation.remove("deviceVerification");
+        RuntimeException restorationFailure = null;
+        if (ProductPermissions.allowed(product, "allowRoot") && !rootEnabledAfterUpdate(true, value)) {
+            try { NotificationManagement.get(context).prepareRootRevocation(); }
+            catch (RuntimeException failure) { restorationFailure = failure; }
+        }
         commit(settings);
         commit(installation);
         if (choicesChanged) {
@@ -173,6 +200,9 @@ final class SetupManager {
             RuntimeService.memoryPermissionsChanged(context);
             RuntimeService.applySavedOperationState();
         }
+        if (restorationFailure != null) throw new IllegalStateException(NativeLocale.text(
+                "Root 授权已关闭，但原通知设置未能恢复。请在通知整理中查看并处理。",
+                "Root access is off, but the original notification settings could not be restored. Review them in notification organization."), restorationFailure);
         return status(context);
     }
 
@@ -247,6 +277,20 @@ final class SetupManager {
             .put("channel", sameChoices ? previous.optString("channel", "none") : "none")
             .put("checkedAt", sameChoices ? previous.optLong("checkedAt", now) : now)
             .put("rootVerified", verified).put("rootCheckedAt", now).put("choicesFingerprint", fingerprint);
+    }
+
+    static synchronized JSONObject uiStatus(Context context) throws Exception {
+        initialize(context);
+        SharedPreferences setup = store(context), product = ProductPermissions.preferences(context);
+        if (!setup.getBoolean("completed", false)) return status(context);
+        // Completed onboarding only needs identity and routing. Environment checks
+        // remain in status()/verify(), rather than every ordinary settings write.
+        return new JSONObject().put("schemaVersion", SCHEMA).put("completed", true).put("required", false)
+            .put("step", setup.getInt("step", 6)).put("source", setup.getString("source", "phone"))
+            .put("mode", setup.getString("mode", "dialogue")).put("modeSelected", setup.getBoolean("modeSelected", false))
+            .put("identity", new JSONObject().put("companionName", product.getString("petName", "Droy"))
+                .put("userAddress", product.getString("userAddress", ""))
+                .put("personality", product.getString("companionPersonality", "")));
     }
 
     static synchronized JSONObject status(Context context) throws Exception {
@@ -324,6 +368,123 @@ final class SetupManager {
         if (!current.getBoolean("canComplete")) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("安装检查尚未通过，请处理未完成项或关闭对应可选功能", "Installation checks have not passed. Address incomplete items or disable the corresponding optional features"));
         commit(store(context).edit().putBoolean("completed", true).putInt("step", 6).putLong("completedAt", System.currentTimeMillis()));
         return status(context);
+    }
+
+    static synchronized JSONObject nativeRouteState(Context context) throws Exception {
+        initialize(context);
+        SharedPreferences installation = store(context);
+        NativeRuntimeHost.Snapshot runtime = NativeRuntimeHost.inspect(context);
+        NativeAuthorizationPolicy policy = new NativePermissionPolicyStore(ProductPermissions.preferences(context)).selected();
+        boolean completed = installation.getBoolean("completed", false);
+        int step = installation.getInt("nativeWizardStep", completed ? 5 : 1);
+        if (step < 1 || step > 6) throw new IllegalStateException(NativeLocale.text("原生安装进度无效", "Invalid native setup progress"));
+        // The former summary page is folded into the final permission step.
+        if (step == 6) {
+            step = 5;
+            commit(installation.edit().putInt("nativeWizardStep", step));
+        }
+        return new JSONObject().put("nativeSchemaVersion", 1).put("schemaVersion", installation.getInt("schemaVersion", SCHEMA))
+            .put("completed", completed).put("required", !completed)
+            .put("step", step)
+            .put("legacyStep", installation.getInt("step", 1)).put("source", installation.getString("source", "phone"))
+            .put("locale", runtime.locale)
+            .put("environment", new JSONObject().put("ready", runtime.ready).put("active", runtime.active)
+                .put("canStart", runtime.canStart).put("status", runtime.status))
+            .put("permissionPolicy", new JSONObject().put("selected", policy != null)
+                .put("mode", policy == null ? JSONObject.NULL : policy.getId()))
+            .put("acknowledgements", receipt(installation, "nativeAcknowledgements"));
+    }
+
+    static synchronized JSONObject nativeStep(Context context, int step) throws Exception {
+        initialize(context);
+        if (step < 1 || step > 5) throw new IllegalArgumentException(NativeLocale.text("安装步骤应为 1–5", "Setup step must be 1–5"));
+        commit(store(context).edit().putInt("nativeWizardStep", step));
+        return nativeRouteState(context);
+    }
+
+    static synchronized JSONObject nativeAcknowledge(Context context, String key, boolean acknowledged) throws Exception {
+        initialize(context);
+        if (key == null || !Set.of("welcome", "accessibility", "root", "backgroundRuntime", "powerManagement").contains(key))
+            throw new IllegalArgumentException(NativeLocale.text("安装确认项目无效", "Invalid setup acknowledgement"));
+        JSONObject values = receipt(store(context), "nativeAcknowledgements").put(key, acknowledged);
+        commit(store(context).edit().putString("nativeAcknowledgements", values.toString()));
+        return nativeRouteState(context);
+    }
+
+    static synchronized JSONObject nativeStatus(Context context, JSONObject input) throws Exception {
+        initialize(context);
+        validateNativeFacts(input);
+        JSONObject result = nativeRouteState(context);
+        JSONObject model = receipt(store(context), "modelVerification");
+        String fingerprint = input.isNull("configFingerprint") ? null : input.getString("configFingerprint");
+        String profileFingerprint = input.getString("profileFingerprint");
+        boolean profileReady = input.getBoolean("profileReady");
+        NativeAuthorizationPolicy policy = new NativePermissionPolicyStore(ProductPermissions.preferences(context)).selected();
+        JSONObject checked = nativeChecks(model, fingerprint, profileReady, profileFingerprint,
+            receipt(store(context), "nativeUserConfirmation"), policy == null ? null : policy.getId(), RuntimeService.ready);
+        JSONObject publicModel = new JSONObject(model.toString());
+        publicModel.remove("configFingerprint");
+        publicModel.put("passed", nativeModelMatches(model, fingerprint))
+            .put("toolsPassed", nativeModelMatches(model, fingerprint) && Boolean.TRUE.equals(model.opt("toolsPassed")));
+        return result.put("checks", checked.getJSONArray("checks")).put("canComplete", checked.getBoolean("canComplete"))
+            .put("modelVerification", publicModel).put("identity", checked.getJSONObject("identity"));
+    }
+
+    static synchronized JSONObject nativeAcknowledgeIdentity(Context context, JSONObject input) throws Exception {
+        initialize(context);
+        if (input == null || !keys(input).equals(Set.of("operation", "profileFingerprint", "profileReady"))
+                || !"nativeAcknowledgeIdentity".equals(input.opt("operation")) || !Boolean.TRUE.equals(input.opt("profileReady"))
+                || !(input.opt("profileFingerprint") instanceof String) || !validFingerprint(input.getString("profileFingerprint")))
+            throw new IllegalArgumentException(NativeLocale.text("用户资料确认无效", "Invalid user profile confirmation"));
+        commit(store(context).edit().putString("nativeUserConfirmation", new JSONObject()
+            .put("profileFingerprint", input.getString("profileFingerprint")).put("confirmedAt", System.currentTimeMillis()).toString()));
+        return nativeRouteState(context);
+    }
+
+    static synchronized JSONObject nativeComplete(Context context, JSONObject input) throws Exception {
+        JSONObject current = nativeStatus(context, input);
+        if (current.getBoolean("completed")) return current;
+        if (!current.getBoolean("canComplete")) throw new IllegalStateException(NativeLocale.text("安装条件尚未完成", "Setup requirements are incomplete"));
+        SharedPreferences installation = store(context);
+        SharedPreferences.Editor editor = installation.edit().putBoolean("completed", true).putInt("nativeWizardStep", 5)
+            .putLong("nativeCompletedAt", System.currentTimeMillis());
+        if (!installation.contains("completedAt")) editor.putLong("completedAt", System.currentTimeMillis());
+        commit(editor);
+        return nativeStatus(context, input);
+    }
+
+    private static void validateNativeFacts(JSONObject input) throws Exception {
+        if (input == null || !keys(input).equals(Set.of("operation", "configFingerprint", "profileFingerprint", "profileReady"))
+                || !Set.of("nativeStatus", "nativeComplete").contains(input.opt("operation"))
+                || !(input.opt("profileReady") instanceof Boolean) || !(input.opt("profileFingerprint") instanceof String)
+                || !validFingerprint(input.getString("profileFingerprint")) || !input.has("configFingerprint")
+                || !input.isNull("configFingerprint") && (!(input.opt("configFingerprint") instanceof String) || !validFingerprint(input.getString("configFingerprint"))))
+            throw new IllegalArgumentException(NativeLocale.text("原生安装检查数据无效", "Invalid native setup verification data"));
+    }
+
+    static boolean nativeModelMatches(JSONObject model, String fingerprint) {
+        String saved = model.optString("configFingerprint");
+        return Boolean.TRUE.equals(model.opt("passed")) && model.opt("configFingerprint") instanceof String
+            && validFingerprint(fingerprint) && validFingerprint(saved)
+            && MessageDigest.isEqual(fingerprint.getBytes(StandardCharsets.US_ASCII), saved.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    static JSONObject nativeChecks(JSONObject model, String fingerprint, boolean profileReady, String profileFingerprint,
+                                   JSONObject confirmation, String permissionPolicy, boolean runtimeReady) throws Exception {
+        boolean modelPassed = nativeModelMatches(model, fingerprint);
+        boolean toolsPassed = modelPassed && Boolean.TRUE.equals(model.opt("toolsPassed"));
+        String confirmed = confirmation.optString("profileFingerprint");
+        boolean identityConfirmed = profileReady && confirmation.opt("profileFingerprint") instanceof String
+            && validFingerprint(profileFingerprint) && validFingerprint(confirmed)
+            && MessageDigest.isEqual(profileFingerprint.getBytes(StandardCharsets.US_ASCII), confirmed.getBytes(StandardCharsets.US_ASCII));
+        boolean policySelected = "batch".equals(permissionPolicy) || "on_first_use".equals(permissionPolicy);
+        JSONArray checks = new JSONArray();
+        for (Object[] check : new Object[][]{{"runtime", runtimeReady}, {"model", modelPassed}, {"modelTools", toolsPassed},
+                {"identity", identityConfirmed}, {"permissionPolicy", policySelected}})
+            checks.put(new JSONObject().put("id", check[0]).put("required", true).put("passed", check[1]));
+        return new JSONObject().put("checks", checks)
+            .put("canComplete", runtimeReady && modelPassed && toolsPassed && identityConfirmed && policySelected)
+            .put("identity", new JSONObject().put("saved", profileReady).put("confirmed", identityConfirmed));
     }
 
     private static JSONObject capabilities(Context context) throws Exception {

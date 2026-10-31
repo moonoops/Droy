@@ -11,6 +11,10 @@ import { patchNodePtyLoader } from './mobile_native_patch.mjs';
 import { patchSidebarBrowser } from './mobile_browser_patch.mjs';
 import { patchSystemPrompt, patchSessionTitleProvider } from './mobile_prompt_patch.mjs';
 import { patchLocalePersistence } from './mobile_locale_patch.mjs';
+import { patchSessionModelSelection } from './mobile_session_model_patch.mjs';
+import { patchNativeCompanionMaintenance } from './native_companion_maintenance_patch.mjs';
+import { patchNativeMaintenanceWebServer, patchNativeMaintenanceGateway } from './native_maintenance_admission_patch.mjs';
+import { patchNativeScheduleMaintenance } from './native_schedule_maintenance_patch.mjs';
 import { patchMediaCommandMenu } from '../runtime/media-input/upstream-patch.mjs';
 import { patchVoiceInput } from '../runtime/voice/upstream-patch.mjs';
 import { patchPrivacyLlm, patchPrivacyPiAi, patchExecutionMcp, patchExecutionFileMode, patchRequiredLoader, patchRequiredPluginManager, patchRequiredPluginManagerPatch } from '../runtime/privacy/upstream-patch.mjs';
@@ -41,6 +45,7 @@ const mobileClient = composeMobileClient(
 for (const destination of [join(staging, 'mobile'), join(staging, 'node_modules/@droyagent/mobile')]) {
   await rm(destination, { recursive: true, force: true });
   await cp(join(root, 'runtime/mobile'), destination, { recursive: true, filter: path => path.split('/').pop() !== 'tests' });
+  await cp(join(root, 'app/src/main/assets/pet'), join(destination, 'assets/pets'), { recursive: true });
   await writeFile(join(destination, 'client.js'), mobileClient);
 }
 const nodeModules = join(staging, 'node_modules');
@@ -105,6 +110,7 @@ function replaceOnce(text, from, to) {
 await patch('@deepseek-ai/dsh-system-prompt/lib/index.js', patchSystemPrompt);
 await patch('@deepseek-ai/dsh-session-title-first-prompt-llm/lib/index.js', patchSessionTitleProvider);
 await patch('@deepseek-ai/dsh-session-title-all-prompts-llm/lib/index.js', patchSessionTitleProvider);
+await patch('@deepseek-ai/dsh-api-session-controller/lib/index.js', patchSessionModelSelection);
 await patch('@deepseek-ai/dsh-llm/lib/index.js', patchPrivacyLlm);
 await patch('@deepseek-ai/dsh-llm-pi-ai/lib/index.js', patchPrivacyPiAi);
 await patch('@deepseek-ai/dsh-mcp-client/lib/index.js', patchExecutionMcp);
@@ -124,9 +130,13 @@ await patch('@deepseek-ai/node-addon-system/lib/flock.js', text => {
 await patch('@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js', text => {
   text = `import { publishExclusive as droyPublishExclusive } from '@droyagent/mobile/publish';\n` + text;
   text = replaceOnce(text, 'await internals.fs.link(staged, currentPath);', 'await droyPublishExclusive(staged, currentPath);');
-  return replaceOnce(text, 'await link(tmp, finalPath);', 'await droyPublishExclusive(tmp, finalPath);');
+  text = replaceOnce(text, 'await link(tmp, finalPath);', 'await droyPublishExclusive(tmp, finalPath);');
+  return patchNativeCompanionMaintenance(text);
 });
+await patch('@deepseek-ai/dsh-api-gateway/lib/index.js', patchNativeMaintenanceGateway);
+await patch('@deepseek-ai/dsh-schedule/lib/index.js', patchNativeScheduleMaintenance);
 await patch('@deepseek-ai/dsh-host-webserver/lib/index.js', text => {
+  text = patchNativeMaintenanceWebServer(text);
   text = `import { requireMobileSession, requireMobileUpgrade } from '@droyagent/mobile/auth';\n` + text;
   text = replaceOnce(text, 'const listener = (req, res) => {', 'const listener = (req, res) => {\n\t\t\tif (!requireMobileSession(req, res)) return;');
   return replaceOnce(text, 'this.server.on("upgrade", (req, socket, head) => {', 'this.server.on("upgrade", (req, socket, head) => {\n\t\t\t\tif (!requireMobileUpgrade(req, socket)) return;');

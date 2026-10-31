@@ -188,7 +188,7 @@ test('revoking extraction permission aborts the real in-flight SDK stream and pr
 
 test('disabling memory cancels the in-flight extraction without storing a late answer', async t => {
   const f = await fixture(t); await f.grant(); await f.enqueue(await f.source()); f.setHold(true);
-  const running = f.maintenance.extractOnce(); await f.waitForRequest(running); f.settings.enabled = false; await f.maintenance.stop();
-  assert.equal((await running).code, 'MEMORY_MAINTENANCE_CANCELLED'); assert.equal((await f.memory.query()).total, 0);
+  const running = f.maintenance.extractOnce(); await f.waitForRequest(running); f.settings.enabled = false; await f.maintenance.stop('MEMORY_DISABLED');
+  assert.equal((await running).code, 'MEMORY_DISABLED'); assert.equal((await f.memory.query()).total, 0);
   assert.equal(f.maintenance.status().held, 1);
 });

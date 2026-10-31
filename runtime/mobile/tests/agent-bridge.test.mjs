@@ -9,7 +9,10 @@ import { createServer } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { companionState } from './fixtures/companion-state.mjs';
 const installed = createRequire(new URL('../../dsh/package.json', import.meta.url));
+const localMemory = createRequire(new URL('../../memory/package.json', import.meta.url));
 const hooks = registerHooks({ resolve(specifier, context, next) {
+  if (specifier === '@droyagent/memory' || specifier.startsWith('@droyagent/memory/'))
+    return {url:pathToFileURL(localMemory.resolve(specifier)).href,shortCircuit:true};
   if (specifier === 'zod' || specifier.startsWith('@deepseek-ai/')) return {url:pathToFileURL(installed.resolve(specifier)).href,shortCircuit:true};
   return next(specifier,context);
 } });
@@ -55,7 +58,7 @@ class ScriptedMockModel extends LlmAdapter {
 function deferred(){let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};}
 async function eventually(predicate,label){const deadline=Date.now()+3000;while(!predicate()){if(Date.now()>deadline)throw new Error(`Timed out: ${label}`);await delay(10);}}
 async function harness(script,implementation,options={}){
-  const requests=[],progressRequests=[],routes=new Map();const sockets=new Set();
+  const requests=[],progressRequests=[],preflightRequests=[],routes=new Map();const sockets=new Set();
   const bridge=createServer(async(req,res)=>{
     try{
       if(routes.has(req.url)){await routes.get(req.url)(req,res);return;}
@@ -63,6 +66,12 @@ async function harness(script,implementation,options={}){
       assert.equal(req.headers['content-type'],'application/json; charset=utf-8');
       let body='';for await(const data of req)body+=data;
       const call={path:req.url,...JSON.parse(body)};
+      if(call.path==='/permissions/preflight'){
+        preflightRequests.push(call);
+        // This Android fixture starts with ordinary access already granted unless a test supplies a human gate.
+        const result=options.preflight?await options.preflight(call):{ok:true,result:{}};
+        if(!res.destroyed){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(result));}return;
+      }
       if(call.path==='/companion'){
         res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,result:companionState}));return;
       }
@@ -89,6 +98,7 @@ async function harness(script,implementation,options={}){
   await ctx.plugin(UserQuestions);await ctx.plugin(UserApproval,{policy:options.approvalPolicy??'ask'});
   await ctx.plugin(pluginPolicy);
   if (options.privacy) ctx.provide('droyPrivacy', options.privacy);
+  ctx.provide('droyCompanions', { ownsSession: () => false, identityForAgent: async () => null });
   await ctx.plugin(mobile);
   const adapter=new ScriptedMockModel(script);ctx.llm.registerAdapter(['mock-android-contract'],adapter);
   const errors=[];ctx.on('agent/error',event=>errors.push(event.error));
@@ -97,7 +107,7 @@ async function harness(script,implementation,options={}){
   // These fixtures exercise expanded capability contracts; startup-context separately tests the compact default.
   for (const group of Object.keys(TOOL_GROUPS))
     await ctx.tools.get('droy_load_tools',agent).execute({group},{agent});
-  return {ctx,agent,adapter,requests,progressRequests,errors,
+  return {ctx,agent,adapter,requests,progressRequests,preflightRequests,errors,
     action(data,headers={Cookie:`droy_session=${TOKEN}`}){return fetch(`http://127.0.0.1:${bridge.address().port}/droy/pet/action`,{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(data)});},
     async run(prompt='仅测试：读取页面并填写指定文字'){agent.followup(createUserMessage({content:[{type:'text',text:prompt}],source:{kind:'user'}}));await agent.whenIdle();},
     async close(){await ctx.fiber.dispose();for(const socket of sockets)socket.destroy();await new Promise(r=>bridge.close(r));},
@@ -272,60 +282,54 @@ test('repeated model tool-call ids in later turns do not reuse an earlier native
     fixture.requests.filter(call => call.path === '/tool')[1].callId);
 });
 
-test('conversation rules are actually persisted through the native endpoint in the real agent loop', async () => {
-  const rule = { packageName: 'example.shop', instruction: '只有闪送送达时提醒，其他收纳', entries: [], defaultAction: 'analyze' };
+test('conversation rule text is persisted through the native endpoint in the real agent loop', async () => {
+  const ruleText = '只有闪送送达时提醒，其他收纳';
   const fixture = await harness([
     tool('notification-current', 'droy_notification_rules', { operation: 'get' }),
-    tool('notification-save', 'droy_notification_rules', { operation: 'upsertRule', rule }),
-    options => {
-      assert.match(JSON.stringify(toolResults(options)), /saved-rule/);
-      return text('已设置：只有闪送送达时提醒。');
-    },
+    tool('notification-save', 'droy_notification_rules', { operation: 'configure', ruleText }),
+    options => { assert.match(JSON.stringify(toolResults(options)), /只有闪送送达时提醒/); return text('已设置：只有闪送送达时提醒。'); },
   ], async call => {
-    if (call.path === '/notifications') return { ok: true, result: call.operation === 'get'
-      ? { enabled: true, rules: [], apps: [{ packageName: 'example.shop', label: '测试商城' }] }
-      : { enabled: true, rules: [{ ...call.rule, id: 'saved-rule' }] } };
+    if (call.path === '/notifications') return { ok: true, result: {
+      enabled: true, ruleText: call.operation === 'get' ? '保留重要通知' : call.ruleText,
+      apps: [{ packageName: 'example.shop', label: '测试商城', mode: 'managed' }],
+    } };
     return { ok: true, result: {} };
   });
   try {
     await fixture.run('测试：淘宝只有闪送送达时提醒，其他收纳');
     assert.deepEqual(fixture.requests.filter(call => call.path === '/notifications').map(({ path, ...body }) => body),
-      [{ operation: 'get' }, { operation: 'upsertRule', rule }]);
+      [{ operation: 'get' }, { operation: 'configure', ruleText }]);
     assert.equal(fixture.errors.length, 0);
   } finally { await fixture.close(); }
 });
 
-test('editing an app policy persists one complete policy containing earlier and new user requirements', async () => {
-  const original = { id: 'existing-policy', packageName: 'example.sms', instruction: '广告短信清除，验证码保留',
-    entries: [{ containsAny: ['退订回T'], action: 'clear' }], defaultAction: 'analyze' };
-  const updated = { ...original, instruction: '广告短信清除，验证码保留；快递取件短信提醒，其他短信按重要性分析',
-    entries: [...original.entries, { containsAll: ['取件码'], action: 'notify' }] };
-  let policies = [original];
+test('editing rule text retains earlier user requirements in the one canonical policy', async () => {
+  const original = '广告短信清除，验证码保留';
+  const updated = original + '；快递取件短信提醒，其他短信按重要性分析';
+  let ruleText = original;
   const fixture = await harness([
     tool('policy-before', 'droy_notification_rules', { operation: 'get' }),
     options => {
       assert.match(JSON.stringify(toolResults(options)), /广告短信清除，验证码保留/);
-      return tool('policy-update', 'droy_notification_rules', { operation: 'upsertRule', rule: updated });
+      return tool('policy-update', 'droy_notification_rules', { operation: 'configure', ruleText: updated });
     },
     text('已设置：快递取件短信提醒，广告与验证码按原规则处理。'),
   ], async call => {
     if (call.path !== '/notifications') return { ok: true, result: {} };
-    if (call.operation === 'upsertRule') policies = [...policies.filter(rule => rule.packageName !== call.rule.packageName), call.rule];
-    return { ok: true, result: { enabled: true, rules: policies, apps: [{ packageName: 'example.sms', label: '测试短信' }] } };
+    if (call.operation === 'configure') ruleText = call.ruleText;
+    return { ok: true, result: { enabled: true, ruleText, apps: [{ packageName: 'example.sms', label: '测试短信', mode: 'managed' }] } };
   });
   try {
     await fixture.run('测试：另外把快递取件短信提醒我，之前的要求保持');
-    assert.deepEqual(policies, [updated]);
-    assert.equal(policies[0].id, original.id);
-    assert.deepEqual(policies[0].entries[0], original.entries[0]);
+    assert.equal(ruleText, updated);
     assert.equal(fixture.errors.length, 0);
   } finally { await fixture.close(); }
 });
 
-test('dialogue app exceptions and content cleanup persist, and restoring all app modes keeps content rules', async () => {
-  const smsRule = { packageName: 'example.sms', instruction: '只清理广告短信，其他短信保留',
-    entries: [], defaultAction: 'analyze' };
-  let exceptions = [], rules = [];
+test('per-app choices and full-list batch selection preserve text rules and the independent master switch', async () => {
+  const smsRule = '只清理广告短信，其他短信保留';
+  let ruleText = '保留重要通知';
+  const modes = new Map([['example.chat', 'managed'], ['example.shop', 'managed'], ['example.sms', 'managed']]);
   const apps = [{ packageName: 'example.chat', label: '测试聊天' }, { packageName: 'example.shop', label: '测试商城' },
     { packageName: 'example.sms', label: '测试短信' }];
   const fixture = await harness([
@@ -334,37 +338,35 @@ test('dialogue app exceptions and content cleanup persist, and restoring all app
       assert.match(JSON.stringify(toolResults(options)), /测试聊天/);
       return tool('allow-chat', 'droy_notification_rules', { operation: 'setAppMode', packageName: 'example.chat', mode: 'allow' });
     },
-    tool('block-shop', 'droy_notification_rules', { operation: 'setAppMode', packageName: 'example.shop', mode: 'block' }),
-    tool('sms-content', 'droy_notification_rules', { operation: 'upsertRule', rule: smsRule }),
-    text('已设置：聊天通知放行，商城通知关闭，短信只清理广告。'),
-    tool('current-exceptions', 'droy_notification_rules', { operation: 'get' }),
+    tool('allow-shop', 'droy_notification_rules', { operation: 'setAppMode', packageName: 'example.shop', mode: 'allow' }),
+    tool('sms-content', 'droy_notification_rules', { operation: 'configure', ruleText: smsRule }),
+    text('已设置：聊天和商城通知按原应用规则，短信只清理广告。'),
+    tool('current-selection', 'droy_notification_rules', { operation: 'get' }),
     options => {
-      const result = JSON.stringify(toolResults(options));
-      assert.match(result, /allow/); assert.match(result, /block/);
-      return tool('restore-app-modes', 'droy_notification_rules', { operation: 'configure', exceptions: [] });
+      assert.match(JSON.stringify(toolResults(options)), /allow/);
+      return tool('select-all-apps', 'droy_notification_rules', { operation: 'setApps', enabled: true, packageNames: apps.map(app => app.packageName) });
     },
-    text('已恢复全部应用智能管理，短信内容规则保留。'),
+    text('已选择全部应用，内容规则保留。'),
   ], async call => {
     if (call.path !== '/notifications') return { ok: true, result: {} };
-    if (call.operation === 'setAppMode') {
-      exceptions = exceptions.filter(entry => entry.packageName !== call.packageName);
-      if (call.mode !== 'managed') exceptions.push({ packageName: call.packageName, mode: call.mode });
+    if (call.operation === 'setAppMode') modes.set(call.packageName, call.mode);
+    if (call.operation === 'configure') ruleText = call.ruleText;
+    if (call.operation === 'setApps') {
+      assert.deepEqual(call.packageNames, apps.map(app => app.packageName));
+      for (const name of call.packageNames) modes.set(name, call.enabled ? 'managed' : 'allow');
     }
-    if (call.operation === 'upsertRule') rules = [{ ...call.rule, id: 'sms-content-policy' }];
-    if (call.operation === 'configure') exceptions = call.exceptions;
-    return { ok: true, result: { enabled: true, cloudAnalysisEnabled: true, exceptions, rules,
-      autoSilence: { status: 'ready' }, apps: apps.map(app => ({ ...app,
-        mode: exceptions.find(entry => entry.packageName === app.packageName)?.mode ?? 'managed' })) } };
+    return { ok: true, result: { enabled: false, ruleText, autoSilence: { status: 'ready' },
+      apps: apps.map(app => ({ ...app, mode: modes.get(app.packageName) })) } };
   });
   try {
-    await fixture.run('测试：放行聊天通知，关闭商城通知，只清理广告短信，其他短信保留');
-    assert.deepEqual(exceptions, [{ packageName: 'example.chat', mode: 'allow' }, { packageName: 'example.shop', mode: 'block' }]);
-    assert.equal(rules[0].instruction, smsRule.instruction);
-    await fixture.run('测试：全部恢复智能管理');
-    assert.deepEqual(exceptions, []);
-    assert.equal(rules[0].instruction, smsRule.instruction);
+    await fixture.run('测试：聊天和商城通知交回原应用处理，只清理广告短信，其他短信保留');
+    assert.equal(modes.get('example.chat'), 'allow'); assert.equal(modes.get('example.shop'), 'allow');
+    assert.equal(ruleText, smsRule);
+    await fixture.run('测试：应用管理全部选择，通知整理总开关先保持关闭');
+    assert.ok([...modes.values()].every(mode => mode === 'managed'));
+    assert.equal(ruleText, smsRule);
     assert.deepEqual(fixture.requests.filter(call => call.path === '/notifications').map(call => call.operation),
-      ['get', 'setAppMode', 'setAppMode', 'upsertRule', 'get', 'configure']);
+      ['get', 'setAppMode', 'setAppMode', 'configure', 'get', 'setApps']);
     assert.equal(fixture.errors.length, 0);
   } finally { await fixture.close(); }
 });
@@ -413,7 +415,9 @@ test('REAL DSH loop → MOCK provider → HTTP Android bridge → verified tool 
     await eventually(()=>fixture.progressRequests.some(r=>r.phase==='completed'),'task progress completion');
     assert.ok(fixture.progressRequests.some(r=>r.phase==='thinking'));
     assert.ok(fixture.progressRequests.some(r=>r.phase==='executing'));
-    assert.ok(fixture.progressRequests.every(r=>Object.keys(r).every(key=>['path','taskId','phase','active','summary','summaryKind','activityKind','pending'].includes(key))));
+    assert.ok(fixture.progressRequests.every(r=>Object.keys(r).every(key=>['path','taskId','phase','active','summary','summaryKind','activityKind','pending','controlTaskId','controlRevision'].includes(key))));
+    assert.ok(fixture.progressRequests.every(r=>r.controlRevision===0));
+    assert.ok(fixture.progressRequests.every(r=>r.controlTaskId===r.taskId));
     assert.deepEqual(fixture.errors,[]);
     assert.equal(JSON.parse(toolResults(fixture.adapter.requests[1])[0].content[0].text).modelImageInput, 'unsupported');
     assert.deepEqual(fixture.requests.filter(r=>r.path==='/tool').map(r=>r.action),['capabilities','observe','input_text','observe']);
@@ -421,6 +425,24 @@ test('REAL DSH loop → MOCK provider → HTTP Android bridge → verified tool 
     assert.deepEqual(fixture.requests.filter(r=>r.path==='/tool').map(r=>r.callId),['caps','before','input','after']);
     assert.match(JSON.stringify(fixture.agent.session.snapshotEvents()),/已重新观察并确认/);
   }finally{await fixture.close();}
+});
+
+test('REAL agent waits for first-use authorization before its original Android call', async () => {
+  const approval = deferred();
+  const fixture = await harness([tool('first-use-observe', 'android_observe', {}), text('收到结果。')],
+    async call => ({ ok: true, result: call.path === '/tool' ? { items: [] } : {} }),
+    { preflight: async () => { await approval.promise; return { ok: true, result: {} }; } });
+  try {
+    const running = fixture.run('测试：读取受控页面夹具。');
+    await eventually(() => fixture.preflightRequests.length === 1, 'first-use preflight');
+    assert.equal(fixture.requests.some(call => call.path === '/tool'), false);
+    const request = fixture.preflightRequests[0];
+    assert.equal(request.taskId, fixture.agent.id); assert.equal(request.callId, 'first-use-observe');
+    approval.resolve(); await running;
+    const calls = fixture.requests.filter(call => call.path === '/tool');
+    assert.equal(calls.length, 1); assert.equal(calls[0].taskId, request.taskId); assert.equal(calls[0].callId, request.callId);
+    assert.deepEqual(fixture.errors, []);
+  } finally { approval.resolve(); await fixture.close(); }
 });
 
 test('REAL agent cancellation reaches /cancel before task release and starts no later action',async()=>{

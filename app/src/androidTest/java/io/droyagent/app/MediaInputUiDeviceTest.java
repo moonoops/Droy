@@ -103,7 +103,6 @@ public final class MediaInputUiDeviceTest {
         assertTrue(preferences.edit().putBoolean("petEnabled", false).putString("petExternalDisplay", "off")
             .putString("petInternalDisplay", "off").putBoolean("backgroundRuntimeEnabled", false).commit());
         imports = new MediaInputStore(context);
-        boolean landscape = "true".equals(InstrumentationRegistry.getArguments().getString("layoutLandscape"));
         // Rotate the physical display through the same automation connection
         // used for injection; a resized letterboxed display has a different input transform.
         assertTrue("UiAutomation did not accept the initial rotation", automation.setRotation(UiAutomation.ROTATION_FREEZE_0));
@@ -112,11 +111,10 @@ public final class MediaInputUiDeviceTest {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         ui = new DeviceUi(instrumentation, activity);
         awaitChat();
-        assertTrue("UiAutomation did not orient the ready chat", automation.setRotation(landscape
-            ? UiAutomation.ROTATION_FREEZE_90 : UiAutomation.ROTATION_FREEZE_0));
+        assertTrue("UiAutomation did not orient the ready chat", automation.setRotation(UiAutomation.ROTATION_FREEZE_0));
         try {
-            DeviceUi.await("The real WebView did not reach the requested orientation", 5000,
-                () -> ui.truth(landscape ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+            DeviceUi.await("The real WebView did not reach the portrait orientation", 5000,
+                () -> ui.truth("innerHeight>innerWidth"));
         } catch (AssertionError failure) {
             org.json.JSONObject geometry = new org.json.JSONObject();
             android.webkit.WebView nativeWeb = ui.web();

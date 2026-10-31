@@ -11,7 +11,7 @@ import { finalizeMobileAssembly, responseLanguagePrompts } from '../prompt.mjs';
 import { mobilePersonas, companionPersonas } from '../profile.mjs';
 import { resolveMobileLocale, normalizeMobileLocale } from '../locale.mjs';
 process.env.DROY_LOCALE = 'zh';
-import { installCompanionIdentity, COMPANION_CONTEXT } from '../companion.mjs';
+import { installCompanionIdentity, COMPANION_CONTEXT, USER_PROFILE_CONTEXT } from '../companion.mjs';
 import { companionState } from './fixtures/companion-state.mjs';
 
 const installed=createRequire(new URL('../../dsh/package.json',import.meta.url));
@@ -99,11 +99,11 @@ for(const preset of presets){
       assert.deepEqual(assembly.tools.map(tool=>tool.name),['fixture_tool']);
       if(config.complete){
         assert.equal(assembly.sections.length,1,'complete mode remains a single section');
-        assert.deepEqual(assembly.contexts.map(context=>context.name),[COMPANION_CONTEXT,'fixture:required']);
+        assert.deepEqual(assembly.contexts.map(context=>context.name),[USER_PROFILE_CONTEXT,COMPANION_CONTEXT,'fixture:required']);
         assert.ok(!renderPrompt(assembly).includes('FICTIONAL_TOOL_CONTRACT'));
       }else{
         assert.match(renderPrompt(assembly),/FICTIONAL_TOOL_CONTRACT/);
-        assert.equal(assembly.contexts.length,3);
+        assert.equal(assembly.contexts.length,4);
       }
       assertProduct(textOf(await fixture.run(agent)));
       assert.ok(JSON.stringify(fixture.adapter.requests.at(-1).messages).includes(companionState.name));
@@ -272,4 +272,22 @@ test('owned blocks in migrated personas change languages once without changing u
   assert.ok(zh.sections[0].text.includes(responseLanguagePrompts.zh));
   assert.equal(zh.contexts, input.contexts);
   assert.equal(zh.tools, input.tools);
+});
+
+test('workbench model receives the current user name and biography on each turn', async () => {
+  let user = {name:'Fictional Alex',bio:'Fictional architect'};
+  let locale = 'en';
+  const f = await harness({locale:()=>locale});
+  try {
+    f.ctx.provide('droyCompanions', {store:{getUserProfile:async()=>user}, identityForAgent:async()=>null, isRestrictedAgent:()=>false});
+    const agent = await f.create({prefix:'Fictional workbench task'});
+    let text = JSON.stringify((await f.run(agent)).messages);
+    assert.match(text,/Fictional Alex/);assert.match(text,/Fictional architect/);
+    user={name:'Fictional Lin',bio:'喜欢徒步'};locale='zh';
+    text=JSON.stringify((await f.run(agent,'继续')).messages);
+    assert.match(text,/Fictional Lin/);assert.match(text,/喜欢徒步/);
+    const assembly = await f.ctx.systemPrompt.assemble({scope:agent,agent});
+    const current = assembly.contexts.find(entry=>entry.name===USER_PROFILE_CONTEXT).text;
+    assert.match(current,/喜欢徒步/);assert.doesNotMatch(current,/Fictional architect/);
+  } finally {await f.close();}
 });

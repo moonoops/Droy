@@ -11,5 +11,5 @@
     }
   },
   "peerDependencies": { "@droyagent/mobile": "0.3.0" },
-  "dependencies": { "ws": "8.22.0", "@deepseek-ai/dsh-tools": "0.2.1-rc.4" }
+  "dependencies": { "ws": "8.22.0", "@deepseek-ai/dsh-tools": "0.2.1-rc.5" }
 }

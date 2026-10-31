@@ -1,4 +1,4 @@
-// DSH 0.2.1-rc.4 exposes row faces but fixes section order internally.
+// DSH 0.2.1-rc.5 exposes row faces but fixes section order internally.
 // Keep this seam separate from the plugin's menu policy and preserve search ranking.
 export function patchMediaCommandMenu(source) {
   const anchor = 'return req.query === "" ? sectionRows(visible, this.t) : (0, _deepseek_ai_dsh_client_ui_primitives.rankByName)(visible, req.query);';

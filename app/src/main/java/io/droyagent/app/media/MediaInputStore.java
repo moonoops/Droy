@@ -39,25 +39,124 @@ public final class MediaInputStore {
     private final File root;
 
     public MediaInputStore(Context context) {
+        this(context, "media-input/v1");
+    }
+
+    private MediaInputStore(Context context, String namespace) {
         this.context = context.getApplicationContext();
-        root = new File(context.getFilesDir(), "media-input/v1");
+        root = new File(context.getFilesDir(), namespace);
+    }
+
+    public static MediaInputStore nativeDrafts(Context context) {
+        return new MediaInputStore(context, "media-input/native-v1");
+    }
+
+    public static MediaInputStore nativeCompanionCreation(Context context) {
+        return new MediaInputStore(context, "media-input/native-companion-creation-v1");
+    }
+
+    /** A caller supplies manifest identities, never a filesystem path or URI. */
+    public InputStream openItem(String importId, String itemId, String consumer) throws Exception {
+        synchronized (LOCK) {
+            MediaInputPolicy.id(itemId);
+            File folder = directory(importId);
+            JSONObject record = ownedManifest(manifest(importId), consumer, null);
+            JSONObject member = null;
+            JSONArray items = record.getJSONArray("items");
+            for (int index = 0; index < items.length(); index++) {
+                JSONObject candidate = items.getJSONObject(index);
+                if (itemId.equals(candidate.getString("id"))) { member = candidate; break; }
+            }
+            File source = new File(folder, itemId + ".blob");
+            if (member == null || Files.isSymbolicLink(root.toPath()) || Files.isSymbolicLink(folder.toPath())
+                    || Files.isSymbolicLink(source.toPath()) || !source.isFile()
+                    || !folder.getCanonicalFile().getParentFile().equals(root.getCanonicalFile())
+                    || !source.getCanonicalFile().getParentFile().equals(folder.getCanonicalFile())
+                    || source.length() != member.getLong("bytes") || source.length() > MediaInputPolicy.MAX_FILE_BYTES)
+                throw new IOException(io.droyagent.app.NativeLocale.text("附件内容不可用", "Attachment content is unavailable"));
+            return Files.newInputStream(source.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS);
+        }
     }
 
     public File root() { return root; }
+
+    /** Only finalized app-owned capture WAVs enter here; arbitrary paths and URI grants are separate admissions. */
+    public JSONObject importCompletedWave(File original, String importId) throws Exception {
+        MediaInputPolicy.id(importId);
+        synchronized (LOCK) {
+            File captureRoot = new File(context.getFilesDir(), "audio-captures");
+            if (!original.getName().matches("[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\\.wav")
+                    || Files.isSymbolicLink(captureRoot.toPath()) || Files.isSymbolicLink(original.toPath()) || !original.isFile()
+                    || !original.getCanonicalFile().getParentFile().equals(captureRoot.getCanonicalFile())
+                    || original.length() <= 44 || original.length() > 20L * 1024 * 1024)
+                throw new IOException(io.droyagent.app.NativeLocale.text("完整录音不可用", "The complete recording is unavailable"));
+            try (InputStream input = Files.newInputStream(original.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                byte[] header = new byte[44];
+                int length = 0;
+                while (length < header.length) {
+                    int count = input.read(header, length, header.length - length);
+                    if (count == -1) break;
+                    length += count;
+                }
+                java.nio.ByteBuffer bytes = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+                if (length != header.length || !new String(header, 0, 4, StandardCharsets.US_ASCII).equals("RIFF")
+                        || !new String(header, 8, 8, StandardCharsets.US_ASCII).equals("WAVEfmt ")
+                        || bytes.getInt(16) != 16 || bytes.getShort(20) != 1 || bytes.getShort(22) != 1
+                        || bytes.getInt(24) != 48000 || bytes.getShort(34) != 16
+                        || bytes.getInt(28) != 96000 || bytes.getShort(32) != 2 || (original.length() - 44) % 2 != 0
+                        || Integer.toUnsignedLong(bytes.getInt(4)) != original.length() - 8
+                        || !new String(header, 36, 4, StandardCharsets.US_ASCII).equals("data")
+                        || Integer.toUnsignedLong(bytes.getInt(40)) != original.length() - 44)
+                    throw new IOException(io.droyagent.app.NativeLocale.text("录音格式无效", "The recording format is invalid"));
+            }
+            File existing = new File(directory(importId), "manifest.json");
+            if (existing.isFile()) {
+                JSONObject value = ownedManifest(readJson(existing), "work", null);
+                if (!value.optString("source").equals("native-voice") || !value.optString("captureName").equals(original.getName()))
+                    throw new IOException(io.droyagent.app.NativeLocale.text("录音属于其他输入", "The recording belongs to another input"));
+                return value;
+            }
+            checkCapacity();
+            if (pendingBytes() + original.length() > MAX_PENDING_BYTES) throw new IOException(io.droyagent.app.NativeLocale.text("待发送附件占用过多空间", "Pending attachments use too much space"));
+            File staging = new File(root, "." + importId + ".tmp");
+            if (staging.exists()) deleteTree(staging);
+            if (!staging.mkdirs()) throw new IOException(io.droyagent.app.NativeLocale.text("无法创建附件目录", "Unable to create attachment directory"));
+            try {
+                String itemId = UUID.randomUUID().toString();
+                File destination = new File(staging, itemId + ".blob");
+                try (InputStream input = Files.newInputStream(original.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS); FileOutputStream output = new FileOutputStream(destination)) {
+                    MediaInputPolicy.copy(input, output, 20L * 1024 * 1024); output.getFD().sync();
+                }
+                if (destination.length() != original.length()) throw new IOException(io.droyagent.app.NativeLocale.text("录音内容已变化", "The recording changed"));
+                JSONObject value = new JSONObject().put("id", importId).put("source", "native-voice").put("consumer", "work")
+                    .put("captureName", original.getName()).put("createdAt", System.currentTimeMillis()).put("text", "").put("textApplied", false)
+                    .put("items", new JSONArray().put(new JSONObject().put("id", itemId).put("name", capturedName("Audio", original.lastModified(), ".wav"))
+                        .put("mediaType", "audio/wav").put("bytes", destination.length())));
+                writeJson(new File(staging, "manifest.json"), value);
+                Files.move(staging.toPath(), directory(importId).toPath(), StandardCopyOption.ATOMIC_MOVE);
+                return value;
+            } catch (Exception failure) { deleteTree(staging); throw failure; }
+        }
+    }
 
     public JSONObject importUris(String source, String target, List<Uri> uris, String text, boolean imagesOnly, int remaining) throws Exception {
         return importUrisForOperation(UUID.randomUUID().toString(), source, target, uris, text, imagesOnly, remaining);
     }
 
     public JSONObject importUrisForOperation(String importId, String source, String target, List<Uri> uris, String text, boolean imagesOnly, int remaining) throws Exception {
+        return importUrisForOperation(importId, source, target, uris, text, imagesOnly, remaining, "work");
+    }
+
+    public JSONObject importUrisForOperation(String importId, String source, String target, List<Uri> uris, String text, boolean imagesOnly, int remaining, String consumer) throws Exception {
         MediaInputPolicy.id(importId);
+        consumer = MediaInputPolicy.consumer(consumer);
         if (uris.size() > MediaInputPolicy.MAX_ITEMS) throw new IOException(io.droyagent.app.NativeLocale.text("一次最多导入32个附件", "Up to 32 attachments can be imported at a time"));
         if (uris.isEmpty() && text.isBlank()) throw new IOException(io.droyagent.app.NativeLocale.text("分享内容为空", "Shared content is empty"));
         MediaInputPolicy.text(text);
-        if (target != null) MediaInputPolicy.session(target);
+        MediaInputPolicy.targetSession(consumer, target);
         synchronized (LOCK) {
             File existing = new File(directory(importId), "manifest.json");
-            if (existing.isFile()) return readJson(existing);
+            if (existing.isFile()) return ownedManifest(readJson(existing), consumer, target);
             checkCapacity();
             String id = importId;
             File staging = new File(root, "." + id + ".tmp");
@@ -98,7 +197,7 @@ public final class MediaInputStore {
                     items.put(new JSONObject().put("id", itemId).put("name", name).put("mediaType", declared).put("bytes", bytes));
                 }
                 if (pendingBytes() + total > MAX_PENDING_BYTES) throw new IOException(io.droyagent.app.NativeLocale.text("待发送附件占用过多空间，请先发送或移除已有附件", "Pending attachments use too much space. Please send or remove existing attachments first"));
-                JSONObject manifest = new JSONObject().put("id", id).put("source", source).put("createdAt", System.currentTimeMillis())
+                JSONObject manifest = new JSONObject().put("id", id).put("source", source).put("consumer", consumer).put("createdAt", System.currentTimeMillis())
                     .put("text", text).put("textApplied", false).put("items", items);
                 if (target != null) manifest.put("targetSessionId", target);
                 writeJson(new File(staging, "manifest.json"), manifest);
@@ -109,13 +208,36 @@ public final class MediaInputStore {
     }
 
     public JSONObject importCapture(File original, String target, int remaining, String albumName) throws Exception {
+        return importCapture(original, target, remaining, albumName, "work");
+    }
+
+    public JSONObject importCapture(File original, String target, int remaining, String albumName, String consumer) throws Exception {
+        return importCapture(original, target, remaining, albumName, consumer,
+            MediaInputPolicy.id(original.getName().replaceFirst("\\.jpg$", "")));
+    }
+
+    /** Native capture stays unbound until the original private draft explicitly sends it. */
+    public JSONObject importNativeCapture(File original, int remaining, String albumName) throws Exception {
+        String name = original.getName();
+        String id = MediaInputPolicy.id(name.replaceFirst("^native-", "").replaceFirst("\\.jpg$", ""));
+        if (!name.equals("native-" + id + ".jpg") || !root.getName().equals("native-v1"))
+            throw new IOException(io.droyagent.app.NativeLocale.text("拍照文件不属于此入口", "The camera file belongs to another input"));
+        return importCapture(original, null, remaining, albumName, "work", id);
+    }
+
+    private JSONObject importCapture(File original, String target, int remaining, String albumName, String consumer, String id) throws Exception {
+        consumer = MediaInputPolicy.consumer(consumer);
+        MediaInputPolicy.targetSession(consumer, target);
         synchronized (LOCK) {
-            String id = MediaInputPolicy.id(original.getName().replaceFirst("\\.jpg$", ""));
+            File captures = new File(context.getFilesDir(), "media-input/captures");
+            if (Files.isSymbolicLink(captures.toPath()) || Files.isSymbolicLink(original.toPath())
+                    || !original.getCanonicalFile().getParentFile().equals(captures.getCanonicalFile()))
+                throw new IOException(io.droyagent.app.NativeLocale.text("拍照文件不属于此入口", "The camera file belongs to another input"));
             File directory = new File(root, id), record = new File(directory, "manifest.json");
             JSONObject manifest;
             if (record.isFile()) {
-                manifest = readJson(record);
-                if (!manifest.optBoolean("attachmentPending")) return saveAlbum(id);
+                manifest = ownedManifest(readJson(record), consumer, target);
+                if (!manifest.optBoolean("attachmentPending")) return saveAlbum(id, consumer);
             } else {
                 checkCapacity();
                 if (original.length() == 0 || original.length() > MediaInputPolicy.MAX_FILE_BYTES)
@@ -134,11 +256,12 @@ public final class MediaInputStore {
                     case "image/bmp", "image/x-ms-bmp" -> ".bmp";
                     default -> "." + type.substring(type.indexOf('/') + 1).replaceAll("[^a-z0-9]", "");
                 };
-                manifest = new JSONObject().put("id", id).put("source", "camera")
-                    .put("createdAt", System.currentTimeMillis()).put("targetSessionId", MediaInputPolicy.session(target))
+                manifest = new JSONObject().put("id", id).put("source", "camera").put("consumer", consumer)
+                    .put("createdAt", System.currentTimeMillis())
                     .put("text", "").put("textApplied", false).put("albumName", MediaInputPolicy.filename(albumName))
-                    .put("originalMediaType", type).put("originalName", "photo-" + id.substring(0, 8) + extension)
+                    .put("originalMediaType", type).put("originalName", capturedName("Photo", original.lastModified(), extension))
                     .put("albumSaved", false).put("attachmentPending", true).put("items", new JSONArray());
+                if (target != null) manifest.put("targetSessionId", MediaInputPolicy.session(target));
                 if (pendingBytes() + original.length() * 2 > MAX_PENDING_BYTES)
                     throw new IOException(io.droyagent.app.NativeLocale.text("待发送附件占用过多空间，请先发送或移除已有附件", "Pending attachments use too much space. Please send or remove existing attachments first"));
                 if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException(io.droyagent.app.NativeLocale.text("无法创建照片导入目录", "Unable to create photo import directory"));
@@ -148,7 +271,7 @@ public final class MediaInputStore {
             File retained = new File(directory, "camera-original");
             if (!retained.isFile()) Files.move(original.toPath(), retained.toPath());
             // Album publication and model attachment normalization have independent outcomes.
-            manifest = saveAlbum(id);
+            manifest = saveAlbum(id, consumer);
             String itemId = UUID.randomUUID().toString();
             File attachment = new File(directory, itemId + ".blob");
             try {
@@ -170,12 +293,21 @@ public final class MediaInputStore {
         }
     }
 
+    private static String capturedName(String kind, long timestamp, String extension) {
+        return kind + "-" + java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", java.util.Locale.ROOT)
+            .withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.ofEpochMilli(timestamp)) + extension;
+    }
+
     public JSONArray list() throws Exception {
         synchronized (LOCK) {
             List<JSONObject> ordered = new ArrayList<>();
             for (File directory : directories()) {
                 File manifest = new File(directory, "manifest.json");
-                if (manifest.isFile()) ordered.add(readJson(manifest));
+                if (manifest.isFile()) {
+                    JSONObject row = readJson(manifest);
+                    String consumer = MediaInputPolicy.consumer(row.has("consumer") ? row.getString("consumer") : null);
+                    ordered.add(ownedManifest(row, consumer, null));
+                }
             }
             ordered.sort(Comparator.comparingLong(value -> value.optLong("createdAt")));
             JSONArray result = new JSONArray();
@@ -189,12 +321,16 @@ public final class MediaInputStore {
     }
 
     public JSONObject bind(String id, String target, Boolean textApplied, Boolean textPrepared, String textBeforeHash) throws Exception {
+        return bind(id, target, textApplied, textPrepared, textBeforeHash, "work");
+    }
+
+    public JSONObject bind(String id, String target, Boolean textApplied, Boolean textPrepared, String textBeforeHash, String consumer) throws Exception {
+        consumer = MediaInputPolicy.consumer(consumer);
+        MediaInputPolicy.targetSession(consumer, target);
         if (Boolean.TRUE.equals(textPrepared)) MediaInputPolicy.draftHash(textBeforeHash);
         else if (textBeforeHash != null) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("草稿校验值缺少文字准备标记", "The draft checksum is missing the text preparation marker"));
         synchronized (LOCK) {
-            JSONObject manifest = manifest(id);
-            String previous = manifest.optString("targetSessionId", "");
-            if (!previous.isEmpty() && !previous.equals(target)) throw new IOException(io.droyagent.app.NativeLocale.text("附件已绑定其他对话，请先完成当前导入", "Attachments belong to another conversation. Complete the current import first"));
+            JSONObject manifest = ownedManifest(manifest(id), consumer, target);
             manifest.put("targetSessionId", MediaInputPolicy.session(target));
             if (textApplied != null) manifest.put("textApplied", textApplied);
             if (textPrepared != null) {
@@ -208,8 +344,12 @@ public final class MediaInputStore {
     }
 
     public JSONObject removeItems(String id, JSONArray ids) throws Exception {
+        return removeItems(id, ids, "work");
+    }
+
+    public JSONObject removeItems(String id, JSONArray ids, String consumer) throws Exception {
         synchronized (LOCK) {
-            JSONObject manifest = manifest(id);
+            JSONObject manifest = ownedManifest(manifest(id), consumer, null);
             Set<String> remove = new java.util.HashSet<>();
             if (ids.length() > MediaInputPolicy.MAX_ITEMS) throw new IOException(io.droyagent.app.NativeLocale.text("附件数量无效", "Invalid attachment count"));
             for (int i = 0; i < ids.length(); i++) remove.add(MediaInputPolicy.id(ids.getString(i)));
@@ -228,8 +368,12 @@ public final class MediaInputStore {
     }
 
     public void complete(String id) throws Exception {
+        complete(id, "work");
+    }
+
+    public void complete(String id, String consumer) throws Exception {
         synchronized (LOCK) {
-            JSONObject manifest = manifest(id);
+            JSONObject manifest = ownedManifest(manifest(id), consumer, null);
             if (manifest.optString("source").equals("camera") && manifest.has("albumUri")) {
                 Uri album = Uri.parse(manifest.getString("albumUri"));
                 int state = albumState(album);
@@ -241,8 +385,12 @@ public final class MediaInputStore {
     }
 
     public JSONObject saveAlbum(String id) throws Exception {
+        return saveAlbum(id, "work");
+    }
+
+    public JSONObject saveAlbum(String id, String consumer) throws Exception {
         synchronized (LOCK) {
-            JSONObject manifest = manifest(id);
+            JSONObject manifest = ownedManifest(manifest(id), consumer, null);
             if (!manifest.optString("source").equals("camera")) throw new IOException(io.droyagent.app.NativeLocale.text("此附件没有待保存照片", "This attachment has no photo waiting to be saved"));
             if (manifest.optBoolean("albumSaved")) return manifest;
             File original = new File(directory(id), "camera-original");
@@ -287,11 +435,17 @@ public final class MediaInputStore {
     }
 
     public JSONObject error(String source, String target, Exception failure) throws Exception {
+        return error(source, target, "work", failure);
+    }
+
+    public JSONObject error(String source, String target, String consumer, Exception failure) throws Exception {
+        consumer = MediaInputPolicy.consumer(consumer);
+        MediaInputPolicy.targetSession(consumer, target);
         synchronized (LOCK) {
             checkCapacity();
             String id = UUID.randomUUID().toString(); File directory = new File(root, id);
             if (!directory.mkdirs()) throw new IOException(io.droyagent.app.NativeLocale.text("无法保存附件导入结果", "Unable to save attachment import result"));
-            JSONObject value = new JSONObject().put("id", id).put("source", source).put("items", new JSONArray())
+            JSONObject value = new JSONObject().put("id", id).put("source", source).put("consumer", consumer).put("items", new JSONArray())
                 .put("text", "").put("createdAt", System.currentTimeMillis())
                 .put("error", failure.getMessage() == null ? io.droyagent.app.NativeLocale.text("附件导入失败", "Attachment import failed") : failure.getMessage());
             if (target != null) value.put("targetSessionId", target);
@@ -310,6 +464,17 @@ public final class MediaInputStore {
     }
 
     private JSONObject manifest(String id) throws Exception { return readJson(new File(directory(id), "manifest.json")); }
+
+    private static JSONObject ownedManifest(JSONObject manifest, String consumer, String target) throws Exception {
+        String expected = MediaInputPolicy.consumer(consumer);
+        String actual = MediaInputPolicy.consumer(manifest.has("consumer") ? manifest.getString("consumer") : null);
+        if (!actual.equals(expected)) throw new IOException(io.droyagent.app.NativeLocale.text("附件属于其他入口", "Attachments belong to another destination"));
+        String previous = manifest.has("targetSessionId") ? manifest.getString("targetSessionId") : null;
+        MediaInputPolicy.targetSession(actual, previous);
+        if (target != null && previous != null && !previous.equals(target))
+            throw new IOException(io.droyagent.app.NativeLocale.text("附件已绑定其他对话，请先完成当前导入", "Attachments belong to another conversation. Complete the current import first"));
+        return manifest.put("consumer", actual);
+    }
     private File directory(String id) { return new File(root, MediaInputPolicy.id(id)); }
 
     private File[] directories() {

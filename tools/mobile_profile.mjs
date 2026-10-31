@@ -63,6 +63,7 @@ export function mobileProfilePatches(upstream) {
     // Droy supplies the public brand slots; keep all model/provider features.
     { id: 'ui-brand-official', disabled: true },
     config('session-persistence-jsonl', { compression: 'none' }),
+    config('session-log-deepseek', { enabled: false }),
     config('web-runtime', { openBrowser: false, printUrl: false }),
     config('webserver', { host: '127.0.0.1', port: { __jsExpr: 'Number(process.env.DROY_WEB_PORT)' } }),
     config('agent-preset-registry', { default: 'standard' }),

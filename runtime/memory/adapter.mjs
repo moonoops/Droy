@@ -143,7 +143,7 @@ export function aggregateSourceRef(status) {
 
 /**
  * Host-only seam: store() returns one owned store, executionStatus() reports
- * verified enforcement, and authorizeUi() authenticates the actual local UI.
+ * memory-host readiness, and authorizeUi() authenticates the actual local UI.
  * Endpoint identities/capabilities and capture settings never come from tools.
  */
 export function createMemoryService({ host, privacy, confirmForget, estimateTokens = text => Buffer.byteLength(text) }) {
@@ -339,8 +339,8 @@ export function createMemoryService({ host, privacy, confirmForget, estimateToke
       fields(args, ['enabled', 'recallEnabled', 'automaticExtraction']);
       if (Object.values(args).some(value => typeof value !== 'boolean')) fail('MEMORY_INVALID_REQUEST');
       if (args.enabled === false) runEpoch++;
-      // The host establishes Root and execution isolation atomically when
-      // enabling. The model cannot reach this authenticated settings operation.
+      // The host initializes local stores before enabling collection.
+      // The model cannot reach this authenticated settings operation.
       return safeSettings(await host.saveSettings(args));
     }
     if (input.operation === 'capture') {
@@ -348,10 +348,20 @@ export function createMemoryService({ host, privacy, confirmForget, estimateToke
       if (!['status', 'configure', 'pause', 'resume', 'apps', 'permission'].includes(args.operation)) fail('MEMORY_INVALID_REQUEST');
       if (typeof host.capture !== 'function') fail('MEMORY_CAPTURE_UNAVAILABLE', 503);
       // Native configure enforces its own gate. Pausing must remain available
-      // when an execution backend becomes unavailable or permission is revoked.
+      // when the memory host becomes unavailable or permission is revoked.
       return host.capture(args.operation, args.args ?? {});
     }
+    if (input.operation === 'pendingAccess') {
+      fields(args, []);
+      return typeof privacy.pendingEndpointAccess === 'function' ? privacy.pendingEndpointAccess() : [];
+    }
+    if (input.operation === 'resolveAccess') {
+      fields(args, ['id', 'approved']);
+      if (typeof args.id !== 'string' || typeof args.approved !== 'boolean' || typeof privacy.resolveEndpointAccess !== 'function') fail('MEMORY_INVALID_REQUEST');
+      return privacy.resolveEndpointAccess(args.id, args.approved);
+    }
     if (input.operation === 'endpoints') {
+      if (typeof host.storedAuthorizations === 'function') return host.storedAuthorizations();
       if (typeof host.processingEndpoints !== 'function') fail('MEMORY_ENDPOINTS_UNAVAILABLE', 503);
       return host.processingEndpoints();
     }
@@ -367,6 +377,7 @@ export function createMemoryService({ host, privacy, confirmForget, estimateToke
     if (['grant', 'revoke'].includes(input.operation)) {
       fields(args, ['id', 'purpose', 'categories']);
       if (typeof args.id !== 'string' || typeof args.purpose !== 'string') fail('MEMORY_INVALID_REQUEST');
+      if (input.operation === 'revoke' && typeof host.revokeStoredAuthorization === 'function') return host.revokeStoredAuthorization(args.id, args.purpose);
       if (typeof host.resolveProcessingEndpoint !== 'function') fail('MEMORY_ENDPOINTS_UNAVAILABLE', 503);
       const route = await host.resolveProcessingEndpoint(args.id, args.purpose);
       if (input.operation === 'revoke') return privacy.revokeEndpoint(route);

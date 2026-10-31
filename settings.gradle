@@ -6,5 +6,5 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = 'DroyAgent'
-include ':app', ':android-use'
+include ':app', ':android-use', ':terminal-ui'
 

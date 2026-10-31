@@ -1,6 +1,6 @@
 # Protected execution
 
-`@droyagent/execution` supplies the filesystem, subprocess, PTY and reviewed MCP adapters used when personal-data protection is active. The Android host starts the APK's fixed `libdroy_exec.so` through an explicitly authorized Root channel.
+`@droyagent/execution` supplies the filesystem, subprocess, PTY and reviewed MCP adapters used when personal-data protection is active. The optional Root backend starts the APK's fixed `libdroy_exec.so` through an explicitly authorized Root channel. Personal memory does not use this backend: the mobile host sets `isolationRequired: false` and retains DSH local file, subprocess, PTY and MCP behavior under the ordinary Android application sandbox, while model-processing grants and session provenance remain enforced.
 
 Each workload uses private mount, network and UTS namespaces, a dedicated unprivileged UID and filtered read-only procfs. The selected workspace is shared with the App group; personal records, privacy state and other sessions are not mounted. The supervisor cancels and reaps descendants before confirming exit.
 
@@ -19,6 +19,6 @@ The NDK and output selection are handled by the build script. Packaging installs
 
 ## Integration
 
-The trusted host chooses workspace identity and session protection before launch. Model endpoint consent is separate from script networking. Unreviewed host-code tools are unavailable after protection activation.
+The trusted host chooses workspace identity and session protection before launch. Model endpoint consent is separate from script networking. The reviewed-tool restriction applies only to the Root backend. In the mobile app, scripts and plugins are trusted and retain normal product permissions; enabling memory does not switch execution backends or restrict these tools.
 
 Transport frames and lifecycle receipts are defined in [PROTOCOL.md](PROTOCOL.md). Android qualification must use the normal product service path; a host test or Root-shell experiment does not establish App-path isolation.

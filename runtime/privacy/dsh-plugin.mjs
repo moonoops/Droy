@@ -1,10 +1,14 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrivacyError, normalizeEndpoint, sessionIdentity } from './policy.mjs';
 
 export const name = 'droy-privacy';
 export const inject = ['llm', 'droyPrivacyHost'];
 export const PREPARED_ROUTE = Symbol.for('droy.privacy.prepared-route.v1');
 const REQUEST_PURPOSES = new Set(['conversation', 'compaction', 'session-title', 'extraction']);
+// DSH pins permission defaults on session/created, before agent/created.
+// Those configuration records do not turn a fresh task into imported history.
+const INITIAL_PERMISSION_EVENTS = new Set(['permission/preset', 'sandbox/mode', 'approval/policy']);
+const hasOnlyInitialPermissionEvents = session => session.snapshotEvents().every(event => INITIAL_PERMISSION_EVENTS.has(event.type));
 const fail = code => { throw new PrivacyError(code); };
 const purposeOf = value => {
   const purpose = value ?? 'conversation';
@@ -28,16 +32,16 @@ const DISPATCH_MESSAGES = Object.freeze({
     en: 'This conversation contains forgotten information. Start a new conversation to continue.',
   },
   PRIVACY_ENDPOINT_NOT_AUTHORIZED: {
-    zh: '当前模型尚未获准处理这些私人信息，请到记忆设置的“处理授权”中检查。',
-    en: 'This model is not authorized to process this private information. Check Processing permissions in Memory settings.',
+    zh: '当前模型尚未获准读取这些记忆。重试时请确认记忆访问请求。',
+    en: 'This model is not authorized to read this memory. Review the memory access request when you retry.',
   },
   PRIVACY_EXECUTION_UNVERIFIED: {
-    zh: '私人信息保护尚未就绪，请检查 Root 授权和记忆设置中的保护状态后重试。',
-    en: 'Private information protection is not ready. Check Root permission and the protection status in Memory settings, then try again.',
+    zh: '记忆服务尚未就绪，请稍后刷新记忆设置并重试。',
+    en: 'Memory is not ready. Refresh Memory settings in a moment and try again.',
   },
   PRIVACY_NOT_INITIALIZED: {
-    zh: '私人信息保护正在初始化，请检查 Root 授权和记忆设置中的保护状态后重试。',
-    en: 'Private information protection is initializing. Check Root permission and the protection status in Memory settings, then try again.',
+    zh: '记忆服务正在初始化，请稍后刷新记忆设置并重试。',
+    en: 'Memory is initializing. Refresh Memory settings in a moment and try again.',
   },
 });
 function dispatchError(error, ctx) {
@@ -59,6 +63,10 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
   const calls = new Set();
   const invalidationListeners = new Set();
   const pendingProtection = new Map();
+  const pendingAccess = new Map();
+  const pendingSessions = new Map();
+  let sessionWrites = Promise.resolve();
+  let accessEpoch = 0;
   let protectionEpoch = 0;
   let disposed = false;
   let everActive = false;
@@ -71,7 +79,24 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
       if (error?.code === 'PRIVACY_NOT_INITIALIZED') storePromise = undefined;
       throw error;
     });
-    return storePromise;
+    const value = await storePromise;
+    if (pendingSessions.size) {
+      const written = sessionWrites.then(async () => {
+        for (const [sessionId, parentId] of pendingSessions) {
+          const current = await value.sessionState(sessionId);
+          if (current.state === 'unknown') {
+            if (parentId) {
+              const parent = await value.sessionState(parentId);
+              if (parent.state !== 'unknown') await value.inheritSession(parentId, sessionId);
+            } else await value.registerCleanSession(sessionId);
+          }
+          pendingSessions.delete(sessionId);
+        }
+      });
+      sessionWrites = written.catch(() => {});
+      await written;
+    }
+    return value;
   }
 
   async function status() {
@@ -184,6 +209,60 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     if (epoch !== protectionEpoch) return { active: true, state: 'unknown' };
     return { active: true, state: record.state };
   }
+  function pendingEndpointAccess() {
+    return [...pendingAccess.values()].map(({ view }) => ({ ...view, categories: [...view.categories] }));
+  }
+  function resolveEndpointAccess(id, approved) {
+    const pending = pendingAccess.get(id);
+    if (!pending || typeof approved !== 'boolean') fail('PRIVACY_AUTHORIZATION_EXPIRED');
+    pending.finish(approved);
+    return { resolved: true };
+  }
+  function cancelEndpointAccess() {
+    accessEpoch++;
+    for (const pending of [...pendingAccess.values()]) pending.finish(false);
+  }
+  async function assertAllowedWithConsent(sessionId, detail, signal) {
+    const store = await getStore();
+    try { await store.assertAllowed({ sessionId, endpoint: detail.endpoint }); return; }
+    catch (error) {
+      if (error.code !== 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' || host?.nativeAccessPrompts !== true) throw error;
+    }
+    signal?.throwIfAborted();
+    if (pendingAccess.size >= 16) fail('PRIVACY_DISPATCH_BUSY');
+    const epoch = accessEpoch;
+    const session = await store.sessionState(sessionId);
+    const id = randomUUID();
+    const view = Object.freeze({ id, sessionId, provider: detail.provider, model: detail.model,
+      url: detail.endpoint.url, purpose: detail.endpoint.purpose, configVersion: detail.endpoint.configVersion,
+      categories: Object.freeze([...session.categories]), expiresAt: Date.now() + 120000 });
+    const approved = await new Promise(resolve => {
+      let timer;
+      const finish = value => {
+        if (!pendingAccess.delete(id)) return;
+        clearTimeout(timer); signal?.removeEventListener('abort', aborted); resolve(value);
+      };
+      const aborted = () => finish(false);
+      pendingAccess.set(id, { view, finish });
+      timer = setTimeout(aborted, 120000);
+      signal?.addEventListener('abort', aborted, { once: true });
+      if (signal?.aborted) aborted();
+    });
+    signal?.throwIfAborted();
+    if (!approved) fail('PRIVACY_ENDPOINT_NOT_AUTHORIZED');
+    await requireReady();
+    const freshRoute = await prepareRoute({ provider: detail.provider, model: detail.model }, detail.endpoint.purpose, signal);
+    const fresh = details(freshRoute).endpoint;
+    if (Object.keys(fresh).some(key => fresh[key] !== detail.endpoint[key])) fail('PRIVACY_ROUTING_CHANGED');
+    const current = await store.sessionState(sessionId);
+    if (epoch !== accessEpoch || current.state !== 'protected' || current.revision !== session.revision) fail('PRIVACY_AUTHORIZATION_REVOKED');
+    const existing = (await store.listGrants()).find(grant => Object.keys(fresh).every(key => grant[key] === fresh[key]));
+    if (epoch !== accessEpoch) fail('PRIVACY_AUTHORIZATION_REVOKED');
+    signal?.throwIfAborted();
+    await store.grantEndpoint({ ...fresh, categories: [...new Set([...(existing?.categories ?? []), ...session.categories])] });
+    signal?.throwIfAborted();
+    await store.assertAllowed({ sessionId, endpoint: fresh });
+  }
   async function beforeDisclosure({ sessionId, categories, sourceRefs, route, signal } = {}) {
     await requireReady(true);
     signal?.throwIfAborted();
@@ -198,7 +277,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
       await (await getStore()).protectSession(sessionId, { categories, sourceRefs });
       persisted = true;
       await ctx.get('droyExecution')?.beforeDisclosure(sessionId);
-      await (await getStore()).assertAllowed({ sessionId, endpoint: detail.endpoint });
+      await assertAllowedWithConsent(sessionId, detail, signal);
       await requireReady();
       signal?.throwIfAborted();
     } finally {
@@ -208,7 +287,28 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     }
   }
   async function onAgentCreated({ agent, source, signal }) {
-    if (!host || !(await status()).active) return;
+    const companions = ctx.get('droyCompanions');
+    if (!disposed && companions?.ownsSession(agent?.session?.id) === true
+      && companions.isRestrictedAgent?.(agent) === true) {
+      signal?.throwIfAborted();
+      return;
+    }
+    if (!host || disposed) return;
+    if (!(await status()).active) {
+      const session = agent?.session, header = session?.header;
+      if (!header || header.id !== session.id) return;
+      const sessionId = sessionIdentity(session.id);
+      const localResume = source === 'resume' && !header.isSeeded && !header.parentSession
+        && ctx.get('sessionPersistence') && ctx.get('agents')?.get(sessionId) === agent
+        && ctx.get('sessions')?.get(sessionId) === session;
+      if (source !== 'startup' && !localResume) return;
+      signal?.throwIfAborted();
+      // Before first activation, DSH's own unseeded local history is ordinary
+      // conversation data. Imported seeds still need their original lineage.
+      if (header.parentSession) pendingSessions.set(sessionId, sessionIdentity(header.parentSession));
+      else if (!header.isSeeded && (localResume || hasOnlyInitialPermissionEvents(session))) pendingSessions.set(sessionId, null);
+      return;
+    }
     const current = await (await getStore()).sessionState(sessionIdentity(agent?.session?.id));
     if (current.state !== 'unknown') return;
     const header = agent.session.header;
@@ -220,10 +320,19 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     }
     // Imported/resumed, compacted or seeded content has no clean-state proof.
     // Keep it inspectable locally; dispatch will refuse unknown provenance.
-    if (source !== 'startup' || header.isSeeded || agent.session.snapshotEvents().length !== 0) return;
+    if (source !== 'startup' || header.isSeeded || !hasOnlyInitialPermissionEvents(agent.session)) return;
     await (await getStore()).registerCleanSession(header.id);
   }
   async function checkDispatch(options, route) {
+    const companions = ctx.get('droyCompanions');
+    if (!disposed && companions?.ownsSession(options.sessionId) === true
+      && companions.isRestrictedSession?.(options.sessionId) === true) {
+      // Ordinary companions use their own scoped conversation/memory service;
+      // they cannot read legacy protected records or inherit work tools. Only
+      // the trusted runtime can attest a live session with those restrictions.
+      options.signal?.throwIfAborted();
+      return undefined;
+    }
     const state = await status();
     if (!state.active) {
       // Inactive is allowed only before protection exists. The host persists
@@ -242,7 +351,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     await requireReady();
     const detail = details(route, options.purpose);
     if (detail.provider !== options.provider || detail.model !== options.model) fail('PRIVACY_ROUTE_MISMATCH');
-    await (await getStore()).assertAllowed({ sessionId: options.sessionId, endpoint: detail.endpoint });
+    await assertAllowedWithConsent(options.sessionId, detail, options.signal);
     return detail;
   }
   async function authorizeExecution(agent, signal) {
@@ -254,7 +363,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     if (record.state === 'forgotten') fail('PRIVACY_SESSION_FORGOTTEN');
     if (record.state === 'protected') {
       const route = await routeForAgent(agent, 'conversation', signal);
-      await (await getStore()).assertAllowed({ sessionId, endpoint: details(route).endpoint });
+      await assertAllowedWithConsent(sessionId, details(route), signal);
     }
     signal?.throwIfAborted();
     return { state: record.state };
@@ -265,7 +374,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     const record = await (await getStore()).sessionState(sessionId);
     if (record.state === 'unknown') fail('PRIVACY_SESSION_UNKNOWN');
     if (record.state === 'forgotten') fail('PRIVACY_SESSION_FORGOTTEN');
-    if (route) await (await getStore()).assertAllowed({ sessionId, endpoint: details(route).endpoint });
+    if (route) await assertAllowedWithConsent(sessionId, details(route), signal);
     signal?.throwIfAborted();
     return { state: record.state, categories: [...record.categories], sourceRefs: [...record.sourceRefs], revision: record.revision };
   }
@@ -306,6 +415,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
   }
   async function revokeEndpoint(route) {
     const endpoint = details(route).endpoint;
+    cancelEndpointAccess();
     const result = await (await getStore()).revokeEndpoint(endpoint);
     abortCalls(call => Object.keys(endpoint).every(key => call.detail.endpoint[key] === endpoint[key]));
     notifyInvalidated();
@@ -319,13 +429,15 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
   }
   function dispose() {
     disposed = true;
+    pendingSessions.clear();
+    cancelEndpointAccess();
     abortCalls(() => true);
     notifyInvalidated(); invalidationListeners.clear();
   }
-  function invalidate() { abortCalls(() => true); notifyInvalidated(); }
+  function invalidate() { cancelEndpointAccess(); abortCalls(() => true); notifyInvalidated(); }
   return Object.freeze({ status, prepareRoute, routeForPrepared, routeForAgent, describeRoute,
     capturePiRoute, wrapDispatch, fetchFor, onAgentCreated, beforeDisclosure,
-    grantEndpoint, revokeEndpoint, forgetSources, authorizeExecution, getSourceSession, outputState, onInvalidated, invalidate, dispose });
+    grantEndpoint, revokeEndpoint, pendingEndpointAccess, resolveEndpointAccess, forgetSources, authorizeExecution, getSourceSession, outputState, onInvalidated, invalidate, dispose });
 }
 
 export function apply(ctx) {

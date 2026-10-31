@@ -1,6 +1,6 @@
 # Personal-data protection
 
-`@droyagent/privacy` stores host-owned session protection and endpoint processing grants. It is composed with [personal memory](../memory/README.md) and [protected execution](../execution/README.md). The store enforces policy state; process, file and network isolation are supplied by the host.
+`@droyagent/privacy` stores host-owned session protection and endpoint processing grants. It is composed with [personal memory](../memory/README.md). The mobile host uses the ordinary Android application sandbox and does not require Root. This store enforces model-processing grants and session provenance; it does not isolate scripts, plugins, files or network access within the app. App-hosted code and plugins are trusted.
 
 ## Host API
 

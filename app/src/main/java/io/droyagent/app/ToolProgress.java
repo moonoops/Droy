@@ -11,14 +11,16 @@ import java.util.Collections;
 
 /** Stores operation metadata, never arguments, screen text, or personal query results. */
 final class ToolProgress {
-    private static final Set<String> PHASES = Set.of("thinking", "executing", "verifying", "waiting", "waiting_input", "blocked", "completed", "interrupted");
+    private static final Set<String> PHASES = Set.of("thinking", "executing", "verifying", "waiting", "waiting_input", "blocked", "completed", "interrupted", "pausing", "paused", "resuming", "stopping", "stopped");
     private static final Set<String> WORKING_PHASES = Set.of("thinking", "executing", "verifying");
+    private static final Set<String> CONTROL_PHASES = Set.of("pausing", "paused", "resuming", "stopping");
     private static Map<String, TaskState> activeTasks = Map.of();
-    private static String currentTask = "", currentPhase = "";
+    private static final Map<String, Long> controlRevisions = new LinkedHashMap<>();
+    private static String currentTask = "", currentControlTask = "", currentPhase = "";
     private static String summary = "", summaryKind = "", activityKind = "";
     private static JSONObject pending;
     private static boolean active;
-    private static long startedAt;
+    private static long startedAt, controlRevision;
     private final SharedPreferences preferences;
     ToolProgress(Context context) { preferences = context.getSharedPreferences("tool-progress", Context.MODE_PRIVATE); }
     synchronized void record(String action, String state, String outcome) {
@@ -35,6 +37,8 @@ final class ToolProgress {
     static synchronized void update(String task, String phase, boolean isActive) {
         validatePhase(task, phase);
         TaskState previous = activeTasks.get(task);
+        // Native dispatch receipts cannot end or resume a product-level pause.
+        if (previous != null && CONTROL_PHASES.contains(previous.phase)) return;
         // Native wait_for dispatch/receipt stages must not replace the engine's
         // announced wait. A later engine event explicitly resumes execution.
         if (isActive && previous != null && previous.phase.equals("waiting")) phase = "waiting";
@@ -42,7 +46,9 @@ final class ToolProgress {
         String text = isActive ? previous == null ? "" : previous.summary : terminalSummary(phase);
         String kind = isActive && previous != null ? previous.summaryKind : "";
         if (kind.equals("slow") && !phase.equals("thinking")) { kind = ""; text = ""; }
-        applyTask(task, phase, isActive, text, kind, isActive && previous != null ? previous.activityKind : "", question);
+        String controller = previous != null ? previous.controlTaskId : task.equals(currentTask) ? currentControlTask : task;
+        applyTask(task, phase, isActive, text, kind, isActive && previous != null ? previous.activityKind : "", question,
+            controlRevisions.getOrDefault(controller, 0L), controller);
     }
     static synchronized boolean hasPending(String task, String request) {
         TaskState state = activeTasks.get(task);
@@ -57,9 +63,14 @@ final class ToolProgress {
         validatePhase(task, phase);
         Object rawActive = request.get("active");
         if (!(rawActive instanceof Boolean)) throw new IllegalArgumentException("active must be a boolean");
+        String controller = request.has("controlTaskId") ? boundedText(request, "controlTaskId", 256, false) : task;
+        long revision = readControlRevision(request);
+        if (revision < controlRevisions.getOrDefault(controller, 0L)) return false;
+        if (CONTROL_PHASES.contains(phase) && !(Boolean) rawActive)
+            throw new IllegalArgumentException(NativeLocale.text("可恢复任务状态必须保持活动", "A resumable task state must remain active"));
         String text = request.has("summary") ? boundedText(request, "summary", 120, true) : "";
         String kind = request.has("summaryKind") ? boundedText(request, "summaryKind", 16, true) : "";
-        if (!kind.isEmpty() && !kind.equals("working") && !kind.equals("slow")) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("宠物消息类型无效", "Invalid companion message type"));
+        if (!kind.isEmpty() && !kind.equals("working") && !kind.equals("slow") && !kind.equals("error")) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("宠物消息类型无效", "Invalid companion message type"));
         String activity = request.has("activityKind") ? boundedText(request, "activityKind", 16, true) : "";
         if (!Set.of("", "started", "thinking", "observing", "controlling", "working").contains(activity))
             throw new IllegalArgumentException(NativeLocale.text("伙伴进度类型无效", "Invalid companion activity type"));
@@ -76,11 +87,29 @@ final class ToolProgress {
             nextPending = new JSONObject().put("requestId", boundedText(source, "requestId", 160, false))
                 .put("title", boundedText(source, "title", 32, false)).put("message", boundedText(source, "message", 120, false))
                 .put("inline", source.getBoolean("inline")).put("options", normalized);
+            if (source.has("kind")) {
+                String pendingKind = boundedText(source, "kind", 16, false);
+                if (!Set.of("question", "approval").contains(pendingKind))
+                    throw new IllegalArgumentException(NativeLocale.text("伙伴问题类型无效", "Invalid companion request type"));
+                nextPending.put("kind", pendingKind);
+            }
             if (source.has("questions")) nextPending.put("questions", normalizeQuestions(source.getJSONArray("questions")));
         }
         boolean completedNow = activeTasks.containsKey(task) && !(Boolean) rawActive && phase.equals("completed");
-        applyTask(task, phase, (Boolean) rawActive, text, kind, activity, nextPending);
+        applyTask(task, phase, (Boolean) rawActive, text, kind, activity, nextPending, revision, controller);
         return completedNow;
+    }
+
+    private static long readControlRevision(JSONObject request) throws org.json.JSONException {
+        if (!request.has("controlRevision")) return 0;
+        Object raw = request.get("controlRevision");
+        if (!(raw instanceof Number value))
+            throw new IllegalArgumentException(NativeLocale.text("任务状态版本无效", "Invalid task state revision"));
+        long revision = value.longValue();
+        double number = value.doubleValue();
+        if (!Double.isFinite(number) || revision < 0 || revision > 9_007_199_254_740_991L || number != (double) revision)
+            throw new IllegalArgumentException(NativeLocale.text("任务状态版本无效", "Invalid task state revision"));
+        return revision;
     }
 
     private static JSONArray normalizeQuestions(JSONArray source) throws org.json.JSONException {
@@ -110,18 +139,21 @@ final class ToolProgress {
         return questions;
     }
 
-    private static void applyTask(String task, String phase, boolean isActive, String text, String kind, String activity, JSONObject question) {
+    private static void applyTask(String task, String phase, boolean isActive, String text, String kind, String activity, JSONObject question, long revision, String controller) {
         TaskState previous = activeTasks.get(task);
+        if (revision > 0) controlRevisions.put(controller, revision);
         // A stale terminal event must neither revive a task nor replace another task's presentation.
         if (!isActive && previous == null && !currentTask.isEmpty() && !currentTask.equals(task)) return;
-        question = isActive ? question : null;
+        question = isActive && !CONTROL_PHASES.contains(phase) ? question : null;
         String effectivePhase = question == null ? phase : "waiting_input";
         long began = previous != null && previous.phase.equals(effectivePhase) ? previous.startedAt
             : !isActive && currentTask.equals(task) && currentPhase.equals(effectivePhase) ? startedAt : System.currentTimeMillis();
         TaskState next = new TaskState(task, effectivePhase, text,
-            isActive && question == null && WORKING_PHASES.contains(effectivePhase) ? kind : "",
-            isActive && question == null && (kind.equals("working") || kind.equals("slow")) ? activity : "", question, began,
-            isActive && previous != null && previous.phoneOperation);
+            isActive && question == null && (WORKING_PHASES.contains(effectivePhase)
+                || CONTROL_PHASES.contains(effectivePhase) && kind.equals("error")) ? kind : "",
+            isActive && question == null && WORKING_PHASES.contains(effectivePhase)
+                && (kind.equals("working") || kind.equals("slow")) ? activity : "", question, began,
+            isActive && previous != null && previous.phoneOperation && !CONTROL_PHASES.contains(effectivePhase), revision, controller);
         Map<String, TaskState> updated = new LinkedHashMap<>(activeTasks);
         if (isActive) updated.put(task, next); else updated.remove(task);
         activeTasks = Collections.unmodifiableMap(updated);
@@ -137,7 +169,9 @@ final class ToolProgress {
 
     private static void show(TaskState state, boolean isActive) {
         currentTask = state.task; currentPhase = state.phase; summary = state.summary;
-        summaryKind = state.summaryKind; activityKind = state.activityKind; pending = state.pending; startedAt = state.startedAt; active = isActive;
+        currentControlTask = state.controlTaskId;
+        summaryKind = state.summaryKind; activityKind = state.activityKind; pending = state.pending; startedAt = state.startedAt;
+        controlRevision = state.controlRevision; active = isActive;
     }
 
     private static String terminalSummary(String phase) {
@@ -147,6 +181,7 @@ final class ToolProgress {
     /** Engine shutdown invalidates all pending questions and running phases together. */
     static synchronized void interruptAll() {
         activeTasks = Map.of();
+        controlRevisions.clear();
         if (active) show(new TaskState(currentTask, "interrupted", terminalSummary("interrupted"), "", "", null,
             System.currentTimeMillis()), false);
     }
@@ -159,7 +194,7 @@ final class ToolProgress {
         if (previous == null || previous.phoneOperation == value) return;
         Map<String, TaskState> updated = new LinkedHashMap<>(activeTasks);
         updated.put(task, new TaskState(previous.task, previous.phase, previous.summary, previous.summaryKind, previous.activityKind,
-            previous.pending, previous.startedAt, value));
+            previous.pending, previous.startedAt, value, previous.controlRevision, previous.controlTaskId));
         activeTasks = Collections.unmodifiableMap(updated);
     }
     static synchronized void clearScreenOperations() {
@@ -171,16 +206,23 @@ final class ToolProgress {
     }
 
     private static final class TaskState {
-        final String task, phase, summary, summaryKind, activityKind;
+        final String task, phase, summary, summaryKind, activityKind, controlTaskId;
         final JSONObject pending;
-        final long startedAt;
+        final long startedAt, controlRevision;
         final boolean phoneOperation;
         TaskState(String task, String phase, String summary, String summaryKind, String activityKind, JSONObject pending, long startedAt) {
             this(task, phase, summary, summaryKind, activityKind, pending, startedAt, false);
         }
         TaskState(String task, String phase, String summary, String summaryKind, String activityKind, JSONObject pending, long startedAt, boolean phoneOperation) {
+            this(task, phase, summary, summaryKind, activityKind, pending, startedAt, phoneOperation, 0);
+        }
+        TaskState(String task, String phase, String summary, String summaryKind, String activityKind, JSONObject pending, long startedAt, boolean phoneOperation, long controlRevision) {
+            this(task, phase, summary, summaryKind, activityKind, pending, startedAt, phoneOperation, controlRevision, task);
+        }
+        TaskState(String task, String phase, String summary, String summaryKind, String activityKind, JSONObject pending, long startedAt, boolean phoneOperation, long controlRevision, String controlTaskId) {
             this.task = task; this.phase = phase; this.summary = summary; this.summaryKind = summaryKind; this.activityKind = activityKind;
-            this.pending = pending; this.startedAt = startedAt; this.phoneOperation = phoneOperation;
+            this.pending = pending; this.startedAt = startedAt; this.phoneOperation = phoneOperation; this.controlRevision = controlRevision;
+            this.controlTaskId = controlTaskId;
         }
     }
     private static String boundedText(JSONObject source, String key, int max, boolean empty) throws org.json.JSONException {
@@ -193,7 +235,8 @@ final class ToolProgress {
         try {
             return new JSONObject().put("taskId", currentTask).put("phase", currentPhase)
                 .put("active", active).put("startedAt", startedAt).put("summary", summary).put("summaryKind", summaryKind)
-                .put("activityKind", activityKind).put("pending", pending == null ? JSONObject.NULL : new JSONObject(pending.toString()));
+                .put("activityKind", activityKind).put("controlRevision", controlRevision).put("controlTaskId", currentControlTask)
+                .put("pending", pending == null ? JSONObject.NULL : new JSONObject(pending.toString()));
         } catch (org.json.JSONException impossible) { throw new AssertionError(impossible); }
     }
     synchronized JSONArray history() {

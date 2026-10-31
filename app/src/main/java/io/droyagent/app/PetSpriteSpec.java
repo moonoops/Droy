@@ -14,12 +14,17 @@ final class PetSpriteSpec {
     final Map<String, Atlas> atlases;
     final Map<String, Animation> animations;
     final Map<String, String[]> variants;
+    final Map<String, Label> labels;
+    final Map<String, Effect> effects;
+    final boolean pixelArt;
     final PetPersona persona;
 
-    private PetSpriteSpec(Map<String, Atlas> atlases, Map<String, Animation> animations, Map<String, String[]> variants, PetPersona persona) {
+    private PetSpriteSpec(Map<String, Atlas> atlases, Map<String, Animation> animations, Map<String, String[]> variants,
+            Map<String, Label> labels, Map<String, Effect> effects, boolean pixelArt, PetPersona persona) {
         this.atlases = Collections.unmodifiableMap(atlases);
         this.animations = Collections.unmodifiableMap(animations);
-        this.variants = Collections.unmodifiableMap(variants); this.persona = persona;
+        this.variants = Collections.unmodifiableMap(variants); this.labels = Collections.unmodifiableMap(labels);
+        this.effects = Collections.unmodifiableMap(effects); this.pixelArt = pixelArt; this.persona = persona;
     }
 
     static PetSpriteSpec parse(JSONObject document) throws Exception {
@@ -51,6 +56,7 @@ final class PetSpriteSpec {
             atlases.put(key, new Atlas(file, width, height, frames));
         }
         Map<String, Animation> animations = new LinkedHashMap<>();
+        Map<String, Label> labels = new LinkedHashMap<>();
         JSONObject animationRows = document.getJSONObject("states");
         for (String required : STATES) if (!animationRows.has(required)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("缺少宠物动作：", "Missing companion action: ") + required);
         if (animationRows.length() > 128) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("宠物动作过多", "Too many companion actions"));
@@ -58,6 +64,8 @@ final class PetSpriteSpec {
             String key = keys.next();
             if (!key.matches("[A-Za-z][A-Za-z0-9_]{0,63}")) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("宠物动作名称无效", "Invalid companion action name"));
             JSONObject row = animationRows.getJSONObject(key);
+            JSONObject paired = row.optJSONObject("labelLocales");
+            if (paired != null) labels.put(key, new Label(label(paired, "zh"), label(paired, "en")));
             String atlasKey = row.getString("atlas");
             Atlas atlas = atlases.get(atlasKey);
             if (atlas == null) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("宠物动作引用了不存在的图片", "Companion action references a missing image"));
@@ -97,7 +105,52 @@ final class PetSpriteSpec {
             }
             variants.put(group, namesArray);
         }
-        return new PetSpriteSpec(atlases, animations, variants, PetPersona.parse(document.optJSONObject("persona")));
+        Map<String, Effect> effects = new LinkedHashMap<>();
+        JSONObject effectRows = document.optJSONObject("effects");
+        if (effectRows != null) {
+            if (effectRows.length() > 8) throw new IllegalArgumentException(NativeLocale.text("宠物特效数量无效", "Invalid companion effect count"));
+            for (Iterator<String> keys = effectRows.keys(); keys.hasNext();) {
+                String key = keys.next();
+                if (!animations.containsKey(key)) throw new IllegalArgumentException(NativeLocale.text("宠物特效引用了不存在的动作", "Companion effect references a missing action"));
+                JSONObject row = effectRows.getJSONObject(key);
+                String atlasKey = row.getString("atlas"); Atlas atlas = atlases.get(atlasKey);
+                if (atlas == null) throw new IllegalArgumentException(NativeLocale.text("宠物特效引用了不存在的图片", "Companion effect references a missing image"));
+                JSONArray sequence = row.getJSONArray("frames"), timing = row.getJSONArray("durationsMs");
+                if (sequence.length() == 0 || sequence.length() > 128 || sequence.length() != timing.length())
+                    throw new IllegalArgumentException(NativeLocale.text("宠物特效帧与时长不匹配", "Companion effect frames and durations do not match"));
+                Frame[] frames = new Frame[sequence.length()]; int[] durations = new int[sequence.length()];
+                int delay = row.getInt("delayMs"); long total = delay;
+                if (delay < 0 || delay > 10000) throw new IllegalArgumentException(NativeLocale.text("宠物特效延迟无效", "Invalid companion effect delay"));
+                for (int i = 0; i < frames.length; i++) {
+                    int index = sequence.getInt(i); durations[i] = timing.getInt(i);
+                    if (index < 0 || index >= atlas.frames.length || durations[i] < 1 || durations[i] > 10000 || (total += durations[i]) > 30000)
+                        throw new IllegalArgumentException(NativeLocale.text("宠物特效帧或时长无效", "Invalid companion effect frame or duration"));
+                    frames[i] = atlas.frames[index];
+                }
+                effects.put(key, new Effect(new Animation(atlasKey, frames, durations, "front", false, key, key), delay));
+            }
+        }
+        JSONObject rendering = document.optJSONObject("rendering");
+        boolean pixelArt = rendering != null && "pixel".equals(rendering.optString("style"));
+        return new PetSpriteSpec(atlases, animations, variants, labels, effects, pixelArt, PetPersona.parse(document.optJSONObject("persona")));
+    }
+
+    private static String label(JSONObject row, String language) throws Exception {
+        String value = row.getString(language).trim();
+        if (value.isEmpty() || value.codePointCount(0, value.length()) > 80 || value.codePoints().anyMatch(Character::isISOControl))
+            throw new IllegalArgumentException(NativeLocale.text("宠物动作文字无效", "Invalid companion action label"));
+        return value;
+    }
+
+    static final class Label {
+        final String zh, en;
+        Label(String zh, String en) { this.zh = zh; this.en = en; }
+        String localized() { return NativeLocale.text(zh, en); }
+    }
+    static final class Effect {
+        final Animation animation; final int delayMs;
+        Effect(Animation animation, int delayMs) { this.animation = animation; this.delayMs = delayMs; }
+        long durationMs() { return delayMs + animation.durationMs; }
     }
 
     static final class Atlas {

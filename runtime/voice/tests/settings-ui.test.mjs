@@ -164,16 +164,16 @@ test('switching speech engines clears the engine-specific voice selection while 
   assert.equal(f.config.tts.voiceId, 'system-voice');
 });
 
-test('companion-name wake disables manual fields while preserving their values and saving the timing', async () => {
+test('wake fields remain editable and retired companion-name switch is absent', async () => {
   const f = await fixture();
   let tree = nodes(f.render());
   const timing = tree.find(node => (node.type?.name === 'Choice' ? node.props.label : node.props['aria-label']) === '唤醒时机');
   assert.deepEqual(Array.from(timing.props.options, option => option.value), ['screen_on', 'foreground']);
   timing.props.onChange('foreground');
-  tree.find(node => node.type === 'switch' && node.props.label === '使用 Droy 伙伴名称唤醒').props.onChange(true);
+  assert.equal(tree.some(node => node.type === 'switch' && node.props.label === '使用 Droy 伙伴名称唤醒'), false);
   tree = nodes(f.render());
-  assert.equal(tree.find(node => node.props['aria-label'] === '中文唤醒词').props.disabled, true);
-  assert.equal(tree.find(node => node.props['aria-label'] === '英文唤醒词').props.disabled, true);
+  assert.equal(tree.find(node => node.props['aria-label'] === '中文唤醒词').props.disabled, false);
+  assert.equal(tree.find(node => node.props['aria-label'] === '英文唤醒词').props.disabled, false);
   assert.equal(tree.find(node => node.props['aria-label'] === '中文唤醒词').props.value, '你好小黑');
   assert.equal(tree.some(node => node.props['data-droy-voice-wake-prepare']), false);
   tree.find(node => node.props['data-droy-voice-save']).props.onClick();
@@ -181,11 +181,10 @@ test('companion-name wake disables manual fields while preserving their values a
   assert.deepEqual(f.requests.map(request => request.operation), ['wake.configure', 'save_config']);
   const savedWake = f.requests[1].patch.wake;
   assert.equal(savedWake.timing, 'foreground');
-  assert.equal(savedWake.useCompanionName, true);
+  assert.equal(savedWake.useCompanionName, false);
   assert.equal(savedWake.chinese, '你好小黑');
   assert.equal(savedWake.english, 'Hey Droy');
   tree = nodes(f.render());
-  tree.find(node => node.type === 'switch' && node.props.label === '使用 Droy 伙伴名称唤醒').props.onChange(false);
   assert.equal(nodes(f.render()).find(node => node.props['aria-label'] === '中文唤醒词').props.disabled, false);
 });
 

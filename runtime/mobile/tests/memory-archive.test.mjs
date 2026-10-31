@@ -75,6 +75,8 @@ test('expiry deletes unused downloads and active streams and refuses subsequent 
   const one = await f.archives.exportArchive(scope), two = await f.archives.exportArchive(scope);
   const download = await f.archives.downloadArchive(two.archiveId);
   t.mock.timers.tick(MEMORY_ARCHIVE_TTL_MS + 1);
+  // Timer cleanup is asynchronous; an immediate expired access joins that cleanup.
+  await assert.rejects(f.archives.downloadArchive(one.archiveId), code('MEMORY_ARCHIVE_EXPIRED'));
   await empty(f.directory);
   assert.equal(download.stream.destroyed, true);
   await assert.rejects(f.archives.downloadArchive(one.archiveId), code('MEMORY_ARCHIVE_NOT_FOUND'));

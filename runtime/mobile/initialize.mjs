@@ -18,5 +18,5 @@ export async function apply(ctx) {
     return join(process.env.DSH_HOME, 'workspace');
   });
   if (created && workspace) await workspace.setTitle(translateBackendText('默认空间', resolveMobileLocale(ctx)));
-  ctx.provide('droyInitialization', { ready: true, skillDirectory });
+  ctx.provide('droyInitialization', { ready: true, skillDirectory, defaultWorkspaceId: workspace?.id ?? null });
 }

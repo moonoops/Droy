@@ -24,6 +24,7 @@ export function createVoiceOutputState({ getPrivacy, nativeStatus, protectionReq
 export function createSpeechService({ store, native, fetchImpl = fetch, getLocale = () => process.env.DROY_LOCALE,
   outputState = async () => ({ active: false, state: 'inactive' }) }) {
   let generation = 0, chain = Promise.resolve(), request, nextPlaybackAt = 0, activeReply;
+  let ownedPreview, ownershipRevision = 0;
   let everProtected = false, playbackUnscoped = false;
   const jobs = new Set(), playbackSessions = new Set(), publicPreview = Symbol('fixed-preview');
   const localProvider = provider => provider === 'melo' || provider === 'qwen3';
@@ -76,6 +77,7 @@ export function createSpeechService({ store, native, fetchImpl = fetch, getLocal
     }
   }
   async function stop() {
+    ownedPreview = undefined; ownershipRevision++;
     const oldGeneration = generation++;
     request?.abort();
     nextPlaybackAt = 0;
@@ -102,6 +104,7 @@ export function createSpeechService({ store, native, fetchImpl = fetch, getLocal
       throw new VoiceError('INVALID_SPEECH', '回复身份格式无效');
     if (input.sessionId !== undefined && (typeof input.sessionId !== 'string' || !input.sessionId || input.sessionId.length > 256))
       throw privacyError('TTS_REPLY_SESSION_MISMATCH');
+    if (permission !== publicPreview) { ownedPreview = undefined; ownershipRevision++; }
     const job = { sessionId: input.sessionId, revision: 0, public: permission === publicPreview };
     // Caller mutation while a previous chunk is playing cannot replace the
     // source identity, provider or text that was queued for this operation.
@@ -197,21 +200,64 @@ export function createSpeechService({ store, native, fetchImpl = fetch, getLocal
     chain = operation.catch(() => {});
     return operation;
   }
+  async function preview(id, draft = {}, owner) {
+      if (!id && draft.provider !== undefined && !['system', 'melo', 'qwen3'].includes(draft.provider))
+        throw new VoiceError('INVALID_SPEECH', '请先保存自定义朗读服务再试听');
+      const stopped = stop(), token = generation;
+      const claim = owner ? { owner, token, phase: 'preparing' } : undefined;
+      if (claim) { ownedPreview = claim; ownershipRevision++; }
+      try {
+        await stopped;
+        const selected = !id && draft.provider ? { provider: draft.provider, voiceId: draft.voiceId || '', rate: draft.rate ?? 1 } : await profile(id);
+        if (token !== generation || claim && ownedPreview !== claim) return { cancelled: true };
+        const result = await speak({ text: getLocale() === 'zh' ? '你好，我是 Droy。我们可以用这个声音聊天。' : 'Hi, I am Droy. We can chat using this voice.', utteranceId: 'preview' }, selected, publicPreview);
+        if (claim && ownedPreview === claim) {
+          if (result?.cancelled) ownedPreview = undefined;
+          else claim.phase = 'playing';
+        }
+        return result;
+      } catch (error) { if (ownedPreview === claim) ownedPreview = undefined; throw error; }
+  }
+  function previewOwnership(status) {
+    const claim = ownedPreview;
+    if (!claim || claim.token !== generation) return { active: false };
+    if (claim.phase === 'playing' && typeof status?.speaking !== 'boolean')
+      throw new VoiceError('VOICE_STATUS_UNAVAILABLE', getLocale() === 'zh' ? '语音状态暂不可用' : 'Voice status is unavailable.');
+    if (claim.phase === 'playing' && (!status?.speaking || status.speechError)) {
+      ownedPreview = undefined;
+      return { active: false };
+    }
+    return { active: true, owner: claim.owner, phase: claim.phase };
+  }
   return {
-    voices, speak, stop, invalidate, requireReady,
+    voices, speak, stop, invalidate, requireReady, preview, previewOwnership,
+    cancelQueued() {
+      ownedPreview = undefined; ownershipRevision++; generation++; request?.abort();
+      nextPlaybackAt = 0; playbackSessions.clear(); playbackUnscoped = false;
+    },
+    async previewOwned(owner, id, draft = {}) {
+      if (typeof owner !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(owner))
+        throw new VoiceError('INVALID_SPEECH', getLocale() === 'zh' ? '试听身份格式无效' : 'Invalid preview identity.');
+      return preview(id, draft, owner);
+    },
+    async stopOwned(owner) {
+      const claim = ownedPreview;
+      if (!claim || claim.owner !== owner || claim.token !== generation) return { stopped: false };
+      if (claim.phase === 'playing') {
+        const status = await native({ operation: 'status' });
+        if (ownedPreview !== claim || !previewOwnership(status).active) return { stopped: false };
+      }
+      const stopping = stop(), revision = ownershipRevision;
+      try { return await stopping; }
+      catch (error) {
+        if (ownershipRevision === revision && !ownedPreview) ownedPreview = { ...claim, token: generation };
+        throw error;
+      }
+    },
     async select(id) {
       const selected = await profile(id);
       await requireReady(selected.provider);
       return store.save({ tts: { provider: selected.provider, voiceId: selected.voiceId, rate: selected.rate || 1 } });
-    },
-    async preview(id, draft = {}) {
-      if (!id && draft.provider !== undefined && !['system', 'melo', 'qwen3'].includes(draft.provider))
-        throw new VoiceError('INVALID_SPEECH', '请先保存自定义朗读服务再试听');
-      const stopped = stop(), token = generation;
-      await stopped;
-      const selected = !id && draft.provider ? { provider: draft.provider, voiceId: draft.voiceId || '', rate: draft.rate ?? 1 } : await profile(id);
-      if (token !== generation) return { cancelled: true };
-      return speak({ text: getLocale() === 'zh' ? '你好，我是 Droy。我们可以用这个声音聊天。' : 'Hi, I am Droy. We can chat using this voice.', utteranceId: 'preview' }, selected, publicPreview);
     },
   };
 }
@@ -235,10 +281,53 @@ function reply(res, status, value) {
 }
 
 export function createVoiceService({ store, native, realtime, fetchImpl, getLocale, outputState }) {
-  const speech = createSpeechService({ store, native, fetchImpl, getLocale, outputState });
-  let mediaEpoch = 0;
+  const ownershipCodes = new Set(['VOICE_OWNER_MISMATCH', 'VOICE_OPERATION_REQUIRED', 'VOICE_OPERATION_INVALID']);
+  function ownershipError(code) {
+    const text = code === 'VOICE_OPERATION_INVALID'
+      ? ['语音操作标识无效。', 'The voice operation ID is invalid.']
+      : ['这次语音对话已由其他操作接管。', 'Another operation owns this voice conversation.'];
+    return new VoiceError(code, (getLocale?.() ?? process.env.DROY_LOCALE) === 'zh' ? text[0] : text[1], code === 'VOICE_OPERATION_INVALID' ? 400 : 409);
+  }
+  const nativeCall = async (input, signal) => {
+    try { return await native(input, signal); }
+    catch (error) {
+      const code = ownershipCodes.has(error?.code) ? error.code : error?.code === 'REJECTED'
+        ? /\b(VOICE_OWNER_MISMATCH|VOICE_OPERATION_REQUIRED|VOICE_OPERATION_INVALID)\b/u.exec(error.message)?.[1] : undefined;
+      if (code) throw ownershipError(code);
+      throw error;
+    }
+  };
+  function owner(input) {
+    if (input.voiceOperationId === undefined) return undefined;
+    if (typeof input.voiceOperationId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(input.voiceOperationId))
+      throw ownershipError('VOICE_OPERATION_INVALID');
+    return input.voiceOperationId;
+  }
+  const speech = createSpeechService({ store, native: nativeCall, fetchImpl, getLocale, outputState });
+  const scopedSpeech = new Map(), pendingStarts = new Map();
+  let latestStart;
+  const activeStates = new Set(['awaiting_user', 'starting', 'recording', 'finalizing']);
+  function speechFor(id) {
+    if (id === undefined) return speech;
+    if (!scopedSpeech.has(id)) scopedSpeech.set(id, createSpeechService({ store,
+      native: (input, signal) => nativeCall({ ...input, voiceOperationId: id }, signal), fetchImpl, getLocale, outputState }));
+    return scopedSpeech.get(id);
+  }
+  function cancelStarts(id) { for (const token of pendingStarts.get(id) ?? []) token.cancelled = true; }
+  async function requireOutputOwner(id) {
+    const status = await nativeCall({ operation: 'status' });
+    if (id !== undefined && (status?.voiceOperationId !== id || !activeStates.has(status.state))) throw ownershipError('VOICE_OWNER_MISMATCH');
+    if (id === undefined && status?.voiceOperationId && activeStates.has(status.state)) throw ownershipError('VOICE_OPERATION_REQUIRED');
+    // This is admission only. Every actual output/stop still carries the ID
+    // and is checked under VoiceMedia's lock after asynchronous preparation.
+  }
+  const speechFacade = { ...speech, async invalidate(notice) {
+    const results = await Promise.allSettled([speech, ...scopedSpeech.values()].map(value => value.invalidate(notice)));
+    const failed = results.filter(value => value.status === 'rejected' && !ownershipCodes.has(value.reason?.code));
+    if (failed.length) throw new AggregateError(failed.map(value => value.reason), 'Voice output could not stop');
+  } };
   async function run(input) {
-    const operation = input.operation;
+    const operation = input.operation, operationOwner = owner(input);
     switch (operation) {
       case 'save_config': {
         if (input.patch?.tts) {
@@ -256,8 +345,11 @@ export function createVoiceService({ store, native, realtime, fetchImpl, getLoca
         return speech.preview(input.id, input);
       case 'speak':
         if (realtime.active) throw new VoiceError('VOICE_BUSY', '实时通话正在使用模型原声', 409);
-        return speech.speak(input);
-      case 'stop_speaking': return speech.stop();
+        await requireOutputOwner(operationOwner);
+        return speechFor(operationOwner).speak(input);
+      case 'stop_speaking':
+        await requireOutputOwner(operationOwner);
+        return speechFor(operationOwner).stop();
       case 'start_realtime':
       case 'poll_realtime':
       case 'interrupt_realtime':
@@ -269,14 +361,20 @@ export function createVoiceService({ store, native, realtime, fetchImpl, getLoca
       case 'set_reference_audio':
       case 'remove_reference_audio':
         throw new VoiceError('FEATURE_UNAVAILABLE', '本版暂不开放实时音视频对话');
-      case 'stop_realtime': mediaEpoch++; return realtime.stop();
-      case 'wake.configure': return native({ ...input, target: 'standard' });
-      case 'mute': return realtime.active ? realtime.mute(input.muted) : native(input);
+      case 'stop_realtime': return realtime.stop();
+      case 'wake.configure': return nativeCall({ ...input, target: 'standard' });
+      case 'mute': return realtime.active ? realtime.mute(input.muted) : nativeCall(input);
       case 'stop': {
-        mediaEpoch++;
+        cancelStarts(operationOwner);
+        if (operationOwner !== undefined) {
+          scopedSpeech.get(operationOwner)?.cancelQueued();
+          // Native stop atomically validates ownership and stops capture and
+          // output together. A later owner never receives this queue's stop.
+          return nativeCall(input);
+        }
         let result;
         try { await speech.stop(); }
-        finally { result = await native(input); }
+        finally { result = await nativeCall(input); }
         return result;
       }
       default:
@@ -285,26 +383,43 @@ export function createVoiceService({ store, native, realtime, fetchImpl, getLoca
         if (operation === 'start') {
           if (input.mode && input.mode !== 'standard')
             throw new VoiceError('FEATURE_UNAVAILABLE', '本版仅支持普通语音对话');
-          const epoch = mediaEpoch;
           if (realtime.active) throw new VoiceError('VOICE_BUSY', '已有实时通话正在进行', 409);
-          if (!(await store.read()).entries.standard) throw new VoiceError('ENTRY_DISABLED', '请先开启语音对话入口');
-          if (epoch !== mediaEpoch) return { state: 'ended', reason: 'cancelled_start' };
+          const token = { cancelled: false };
+          if (!pendingStarts.has(operationOwner)) pendingStarts.set(operationOwner, new Set());
+          pendingStarts.get(operationOwner).add(token);
+          try {
+            if (!(await store.read()).entries.standard) throw new VoiceError('ENTRY_DISABLED', '请先开启语音对话入口');
+            if (token.cancelled) return { ...await nativeCall({ operation: 'status' }), reason: 'cancelled_start' };
+            latestStart = token;
+            const result = await nativeCall(input);
+            if (operationOwner !== undefined && result?.voiceOperationId !== operationOwner) throw ownershipError('VOICE_OWNER_MISMATCH');
+            if (activeStates.has(result?.state) && latestStart === token && !token.cancelled) {
+              if (operationOwner !== undefined) speech.cancelQueued();
+              for (const [id, value] of scopedSpeech) if (id !== operationOwner) { value.cancelQueued(); scopedSpeech.delete(id); }
+              if (operationOwner !== undefined) speechFor(operationOwner);
+            }
+            return result;
+          } finally {
+            pendingStarts.get(operationOwner)?.delete(token);
+            if (!pendingStarts.get(operationOwner)?.size) pendingStarts.delete(operationOwner);
+          }
         }
         if (nativeOperations.has(operation) || (typeof operation === 'string' && operation.startsWith('wake.')))
-          return native(input);
+          return nativeCall(input);
         throw new VoiceError('UNKNOWN_OPERATION', '不支持的语音操作');
     }
   }
   return {
-    run, speech, realtime,
+    run, speech: speechFacade, realtime,
     async snapshot() { return { config: await store.publicConfig(), state: { status: 'idle' } }; },
     async dispose() {
-      mediaEpoch++;
+      for (const id of pendingStarts.keys()) cancelStarts(id);
       const failures = [];
-      try { await native({ operation: 'wake.suspend' }); } catch (error) { failures.push(error); }
+      try { await nativeCall({ operation: 'wake.suspend' }); } catch (error) { failures.push(error); }
+      for (const value of scopedSpeech.values()) value.cancelQueued();
       const results = await Promise.allSettled([realtime.stop('plugin_disabled'), speech.stop()]);
-      for (const result of results) if (result.status === 'rejected') failures.push(result.reason);
-      try { await native({ operation: 'dispose' }); } catch (error) { failures.push(error); }
+      for (const result of results) if (result.status === 'rejected' && !ownershipCodes.has(result.reason?.code)) failures.push(result.reason);
+      try { await nativeCall({ operation: 'dispose' }); } catch (error) { failures.push(error); }
       if (failures.length) throw new AggregateError(failures, '语音资源未能全部释放');
     },
   };

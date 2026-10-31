@@ -6,27 +6,40 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class NotificationManagementRulesTest {
-    @Test public void takeoverDefaultsIncludeEveryEligibleAppAndOnlyPersistExceptions() throws Exception {
+    @Test public void selectionMigrationPreservesOldChoicesAndNewAppsAreNotImplicitlySelected() throws Exception {
         JSONObject fresh = NotificationManagementRules.configuration(null);
-        assertTrue(fresh.getBoolean("cloudAnalysisEnabled"));
+        assertFalse(fresh.has("cloudAnalysisEnabled"));
         assertEquals(0, fresh.getJSONObject("exceptions").length());
-        assertFalse(fresh.has("packages"));
         JSONObject old = NotificationManagementRules.configuration(new JSONObject().put("revision", 2)
                 .put("cloudAnalysisEnabled", false).put("packages", new JSONArray().put("example.parcel")));
-        assertFalse(old.getBoolean("cloudAnalysisEnabled"));
+        NotificationManagementRules.migrateApplications(old, java.util.Set.of("example.parcel", "example.other"));
+        assertTrue(old.getBoolean("needsModelConsent"));
         assertFalse(old.has("packages"));
-        assertEquals(3, old.getLong("revision"));
-        for (String mode : new String[]{"managed", "allow", "block"}) assertEquals(mode, NotificationManagementRules.appMode(mode));
-        try { NotificationManagementRules.appMode("unknown"); fail(); }
-        catch (IllegalArgumentException expected) { assertNotNull(expected.getMessage()); }
-        JSONObject exceptions = NotificationManagementRules.exceptions(new JSONArray()
-                .put(new JSONObject().put("packageName", "example.parcel").put("mode", "allow"))
-                .put(new JSONObject().put("packageName", "example.ads").put("mode", "block"))
-                .put(new JSONObject().put("packageName", "example.default").put("mode", "managed")));
-        assertEquals(2, exceptions.length());
-        assertEquals("allow", exceptions.getString("example.parcel"));
-        assertEquals("block", exceptions.getString("example.ads"));
-        assertEquals(0, NotificationManagementRules.exceptions(new JSONArray()).length());
+        assertEquals("managed", old.getJSONObject("exceptions").getString("example.parcel"));
+        assertEquals("allow", old.getJSONObject("exceptions").getString("example.other"));
+        JSONObject blocked = NotificationManagementRules.configuration(new JSONObject().put("exceptions",
+            new JSONObject().put("example.ads", "block")));
+        NotificationManagementRules.migrateApplications(blocked, java.util.Set.of("example.ads", "example.parcel"));
+        assertTrue(blocked.getBoolean("requiresReview"));
+        assertEquals("allow", blocked.getJSONObject("exceptions").getString("example.ads"));
+        assertEquals("managed", blocked.getJSONObject("exceptions").getString("example.parcel"));
+        for (String mode : new String[]{"managed", "allow"}) assertEquals(mode, NotificationManagementRules.appMode(mode));
+        try { NotificationManagementRules.appMode("block"); fail(); } catch (IllegalArgumentException expected) { }
+    }
+
+    @Test public void legacyRulesBecomeReviewableTextAndNeverRemainAnActiveHiddenPolicy() throws Exception {
+        JSONObject old = NotificationManagementRules.configuration(new JSONObject().put("rules", new JSONArray().put(rule().put("repeatMinutes", 10))));
+        assertTrue(old.getBoolean("requiresReview"));
+        assertFalse(old.has("rules"));
+        assertTrue(NotificationManagementRules.ruleText(old).contains("example.parcel"));
+        assertTrue(NotificationManagementRules.ruleText(old).contains("10"));
+        NotificationManagementRules.setRuleText(old, "Keep deliveries", false);
+        assertEquals("Keep deliveries", NotificationManagementRules.ruleText(old));
+        assertFalse(old.getBoolean("requiresReview"));
+        assertFalse(old.has("legacyRules"));
+        NotificationManagementRules.setRuleText(old, "", true);
+        assertFalse(old.has("ruleText"));
+        assertFalse(NotificationManagementRules.ruleText(old).isBlank());
     }
 
     @Test public void installedUserAppsAndVisibleSystemAppsAreEligibleButCoreServicesAreNot() {
@@ -199,6 +212,47 @@ public class NotificationManagementRulesTest {
         assertEquals(285, summary.length());
         assertTrue(summary.startsWith("A".repeat(100) + "…"));
         assertTrue(summary.endsWith("B".repeat(180) + "…"));
+    }
+
+    @Test public void silentTakeoverRequiresAnExplicitSavedChoice() throws Exception {
+        assertFalse(NotificationManagementRules.configuration(null).getBoolean("silentTakeoverEnabled"));
+        assertFalse(NotificationManagementRules.configuration(new JSONObject().put("schemaVersion", 2)
+            .put("exceptions", new JSONObject().put("example.parcel", "managed"))).getBoolean("silentTakeoverEnabled"));
+        assertTrue(NotificationManagementRules.configuration(new JSONObject().put("silentTakeoverEnabled", true)).getBoolean("silentTakeoverEnabled"));
+        for (Object invalid : new Object[]{"true", 1, JSONObject.NULL}) {
+            try {
+                NotificationManagementRules.configuration(new JSONObject().put("silentTakeoverEnabled", invalid));
+                fail("Accepted invalid silent takeover choice");
+            } catch (IllegalArgumentException expected) { assertNotNull(expected.getMessage()); }
+        }
+    }
+
+    @Test public void pendingImportantReminderSurvivesTwoHundredNewHistoryItems() throws Exception {
+        JSONObject pending = new JSONObject().put("key", "pending-important").put("packageName", "example.parcel")
+            .put("revision", 4).put("applied", true).put("action", "retain").put("important", true)
+            .put("reminderAt", 9000).put("savedAtMs", 1000);
+        JSONArray records = new JSONArray().put(pending);
+        for (int i = 0; i < 200; i++) records.put(new JSONObject().put("key", "history-" + i).put("savedAtMs", 2000 + i));
+        JSONArray kept = NotificationManagementRules.trimHistory(records, 0, 4, java.util.Set.of("example.parcel"));
+        assertEquals(201, kept.length());
+        assertEquals("pending-important", kept.getJSONObject(0).getString("key"));
+        assertSame(pending, kept.getJSONObject(0));
+        pending.put("reminderAt", 0).put("reminderAttemptedAt", 9000);
+        assertEquals(200, NotificationManagementRules.trimHistory(records, 0, 4, java.util.Set.of("example.parcel")).length());
+    }
+
+    @Test public void obsoleteDismissedAndUnselectedRemindersDoNotBypassHistoryLimits() throws Exception {
+        JSONObject pending = new JSONObject().put("key", "old-important").put("packageName", "example.parcel")
+            .put("revision", 4).put("applied", true).put("action", "retain").put("important", true)
+            .put("reminderAt", 9000).put("savedAtMs", 1000);
+        JSONArray records = new JSONArray().put(pending);
+        for (int i = 0; i < 205; i++) records.put(new JSONObject().put("key", "history-" + i).put("savedAtMs", 2000 + i));
+        assertEquals(200, NotificationManagementRules.trimHistory(records, 0, 5, java.util.Set.of("example.parcel")).length());
+        assertEquals(200, NotificationManagementRules.trimHistory(records, 0, 4, java.util.Set.of()).length());
+        pending.put("dismissed", true);
+        assertEquals(200, NotificationManagementRules.trimHistory(records, 0, 4, java.util.Set.of("example.parcel")).length());
+        JSONArray dated = new JSONArray().put(new JSONObject().put("savedAtMs", 100)).put(new JSONObject().put("savedAtMs", 500));
+        assertEquals(1, NotificationManagementRules.trimHistory(dated, 300, 4, java.util.Set.of()).length());
     }
 
 }

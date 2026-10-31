@@ -243,8 +243,9 @@ export function createMemoryMaintenance({ store, existingStore, executionStatus,
   const getStore = typeof store === 'function' ? store : async () => store;
   const getExistingStore = existingStore ?? (typeof store === 'function' ? async () => null : async () => store);
   let state, busy = false, stopped = false, closed = false, activeController, lastCode;
-  let serial = Promise.resolve();
+  let serial = Promise.resolve(), writeRevision = 0;
   const serialize = operation => {
+    writeRevision++;
     const next = serial.then(operation, operation);
     serial = next.catch(() => {}); return next;
   };
@@ -286,7 +287,7 @@ export function createMemoryMaintenance({ store, existingStore, executionStatus,
     const signal = activeController.signal;
     try { await check({ ...options, signal }); return await run(signal); }
     catch (error) {
-      const code = signal.aborted ? 'MEMORY_MAINTENANCE_CANCELLED' : error.code ?? 'MEMORY_MAINTENANCE_FAILED';
+      const code = signal.aborted ? signal.reason?.code ?? 'MEMORY_MAINTENANCE_CANCELLED' : error.code ?? 'MEMORY_MAINTENANCE_FAILED';
       lastCode = code; reportError(code);
       return { status: 'blocked', action, code };
     } finally { activeController = undefined; busy = false; }
@@ -611,6 +612,8 @@ export function createMemoryMaintenance({ store, existingStore, executionStatus,
 
   return {
     ingestOnce, enqueueExtraction, extractOnce, maintainOnce, stop,
+    revision: () => writeRevision,
+    async whenIdle() { let observed; do { observed = serial; await observed; } while (observed !== serial); },
     retryExtraction(id) { return changeHeld(id, false); },
     discardExtraction(id) { return changeHeld(id, true); },
     resume() { if (closed) throw codeError('MEMORY_MAINTENANCE_STOPPED'); stopped = false; },

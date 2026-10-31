@@ -1,0 +1,14 @@
+Please evaluate whether the following expression or language style, together with its usage condition or usage scenario, is appropriate:
+Usage condition or usage scenario: {situation}
+Expression or language style: {style}
+
+Please evaluate from the following aspects:
+{criteria_list}
+
+Please output the evaluation result in JSON format:
+{{
+    "suitable": true/false,
+    "reason": "Reason for evaluation (if inappropriate, explain why)"
+
+}}
+Please strictly output in JSON format and do not include any other content.

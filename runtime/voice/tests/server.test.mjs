@@ -20,21 +20,22 @@ async function storeFixture(t) {
 const idleRealtime = () => ({ active: false, snapshot: () => ({ status: 'idle' }), stop: async () => ({ status: 'ended' }),
   testConnection: async () => ({ connected: true }) });
 
-test('voice entry defaults on and wake binding preserves manual words across reload', async t => {
+test('wake defaults use Droy and Dory and retired name binding cannot override manual words', async t => {
   const { store, home } = await storeFixture(t);
   assert.equal((await store.publicConfig()).entries.standard, true);
   assert.equal((await store.publicConfig()).wake.timing, 'screen_on');
+  assert.equal((await store.publicConfig()).wake.chinese, '你好Droy');
+  assert.equal((await store.publicConfig()).wake.english, 'Hey Dory');
   await store.save({ entries: { standard: false }, wake: { timing: 'foreground', useCompanionName: true,
     chinese: '你好测试', english: 'Hello Droy' } });
   const restored = createConfigStore({ home, env: {} });
-  assert.equal((await restored.publicConfig()).entries.standard, false);
-  assert.equal((await restored.read()).wake.useCompanionName, true);
+  assert.equal((await restored.publicConfig()).entries.standard, true);
+  assert.equal((await restored.read()).wake.useCompanionName, false);
   await restored.save({ wake: { useCompanionName: false } });
   const wake = (await restored.read()).wake;
   assert.equal(wake.timing, 'foreground'); assert.equal(wake.chinese, '你好测试'); assert.equal(wake.english, 'Hello Droy');
   await assert.rejects(restored.save({ wake: { timing: 'unknown' } }), /唤醒时机不支持/);
-  await restored.save({ wake: { enabled: true, useCompanionName: true, chinese: '', english: '' } });
-  await assert.rejects(restored.save({ wake: { useCompanionName: false } }), /至少填写一个唤醒词/);
+  await assert.rejects(restored.save({ wake: { enabled: true, useCompanionName: true, chinese: '', english: '' } }), /至少填写一个唤醒词/);
 });
 
 test('system speech is default and downloaded local voice previews do not save drafts', async t => {
@@ -181,7 +182,7 @@ test('Qwen resets inherited speed to standard and rejects explicit unsupported s
   assert.equal((await store.read()).tts.voiceId, 'Serena');
 });
 
-test('authenticated HTTP configuration masks secrets and disabled standard entry cannot start native recording', async t => {
+test('authenticated HTTP masks secrets and the retired entry switch does not disable voice access', async t => {
   const { store } = await storeFixture(t); const calls = [];
   const native = async input => { calls.push(input); return { voices: [], ready: true }; };
   const service = createVoiceService({ store, native, realtime: idleRealtime() });
@@ -190,10 +191,9 @@ test('authenticated HTTP configuration masks secrets and disabled standard entry
   const result = await (await http.get()).json();
   assert.equal(result.result.config.tts.hasKey, true);
   assert.equal(JSON.stringify(result).includes('fixture-tts-key'), false);
-  const rejected = await http.post({ operation: 'start', mode: 'standard', sessionId: 'fixture-session' });
-  assert.equal(rejected.status, 400);
-  assert.equal((await rejected.json()).error.code, 'ENTRY_DISABLED');
-  assert.equal(calls.length, 0);
+  const started = await http.post({ operation: 'start', mode: 'standard', sessionId: 'fixture-session' });
+  assert.equal(started.status, 200);
+  assert.equal(calls.filter(row => row.operation === 'start').length, 1);
 });
 
 test('HTTP denial does not read configuration or dispatch native actions', async t => {
@@ -412,7 +412,7 @@ test('model downloads and status do not wait behind an active speech response', 
   await fetching;
   await service.run({ operation: 'tts.download', provider: 'qwen3' });
   await service.run({ operation: 'tts.models' });
-  assert.deepEqual(calls, ['tts.download', 'tts.models']);
+  assert.deepEqual(calls, ['status', 'tts.download', 'tts.models']);
   await service.run({ operation: 'stop_speaking' });
   assert.deepEqual(await pending, { cancelled: true });
 });

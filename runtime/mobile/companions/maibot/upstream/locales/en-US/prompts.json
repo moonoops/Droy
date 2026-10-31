@@ -1,0 +1,8 @@
+{
+  "prompt.duplicate_template_name": "Prompt template name '{name}' is duplicated: {path_a} and {path_b}",
+  "prompt.format_failed": "Failed to render prompt template '{name}': {error}",
+  "prompt.invalid_category": "Prompt category '{category}' is invalid",
+  "prompt.invalid_name": "Prompt name '{name}' is invalid",
+  "prompt.missing_placeholder": "Prompt template '{name}' is missing placeholder '{placeholder}'",
+  "prompt.template_not_found": "Prompt template '{name}' not found under locale '{locale}'"
+}

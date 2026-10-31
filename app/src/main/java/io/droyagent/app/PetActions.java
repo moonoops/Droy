@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
@@ -19,12 +20,24 @@ final class PetActions {
         send(taskId, "answer", requestId, null, answers);
     }
 
+    static void control(String taskId, String action, long expectedRevision) throws Exception {
+        if (!Set.of("pause", "resume", "stop").contains(action) || expectedRevision < 0
+                || expectedRevision > 9_007_199_254_740_991L)
+            throw new IllegalArgumentException(NativeLocale.text("任务控制请求无效", "Invalid task control request"));
+        request(new JSONObject().put("taskId", taskId).put("action", action)
+            .put("expectedRevision", expectedRevision), true);
+    }
+
     private static void send(String taskId, String action, String requestId, String optionId, JSONArray answers) throws Exception {
-        if (!RuntimeService.ready) throw new IOException(io.droyagent.app.NativeLocale.text("任务服务尚未就绪，请打开 Droy 查看", "The task service is not ready. Please open Droy"));
         JSONObject body = new JSONObject().put("taskId", taskId).put("action", action);
         if (requestId != null) body.put("requestId", requestId);
         if (optionId != null) body.put("optionId", optionId);
         if (answers != null) body.put("answers", answers);
+        request(body, false);
+    }
+
+    private static void request(JSONObject body, boolean control) throws Exception {
+        if (!RuntimeService.ready) throw new IOException(io.droyagent.app.NativeLocale.text("任务服务尚未就绪，请打开 Droy 查看", "The task service is not ready. Please open Droy"));
         HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:"
             + RuntimeService.webPort + "/droy/pet/action").openConnection();
         try {
@@ -36,7 +49,9 @@ final class PetActions {
             connection.setDoOutput(true);
             try (var stream = connection.getOutputStream()) { stream.write(body.toString().getBytes(StandardCharsets.UTF_8)); }
             int status = connection.getResponseCode();
-            if (status == 409) throw new IOException(io.droyagent.app.NativeLocale.text("这个问题已更新，请查看当前任务", "This question has changed. Please view the current task"));
+            if (status == 409) throw new IOException(control
+                ? NativeLocale.text("任务状态已变化，请重新打开气泡后操作", "The task state has changed. Reopen the bubble and try again")
+                : NativeLocale.text("这个问题已更新，请查看当前任务", "This question has changed. Please view the current task"));
             if (status != 200) throw new IOException(io.droyagent.app.NativeLocale.text("操作未完成，请打开任务重试", "The operation did not complete. Please open the task and retry"));
             try (var stream = connection.getInputStream()) {
                 java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();

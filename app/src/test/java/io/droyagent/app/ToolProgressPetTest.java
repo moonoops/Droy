@@ -63,6 +63,43 @@ public class ToolProgressPetTest {
         ToolProgress.updateFromEngine(event("slow-task", "executing", true, null));
         assertEquals("", ToolProgress.current(null).getString("summaryKind"));
     }
+    @Test public void explicitErrorKindPreservesTheSuppliedSummaryAndNeverBecomesOrdinaryChatter() throws Exception {
+        for (String summary : new String[]{"模型请求失败，正在等待重试，可停止任务",
+                "The model request failed. Waiting to retry; you can stop the task."}) {
+            ToolProgress.interruptAll();
+            ToolProgress.updateFromEngine(event("retry-error", "thinking", true, null)
+                .put("summary", summary).put("summaryKind", "error").put("activityKind", "thinking"));
+            JSONObject current = ToolProgress.current(null);
+            assertEquals("error", current.getString("summaryKind"));
+            assertEquals(summary, current.getString("summary"));
+            assertEquals("", current.getString("activityKind"));
+            long began = current.getLong("startedAt");
+            ToolProgress.updateFromEngine(event("retry-error", "thinking", true, null)
+                .put("summary", summary).put("summaryKind", "error"));
+            assertEquals("Duplicate error receipts must retain their presentation identity", began,
+                ToolProgress.current(null).getLong("startedAt"));
+            ToolProgress.updateFromEngine(event("retry-error", "interrupted", false, null).put("summaryKind", "error"));
+            assertEquals("", ToolProgress.current(null).getString("summaryKind"));
+            ToolProgress.updateFromEngine(event("retry-error", "thinking", true, null).put("summary", "用户原文包含错误两个字"));
+            assertEquals("General summaries must never be inferred to be errors", "",
+                ToolProgress.current(null).getString("summaryKind"));
+        }
+    }
+    @Test public void explicitErrorsCannotReplacePendingQuestionsInThisOrAnotherTask() throws Exception {
+        ToolProgress.updateFromEngine(event("question-priority", "thinking", true, question("priority-question"))
+            .put("summaryKind", "error"));
+        assertEquals("", ToolProgress.current(null).getString("summaryKind"));
+        ToolProgress.updateFromEngine(event("background-error", "thinking", true, null)
+            .put("summary", "保留原始错误摘要").put("summaryKind", "error"));
+        JSONObject current = ToolProgress.current(null);
+        assertEquals("question-priority", current.getString("taskId"));
+        assertEquals("priority-question", current.getJSONObject("pending").getString("requestId"));
+        assertEquals("", current.getString("summaryKind"));
+        ToolProgress.updateFromEngine(event("question-priority", "interrupted", false, null));
+        assertEquals("background-error", ToolProgress.current(null).getString("taskId"));
+        assertEquals("error", ToolProgress.current(null).getString("summaryKind"));
+        assertEquals("保留原始错误摘要", ToolProgress.current(null).getString("summary"));
+    }
     @Before public void resetCurrentTask() {
         ToolProgress.interruptAll();
     }

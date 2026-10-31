@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_shell_messages">Messages</string>
+    <string name="native_shell_settings">Settings</string>
+    <string name="native_shell_pending_share">Pending share</string>
+    <string name="native_shell_pending_voice">Saved recording</string>
+    <string name="native_shell_plugins_accounts">Plugins and accounts</string>
+    <string name="native_shell_camera">Camera</string>
+    <string name="native_shell_discard_space_draft">Discard the draft in %1$s?</string>
+</resources>

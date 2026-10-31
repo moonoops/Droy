@@ -1,0 +1,14 @@
+<resources>
+    <style name="DroyPetBubbleTheme" parent="@android:style/Theme.Material.Light.Dialog.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowMinWidthMajor">0dp</item>
+        <item name="android:windowMinWidthMinor">0dp</item>
+        <item name="android:windowElevation">0dp</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:colorAccent">@android:color/transparent</item>
+    </style>
+</resources>

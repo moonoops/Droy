@@ -92,10 +92,9 @@ public final class VoiceUiDeviceTest {
         ui.awaitPage();
         DeviceUi.await("Voice plugin did not initialize in the real DSH profile", 15000,
             () -> ui.truth("!!window.DroyVoice?.getSnapshot().config"));
-        boolean landscape = "true".equals(InstrumentationRegistry.getArguments().getString("layoutLandscape"));
-        assertTrue(automation.setRotation(landscape ? UiAutomation.ROTATION_FREEZE_90 : UiAutomation.ROTATION_FREEZE_0));
-        DeviceUi.await("Voice UI did not reach the requested orientation", 5000,
-            () -> ui.truth(landscape ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+        assertTrue(automation.setRotation(UiAutomation.ROTATION_FREEZE_0));
+        DeviceUi.await("Voice UI did not reach the portrait orientation", 5000,
+            () -> ui.truth("innerHeight>innerWidth"));
         configureLayout();
         DeviceUi.await("Bundled Android ASR did not become ready automatically", 120000, () -> {
             JSONObject preparation = AudioTranscription.get(context).uiStatus();
@@ -927,8 +926,7 @@ public final class VoiceUiDeviceTest {
         if (awaitPaint) {
             ui.awaitPaint(".droy-voice-wave");
         }
-        boolean landscape = "true".equals(InstrumentationRegistry.getArguments().getString("layoutLandscape"));
-        assertTrue("Evidence orientation changed before capture", ui.truth(landscape ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+        assertTrue("Evidence orientation changed before capture", ui.truth("innerHeight>innerWidth"));
         Bitmap screen = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES).takeScreenshot();
         assertNotNull(screen);
         try {

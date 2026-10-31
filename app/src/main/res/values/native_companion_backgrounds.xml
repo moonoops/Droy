@@ -1,0 +1,10 @@
+<resources>
+    <string name="native_companion_background_paper_light">Paper · Light</string>
+    <string name="native_companion_background_paper_dark">Paper · Dark</string>
+    <string name="native_companion_background_mist_light">Mist · Light</string>
+    <string name="native_companion_background_mist_dark">Mist · Dark</string>
+    <string name="native_companion_background_leaves_light">Leaf shadows · Light</string>
+    <string name="native_companion_background_leaves_dark">Leaf shadows · Dark</string>
+    <string name="native_companion_background_lines_light">Line drawings · Light</string>
+    <string name="native_companion_background_lines_dark">Line drawings · Dark</string>
+</resources>

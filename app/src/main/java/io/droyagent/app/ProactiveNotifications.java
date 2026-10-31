@@ -7,25 +7,28 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 /** Product notification choices and native publication, independent from incoming-notification management. */
 final class ProactiveNotifications {
-    private static final String DATA = "proactiveNotificationRecords", ALLOWED = "notifyAllowedApps";
+    private static final String DATA = "proactiveNotificationRecords";
+    private static final String MESSAGE_POSITIONS = "companionNotificationPositions";
+    static final String MESSAGES = "notifyMessagesEnabled", TASKS = "notifyTasksEnabled";
+    static final String MESSAGE_CHANNEL = "companion_messages";
+    static final String QUIET_MESSAGE_CHANNEL = "companion_messages_quiet";
     private static final String TAG = "droy-task-notice";
-    private static ProactiveNotifications instance;
+    static final String COMPANION_TAG = "droy-companion-notice";
+    private static volatile ProactiveNotifications instance;
     private final Context context;
     private final SharedPreferences preferences;
     private final NotificationManager notifications;
     private final ProactiveNoticeStore store;
-    private final Map<String, String> appContexts = new ConcurrentHashMap<>();
+    private final CompanionNotificationHistory messageHistory;
+    private final android.os.Handler localeUpdates = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final java.util.LinkedHashSet<String> pendingLocaleUpdates = new java.util.LinkedHashSet<>();
+    private boolean localeUpdateScheduled;
+    private long nextLocaleUpdateAt;
     private volatile boolean active;
 
     static synchronized ProactiveNotifications get(Context context) {
@@ -41,17 +44,90 @@ final class ProactiveNotifications {
         preferences = ProductPermissions.preferences(context);
         notifications = context.getSystemService(NotificationManager.class);
         store = new ProactiveNoticeStore(new JSONArray(preferences.getString(DATA, "[]")));
+        messageHistory = new CompanionNotificationHistory(store, new JSONObject(preferences.getString(MESSAGE_POSITIONS, "{}")));
         save();
-        notifications.createNotificationChannel(new NotificationChannel("task_updates", io.droyagent.app.NativeLocale.text("任务结果", "Task results"), NotificationManager.IMPORTANCE_LOW));
-        notifications.createNotificationChannel(new NotificationChannel("task_attention", io.droyagent.app.NativeLocale.text("需要及时处理", "Needs attention"), NotificationManager.IMPORTANCE_DEFAULT));
-        notifications.createNotificationChannel(new NotificationChannel("task_urgent", io.droyagent.app.NativeLocale.text("紧急重要事项", "Urgent and important"), NotificationManager.IMPORTANCE_HIGH));
+        createChannel("task_updates", NativeLocale.text("任务结果", "Task results"), NotificationManager.IMPORTANCE_LOW, false);
+        createChannel("task_attention", NativeLocale.text("需要及时处理", "Needs attention"), NotificationManager.IMPORTANCE_DEFAULT, true);
+        createChannel("task_urgent", NativeLocale.text("紧急重要事项", "Urgent and important"), NotificationManager.IMPORTANCE_HIGH, true);
+        if (notifications.getNotificationChannel(MESSAGE_CHANNEL) == null) {
+            NotificationChannel source = notifications.getNotificationChannel("task_attention");
+            NotificationChannel channel = new NotificationChannel(MESSAGE_CHANNEL,
+                CompanionNotificationPresentation.text(context, R.string.cnotice_channel), source.getImportance());
+            // Preserve the old shared channel's user choices when splitting message delivery.
+            channel.setSound(source.getSound(), source.getAudioAttributes());
+            channel.setVibrationPattern(source.getVibrationPattern());
+            channel.enableVibration(source.shouldVibrate());
+            channel.setShowBadge(source.canShowBadge());
+            channel.setLockscreenVisibility(source.getLockscreenVisibility());
+            notifications.createNotificationChannel(channel);
+        }
+        if (notifications.getNotificationChannel(QUIET_MESSAGE_CHANNEL) == null) {
+            NotificationChannel source = notifications.getNotificationChannel(MESSAGE_CHANNEL);
+            NotificationChannel quiet = new NotificationChannel(QUIET_MESSAGE_CHANNEL,
+                CompanionNotificationPresentation.text(context, R.string.cnotice_quiet_channel),
+                Math.max(NotificationManager.IMPORTANCE_MIN, Math.min(NotificationManager.IMPORTANCE_LOW, source.getImportance())));
+            quiet.setSound(null, null); quiet.enableVibration(false);
+            quiet.setShowBadge(source.canShowBadge()); quiet.setLockscreenVisibility(source.getLockscreenVisibility());
+            notifications.createNotificationChannel(quiet);
+        }
+    }
+
+    private void createChannel(String id, String title, int importance, boolean vibrate) {
+        if (notifications.getNotificationChannel(id) != null) return;
+        NotificationChannel channel = new NotificationChannel(id, title, importance);
+        channel.enableVibration(vibrate);
+        if (vibrate) channel.setVibrationPattern(new long[]{0, 80});
+        notifications.createNotificationChannel(channel);
+    }
+
+    private synchronized void migratePreferences(boolean legacyPluginEnabled) {
+        boolean inherited = NotificationDeliveryPolicy.inheritedEnabled(legacyPluginEnabled,
+            preferences.getBoolean("notifyLocalEnabled", true));
+        SharedPreferences.Editor editor = preferences.edit();
+        if (!preferences.contains(MESSAGES)) editor.putBoolean(MESSAGES, inherited);
+        if (!preferences.contains(TASKS)) editor.putBoolean(TASKS, inherited);
+        editor.remove("notifyAppsEnabled").remove("notifyAllowedApps");
+        if (!editor.commit()) throw new IllegalStateException(NativeLocale.text("通知设置未保存", "Notification settings were not saved"));
     }
 
     static void refreshLocale(Context context) {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
+        renameChannel(manager, MESSAGE_CHANNEL, CompanionNotificationPresentation.text(context, R.string.cnotice_channel));
+        renameChannel(manager, QUIET_MESSAGE_CHANNEL, CompanionNotificationPresentation.text(context, R.string.cnotice_quiet_channel));
         renameChannel(manager, "task_updates", NativeLocale.text("任务结果", "Task results"));
         renameChannel(manager, "task_attention", NativeLocale.text("需要及时处理", "Needs attention"));
         renameChannel(manager, "task_urgent", NativeLocale.text("紧急重要事项", "Urgent and important"));
+        ProactiveNotifications current = instance;
+        if (current != null) current.scheduleLocaleUpdates();
+    }
+
+    private synchronized void scheduleLocaleUpdates() {
+        pendingLocaleUpdates.clear();
+        for (android.service.notification.StatusBarNotification posted : notifications.getActiveNotifications()) {
+            String tag = posted.getTag();
+            if (tag != null && tag.startsWith(COMPANION_TAG + ":")) pendingLocaleUpdates.add(tag.substring(COMPANION_TAG.length() + 1));
+        }
+        if (localeUpdateScheduled || pendingLocaleUpdates.isEmpty()) return;
+        localeUpdateScheduled = true;
+        localeUpdates.postDelayed(this::refreshNextLocale, Math.max(500, nextLocaleUpdateAt - android.os.SystemClock.uptimeMillis()));
+    }
+
+    private synchronized void refreshNextLocale() {
+        if (instance != this || pendingLocaleUpdates.isEmpty()) {
+            pendingLocaleUpdates.clear(); localeUpdateScheduled = false; return;
+        }
+        String companion = pendingLocaleUpdates.iterator().next();
+        pendingLocaleUpdates.remove(companion);
+        try { refreshCompanion(companion); }
+        catch (Exception failure) {
+            android.util.Log.e("DroyNotifications", "COMPANION_NOTIFICATION_LOCALE_REFRESH_FAILED", failure);
+            android.widget.Toast.makeText(context, CompanionNotificationPresentation.text(context, R.string.cnotice_language_update_failed),
+                android.widget.Toast.LENGTH_LONG).show();
+        }
+        // A language change can update several conversations. Leave publication capacity for new messages.
+        nextLocaleUpdateAt = android.os.SystemClock.uptimeMillis() + 500;
+        if (pendingLocaleUpdates.isEmpty()) localeUpdateScheduled = false;
+        else localeUpdates.postDelayed(this::refreshNextLocale, 500);
     }
 
     private static void renameChannel(NotificationManager manager, String id, String name) {
@@ -61,58 +137,216 @@ final class ProactiveNotifications {
         manager.createNotificationChannel(channel);
     }
 
-    JSONObject request(JSONObject args) throws Exception {
+    JSONObject request(JSONObject args) throws Exception { return request(args, true); }
+
+    synchronized JSONObject request(JSONObject args, boolean includeApps) throws Exception {
         return switch (args.getString("operation")) {
-            case "activate" -> { active = bool(args, "enabled"); if (!active) endAll(); yield status(); }
-            case "get" -> status();
-            case "configure" -> { configure(args); yield status(); }
+            case "activate" -> { active = bool(args, "enabled"); if (active) migratePreferences(true); yield status(includeApps); }
+            case "get" -> status(includeApps);
+            case "configure" -> { configure(args); yield status(includeApps); }
             case "send" -> send(args);
-            case "complete" -> complete(args);
-            case "end" -> { end(string(args, "taskId", 256)); yield new JSONObject().put("ok", true); }
+            case "companion" -> companion(args);
+            case "companionRead" -> companionRead(args);
+            case "companionRemove" -> companionRemove(args);
+            case "end" -> { string(args, "taskId", 256); yield new JSONObject().put("ok", true); }
             default -> throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("未知的主动通知操作", "Unknown proactive notification operation"));
         };
     }
 
-    JSONObject status() throws Exception {
+    static boolean isCompanionId(String id) { return CompanionIdentity.isValid(id); }
+
+    static String companionTag(String companionId) { return COMPANION_TAG + ":" + companionId; }
+    static boolean isCompanionTag(String tag) { return COMPANION_TAG.equals(tag) || tag != null && tag.startsWith(COMPANION_TAG + ":"); }
+
+    /** IM delivery is local only and never enters the task/app action channel. */
+    private synchronized JSONObject companion(JSONObject args) throws Exception {
+        fields(args, java.util.Set.of("operation", "companionId", "name", "text", "messageId", "sequence", "sentAt", "quiet", "alert", "avatar", "unreadCount", "throughSequence"));
+        String companion = checkedCompanion(args);
+        String name = string(args, "name", 160), text = string(args, "text", 4000), message = string(args, "messageId", 160);
+        if (text.codePointCount(0, text.length()) > 2000) throw new IllegalArgumentException(NativeLocale.text("伙伴通知正文无效", "Invalid companion notification text"));
+        long sequence = integer(args, "sequence", 1, 0), sentAt = integer(args, "sentAt", 1, System.currentTimeMillis());
+        boolean quiet = args.has("quiet") && bool(args, "quiet"), alert = !args.has("alert") || bool(args, "alert");
+        Integer unread = count(args);
+        String avatar = optional(args, "avatar", 1000);
+        long previousRead = messageHistory.readThrough(companion);
+        int previousDisplayedCount = Math.max(messageHistory.count(companion), messageHistory.pending(companion).size());
+        if (args.has("throughSequence")) {
+            long through = integer(args, "throughSequence", 0, 0);
+            messageHistory.read(companion, through, null);
+            // A delayed publication can arrive after a newer read callback.
+            if (through < previousRead) unread = null;
+        }
+        JSONObject result = new JSONObject().put("companionId", companion).put("messageId", message).put("published", false);
+        String receiptId = ProactiveNoticeStore.identity(companion, message, "message", "companion", "", "");
+        JSONObject previous = store.find(receiptId);
+        if (previous != null && !java.util.Set.of("failed", "unknown", "dispatching").contains(previous.optString("status"))) {
+            if (unread != null) messageHistory.count(companion, unread);
+            save();
+            if (messageHistory.readThrough(companion) > previousRead
+                || Math.max(messageHistory.count(companion), messageHistory.pending(companion).size()) != previousDisplayedCount)
+                refreshCompanion(companion);
+            return result.put("status", previous.optString("status")).put("duplicate", true);
+        }
+        boolean replay = previous != null;
+        JSONObject receipt = previous == null ? new JSONObject().put("noticeId", receiptId).put("channel", "companion")
+            .put("companionId", companion).put("messageId", message) : previous;
+        receipt.put("name", name).put("text", text).put("sequence", sequence).put("sentAt", sentAt).put("quiet", quiet).put("avatar", avatar).put("status", "dispatching");
+        if (previous == null) store.add(receipt);
+        if (unread != null) messageHistory.count(companion, unread);
+        if (sequence > 0 && sequence <= messageHistory.readThrough(companion)) {
+            receipt.put("status", "read"); save();
+            refreshCompanion(companion);
+            return result.put("status", "read").put("reason", "already_read");
+        }
+        android.service.notification.StatusBarNotification existing = postedCompanion(companion);
+        String channel = quiet || ((!alert || replay) && existing == null) ? QUIET_MESSAGE_CHANNEL
+            : (!alert || replay) && existing != null ? existing.getNotification().getChannelId() : MESSAGE_CHANNEL;
+        String reason = NotificationDeliveryPolicy.messageSuppression(
+            preferences.getBoolean(MESSAGES, false), notifications.areNotificationsEnabled(),
+            enabledChannel(MESSAGE_CHANNEL) && enabledChannel(channel), NativeRuntimeHost.isCompanionVisible(companion));
+        if (reason != null) {
+            receipt.put("status", "suppressed"); save();
+            refreshCompanion(companion);
+            return result.put("status", reason.equals("conversation_visible") ? "suppressed" : "disabled").put("reason", reason);
+        }
+        receipt.put("postedChannel", channel); save();
+        try {
+            notifications.notify(companionTag(companion), companion.hashCode() & 0x7fffffff,
+                CompanionNotificationPresentation.build(context, companion, messageHistory.recent(companion),
+                    Math.max(messageHistory.count(companion), messageHistory.pending(companion).size()), channel, quiet || !alert || replay));
+            notifications.cancel(COMPANION_TAG, companion.hashCode() & 0x7fffffff);
+        } catch (SecurityException revoked) {
+            receipt.put("status", "failed"); save();
+            return result.put("status", "disabled").put("reason", "system_disabled");
+        }
+        receipt.put("status", "published"); save();
+        return result.put("status", "published").put("published", true);
+    }
+
+    private JSONObject companionRead(JSONObject args) throws Exception {
+        fields(args, java.util.Set.of("operation", "companionId", "throughSequence", "unreadCount"));
+        String companion = checkedCompanion(args);
+        if (!args.has("throughSequence")) throw new IllegalArgumentException(NativeLocale.text("缺少已读位置", "The read position is missing"));
+        long through = integer(args, "throughSequence", 0, 0);
+        messageHistory.read(companion, through, count(args)); save();
+        refreshCompanion(companion);
+        return new JSONObject().put("ok", true).put("throughSequence", messageHistory.readThrough(companion));
+    }
+
+    private JSONObject companionRemove(JSONObject args) throws Exception {
+        fields(args, java.util.Set.of("operation", "companionId", "messageId", "unreadCount"));
+        String companion = checkedCompanion(args);
+        messageHistory.remove(companion, string(args, "messageId", 160), count(args)); save();
+        refreshCompanion(companion);
+        return new JSONObject().put("ok", true);
+    }
+
+    synchronized void dismissCompanion(String companion, String message) throws Exception {
+        messageHistory.dismiss(companion, message); save();
+        // A new message can arrive after the swipe but before its delete intent is handled.
+        refreshCompanion(companion);
+    }
+
+    private void refreshCompanion(String companion) throws Exception {
+        android.service.notification.StatusBarNotification existing = postedCompanion(companion);
+        if (existing == null) {
+            notifications.cancel(COMPANION_TAG, companion.hashCode() & 0x7fffffff);
+            return;
+        }
+        java.util.List<JSONObject> rows = messageHistory.recent(companion);
+        if (rows.isEmpty()) { notifications.cancel(existing.getTag(), existing.getId()); return; }
+        String channel = existing.getNotification().getChannelId();
+        String latestChannel = rows.get(rows.size() - 1).optString("postedChannel");
+        if (MESSAGE_CHANNEL.equals(latestChannel) || QUIET_MESSAGE_CHANNEL.equals(latestChannel)) channel = latestChannel;
+        if (!preferences.getBoolean(MESSAGES, false) || !notifications.areNotificationsEnabled()
+            || !enabledChannel(MESSAGE_CHANNEL) || !enabledChannel(channel)) {
+            notifications.cancel(existing.getTag(), existing.getId()); return;
+        }
+        int unread = Math.max(messageHistory.count(companion), messageHistory.pending(companion).size());
+        // Repeated read callbacks must not re-post an unchanged card or consume Android's update budget.
+        if (CompanionNotificationPresentation.matches(existing.getNotification(), companion, rows, unread, channel)) return;
+        notifications.notify(companionTag(companion), companion.hashCode() & 0x7fffffff,
+            CompanionNotificationPresentation.build(context, companion, rows, unread, channel, true));
+    }
+
+    private android.service.notification.StatusBarNotification postedCompanion(String companion) {
+        for (android.service.notification.StatusBarNotification posted : notifications.getActiveNotifications())
+            if (companionTag(companion).equals(posted.getTag()) && posted.getId() == (companion.hashCode() & 0x7fffffff)) return posted;
+        return null;
+    }
+
+    synchronized void clearCompanion(String companionId) throws Exception {
+        if (!isCompanionId(companionId)) throw new IllegalArgumentException(NativeLocale.text("伙伴不存在", "Companion not found"));
+        messageHistory.clear(companionId); save();
+        notifications.cancel(companionTag(companionId), companionId.hashCode() & 0x7fffffff);
+        notifications.cancel(COMPANION_TAG, companionId.hashCode() & 0x7fffffff);
+        context.getSystemService(android.content.pm.ShortcutManager.class).removeLongLivedShortcuts(java.util.List.of("companion:" + companionId));
+        context.getSystemService(android.content.pm.ShortcutManager.class).removeDynamicShortcuts(java.util.List.of("companion:" + companionId));
+    }
+
+    private static void fields(JSONObject args, java.util.Set<String> allowed) {
+        for (java.util.Iterator<String> keys = args.keys(); keys.hasNext();) if (!allowed.contains(keys.next()))
+            throw new IllegalArgumentException(NativeLocale.text("伙伴通知参数无效", "Invalid companion notification arguments"));
+    }
+    private static String checkedCompanion(JSONObject args) throws Exception {
+        String companion = string(args, "companionId", 160);
+        if (!isCompanionId(companion)) throw new IllegalArgumentException(NativeLocale.text("伙伴不存在", "Companion not found"));
+        return companion;
+    }
+    static long integer(JSONObject args, String key, long min, long fallback) throws Exception {
+        if (!args.has(key)) return fallback;
+        Object value = args.get(key);
+        if (!(value instanceof Number number) || !Double.isFinite(number.doubleValue()) || number.doubleValue() != Math.rint(number.doubleValue())
+            || number.doubleValue() < min || number.doubleValue() > 9007199254740991d) throw new IllegalArgumentException(key + NativeLocale.text(" 无效", " is invalid"));
+        return ((Number)value).longValue();
+    }
+    private static Integer count(JSONObject args) throws Exception {
+        if (!args.has("unreadCount")) return null;
+        long count = integer(args, "unreadCount", 0, 0);
+        if (count > Integer.MAX_VALUE) throw new IllegalArgumentException(NativeLocale.text("未读消息数量无效", "Invalid unread message count"));
+        return (int)count;
+    }
+
+    JSONObject status() throws Exception { return status(true); }
+
+    JSONObject status(boolean includeApps) throws Exception {
         JSONObject pet = PetOverlay.notificationState(context, "");
-        boolean local = preferences.getBoolean("notifyLocalEnabled", true), apps = preferences.getBoolean("notifyAppsEnabled", false);
-        JSONArray allowed = allowedApps(), installed = installedApps();
-        boolean system = active && local && notifications.areNotificationsEnabled() && enabledChannel("task_updates");
-        boolean petAvailable = active && local && pet.optBoolean("petAvailable");
-        boolean appAvailable = active && apps && allowed.length() > 0 && !ProductPermissions.stopped(context)
-            && ProductPermissions.allowed(preferences, "allowApps") && ProductPermissions.allowed(preferences, "allowObserve")
-            && ProductPermissions.allowed(preferences, "allowControl");
-        return new JSONObject().put("pluginActive", active).put("localEnabled", local).put("appsEnabled", apps)
-            .put("allowedApps", allowed).put("apps", installed)
+        boolean messages = preferences.getBoolean(MESSAGES, false), tasks = preferences.getBoolean(TASKS, false);
+        boolean system = active && tasks && notifications.areNotificationsEnabled()
+            && (enabledChannel("task_updates") || enabledChannel("task_attention") || enabledChannel("task_urgent"));
+        return new JSONObject().put("pluginActive", active).put("messagesEnabled", messages).put("tasksEnabled", tasks)
+            .put("messageDelivery", new JSONObject().put("systemEnabled", notifications.areNotificationsEnabled())
+                .put("channelEnabled", enabledChannel(MESSAGE_CHANNEL)).put("quietChannelEnabled", enabledChannel(QUIET_MESSAGE_CHANNEL))
+                .put("available", messages && notifications.areNotificationsEnabled() && enabledChannel(MESSAGE_CHANNEL))
+                .put("quietAvailable", messages && notifications.areNotificationsEnabled() && enabledChannel(MESSAGE_CHANNEL) && enabledChannel(QUIET_MESSAGE_CHANNEL))
+                .put("reason", !messages ? "messages_disabled" : !notifications.areNotificationsEnabled() ? "system_disabled" : !enabledChannel(MESSAGE_CHANNEL) ? "channel_disabled" : "")
+                .put("channelId", MESSAGE_CHANNEL).put("quietChannelId", QUIET_MESSAGE_CHANNEL))
             .put("channels", new JSONArray()
-                .put(channel("system", system, !local ? io.droyagent.app.NativeLocale.text("本机通知已关闭", "Local notifications are disabled") : io.droyagent.app.NativeLocale.text("系统通知权限或渠道未开启", "System notification permission or channel is disabled")))
-                .put(channel("pet", petAvailable, !local ? io.droyagent.app.NativeLocale.text("本机通知已关闭", "Local notifications are disabled") : io.droyagent.app.NativeLocale.text("当前伙伴形象不可展示", "The current companion artwork cannot be displayed")))
-                .put(channel("app", appAvailable, !apps ? io.droyagent.app.NativeLocale.text("App 主动通知已关闭", "App proactive notifications are disabled") : io.droyagent.app.NativeLocale.text("请选择允许的 App，并开启手机操作", "Choose allowed apps and enable phone operations"))))
-            .put("context", pet.put("returnOnCompletion", preferences.getBoolean("returnToDroyOnCompletion", false)));
+                .put(channel("system", system, !tasks ? NativeLocale.text("任务通知已关闭", "Task notifications are off")
+                    : NativeLocale.text("系统通知权限或渠道未开启", "System notification permission or channel is disabled")))
+                .put(channel("pet", active && pet.optBoolean("petAvailable"), NativeLocale.text("当前无法显示宠物", "The pet cannot be shown now"))))
+            .put("context", pet.put("returnOnCompletion", preferences.getBoolean("returnToDroyOnCompletion", true)));
     }
 
     private static JSONObject channel(String id, boolean available, String reason) throws Exception {
         return new JSONObject().put("id", id).put("available", available).put("reason", available ? "" : reason);
     }
 
-    private void configure(JSONObject args) throws Exception {
-        SharedPreferences.Editor editor = preferences.edit();
-        if (args.has("localEnabled")) editor.putBoolean("notifyLocalEnabled", bool(args, "localEnabled"));
-        if (args.has("appsEnabled")) editor.putBoolean("notifyAppsEnabled", bool(args, "appsEnabled"));
-        if (args.has("allowedApps")) {
-            JSONArray requested = args.getJSONArray("allowedApps"), checked = new JSONArray();
-            if (requested.length() > 100) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("允许的 App 过多", "Too many allowed apps"));
-            java.util.Set<String> seen = new java.util.HashSet<>();
-            for (int i = 0; i < requested.length(); i++) {
-                JSONObject item = requested.getJSONObject(i);
-                String pkg = string(item, "packageName", 255);
-                context.getPackageManager().getApplicationInfo(pkg, 0);
-                if (!seen.add(pkg) || pkg.equals(context.getPackageName())) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("通知 App 无效或重复", "Invalid or duplicate notification app"));
-                checked.put(new JSONObject().put("packageName", pkg).put("target", optional(item, "target", 200)));
-            }
-            editor.putString(ALLOWED, checked.toString());
+    private synchronized void configure(JSONObject args) throws Exception {
+        for (java.util.Iterator<String> keys = args.keys(); keys.hasNext();) {
+            if (!java.util.Set.of("operation", "messagesEnabled", "tasksEnabled").contains(keys.next()))
+                throw new IllegalArgumentException(NativeLocale.text("通知设置无效", "Invalid notification settings"));
         }
-        if (!editor.commit()) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("主动通知设置未保存", "Proactive notification settings were not saved"));
+        migratePreferences(active);
+        SharedPreferences.Editor editor = preferences.edit();
+        if (args.has("messagesEnabled")) editor.putBoolean(MESSAGES, bool(args, "messagesEnabled"));
+        if (args.has("tasksEnabled")) editor.putBoolean(TASKS, bool(args, "tasksEnabled"));
+        if (!editor.commit()) throw new IllegalStateException(NativeLocale.text("通知设置未保存", "Notification settings were not saved"));
+        for (android.service.notification.StatusBarNotification posted : notifications.getActiveNotifications()) {
+            if ((!preferences.getBoolean(MESSAGES, false) && isCompanionTag(posted.getTag()))
+                || (!preferences.getBoolean(TASKS, false) && TAG.equals(posted.getTag())))
+                notifications.cancel(posted.getTag(), posted.getId());
+        }
     }
 
     private synchronized JSONObject send(JSONObject args) throws Exception {
@@ -125,19 +359,19 @@ final class ProactiveNotifications {
         if (!java.util.Set.of("quiet", "normal", "urgent").contains(attention)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("提醒强度无效", "Invalid alert level"));
         JSONArray destinations = args.getJSONArray("destinations"), results = new JSONArray();
         if (destinations.length() < 1 || destinations.length() > 3) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("请选择少量通知渠道", "Please select a small number of notification channels"));
-        long appCount = 0;
-        for (int i = 0; i < destinations.length(); i++) if (destinations.getJSONObject(i).optString("channel").equals("app")) appCount++;
-        if (appCount > 1) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("多个 App 请依次完成发送", "Send notifications to multiple apps one at a time"));
+        for (int i = 0; i < destinations.length(); i++) {
+            if (!java.util.Set.of("system", "pet").contains(destinations.getJSONObject(i).optString("channel")))
+                throw new IllegalArgumentException(NativeLocale.text("通知渠道不可用", "Notification channel is unavailable"));
+        }
         for (int i = 0; i < destinations.length(); i++) {
             JSONObject dest = destinations.getJSONObject(i);
-            String selected = string(dest, "channel", 40), pkg = optional(dest, "packageName", 255), target = optional(dest, "target", 200);
-            if (selected.equals("app") && target.isEmpty()) target = defaultTarget(pkg);
+            String selected = string(dest, "channel", 40), pkg = "", target = "";
             String id = ProactiveNoticeStore.identity(task, turn, key, selected, pkg, target);
             JSONObject record;
             synchronized (store) {
                 record = store.find(id);
                 if (record != null && !record.optString("status").equals("failed")
-                        && (selected.equals("app") || record.optString("text").equals(text) && record.optString("title").equals(title))) {
+                        && (record.optString("text").equals(text) && record.optString("title").equals(title))) {
                     results.put(publicRecord(record).put("duplicate", true)); continue;
                 }
                 boolean existing = record != null;
@@ -156,22 +390,13 @@ final class ProactiveNotifications {
             try {
                 switch (selected) {
                     case "system" -> {
-                        checkLocal();
-                        publish(record, attention, record.optBoolean("update"));
-                        record.put("status", "published");
+                        checkTask();
+                        record.put("status", publish(record, attention, record.optBoolean("update")) ? "published" : "suppressed");
                     }
                     case "pet" -> {
-                        checkLocal();
                         if (record.optBoolean("update")) { PetOverlay.updateNotice(context, id, text); record.put("status", "updated"); }
-                        else if (PetOverlay.notify(context, task, id, text, this::localAllowed)) record.put("status", "shown");
+                        else if (PetOverlay.notify(context, task, id, text, () -> active)) record.put("status", "shown");
                         else throw new IllegalStateException(io.droyagent.app.NativeLocale.text("当前无法展示伙伴形象提示，请选择其他渠道", "The companion alert cannot be displayed now. Please choose another channel"));
-                    }
-                    case "app" -> {
-                        checkApp(pkg);
-                        if (target.isEmpty()) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("请指定接收对象，或先设置常用目标", "Specify a recipient or set a frequent target first"));
-                        String previous = appContexts.putIfAbsent(task, id);
-                        if (previous != null && !previous.equals(id)) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("请先完成当前 App 通知", "Please complete the current app notification first"));
-                        record.put("status", "requires_action");
                     }
                     default -> throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("通知渠道尚未接入", "This notification channel is not connected yet"));
                 }
@@ -185,70 +410,20 @@ final class ProactiveNotifications {
         return new JSONObject().put("results", results);
     }
 
-    private synchronized JSONObject complete(JSONObject args) throws Exception {
-        String task = string(args, "taskId", 256), id = string(args, "noticeId", 100), status = string(args, "status", 40);
-        if (!java.util.Set.of("sent_in_app", "failed", "unknown", "cancelled").contains(status)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("通知结果无效", "Invalid notification result"));
-        JSONObject record = store.find(id);
-        if (record == null || !task.equals(record.optString("taskId")) || !record.optString("channel").equals("app"))
-            throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("通知记录与当前任务不符", "The notification record does not match the current task"));
-        if (!id.equals(appContexts.get(task))) return publicRecord(record);
-        if (status.equals("sent_in_app") && args.optJSONObject("evidence") == null) status = "unknown";
-        record.put("status", status);
-        if (args.optJSONObject("evidence") != null) record.put("evidence", args.getJSONObject("evidence"));
-        appContexts.remove(task, id); save();
-        return publicRecord(record);
-    }
-
-    void checkAppOperation(String task) {
-        String id = appContexts.get(task);
-        if (id == null) return;
-        try {
-            JSONObject record = store.find(id);
-            if (record == null) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("通知执行上下文已失效", "The notification execution context expired"));
-            checkApp(record.optString("packageName"));
-        } catch (RuntimeException failure) { throw failure; }
-        catch (Exception failure) { throw new IllegalStateException(io.droyagent.app.NativeLocale.text("通知执行上下文无法读取", "Unable to read notification execution context"), failure); }
-    }
-
-    synchronized void appActionDispatched(String task) throws Exception {
-        String id = appContexts.get(task);
-        if (id != null) { JSONObject record = store.find(id); if (record != null && !record.optBoolean("actionStarted")) {
-            record.put("actionStarted", true); save();
-        } }
-    }
-
-    synchronized void end(String task) throws Exception {
-        String id = appContexts.remove(task);
-        if (id != null) { JSONObject record = store.find(id); if (record != null) {
-            record.put("status", record.optBoolean("actionStarted") ? "unknown" : "cancelled"); save();
-        } }
-    }
-    private void endAll() throws Exception { for (String task : new ArrayList<>(appContexts.keySet())) end(task); }
-
-    private void checkLocal() {
-        if (!localAllowed()) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("本机主动通知已关闭", "Local proactive notifications are disabled"));
-    }
-    private boolean localAllowed() { return active && preferences.getBoolean("notifyLocalEnabled", true); }
-    private void checkApp(String pkg) throws Exception {
-        if (!active || !preferences.getBoolean("notifyAppsEnabled", false)) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("App 主动通知已关闭", "App proactive notifications are disabled"));
-        if (ProductPermissions.stopped(context)) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("手机操作已暂停", "Phone operations are paused"));
-        JSONArray apps = allowedApps();
-        for (int i = 0; i < apps.length(); i++) if (apps.getJSONObject(i).getString("packageName").equals(pkg)) return;
-        throw new IllegalStateException(io.droyagent.app.NativeLocale.text("尚未允许此 App 主动通知", "Proactive notifications are not allowed for this app"));
-    }
-    private String defaultTarget(String pkg) throws Exception {
-        JSONArray apps = allowedApps();
-        for (int i = 0; i < apps.length(); i++) if (apps.getJSONObject(i).getString("packageName").equals(pkg)) return apps.getJSONObject(i).optString("target");
-        return "";
+    private void checkTask() {
+        if (!NotificationDeliveryPolicy.taskAllowed(preferences.getBoolean(TASKS, false), active))
+            throw new IllegalStateException(NativeLocale.text("任务通知已关闭", "Task notifications are off"));
     }
     private boolean enabledChannel(String id) { NotificationChannel channel = notifications.getNotificationChannel(id); return channel != null && channel.getImportance() != NotificationManager.IMPORTANCE_NONE; }
-    private void publish(JSONObject record, String attention, boolean update) throws Exception {
+    private boolean publish(JSONObject record, String attention, boolean update) throws Exception {
+        checkTask();
+        if (NativeRuntimeHost.isConversationVisible(record.getString("taskId"))) return false;
         String channel = attention.equals("urgent") ? "task_urgent" : attention.equals("normal") ? "task_attention" : "task_updates";
         if (!notifications.areNotificationsEnabled() || !enabledChannel(channel)) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("请开启 Droy 对应通知渠道", "Please enable the corresponding Droy notification channel"));
         String id = record.getString("noticeId");
         int numeric = id.hashCode() & 0x7fffffff;
         PendingIntent open = PendingIntent.getActivity(context, numeric,
-            new Intent(context, MainActivity.class).putExtra("petTaskId", record.getString("taskId"))
+            new Intent(context, NativeAppActivity.class).putExtra("petTaskId", record.getString("taskId"))
                 .setData(android.net.Uri.parse("droy://notification/" + id))
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
@@ -257,23 +432,7 @@ final class ProactiveNotifications {
             .setContentTitle(title.isBlank() ? io.droyagent.app.NativeLocale.text("Droy · 任务消息", "Droy · Task message") : title).setContentText(record.getString("text"))
             .setStyle(new Notification.BigTextStyle().bigText(record.getString("text"))).setContentIntent(open)
             .setAutoCancel(true).setOnlyAlertOnce(update).setVisibility(Notification.VISIBILITY_PRIVATE).build());
-    }
-    private JSONArray allowedApps() throws Exception {
-        JSONArray saved = new JSONArray(preferences.getString(ALLOWED, "[]")), result = new JSONArray();
-        for (int i = 0; i < saved.length(); i++) {
-            JSONObject item = new JSONObject(saved.getJSONObject(i).toString());
-            try { item.put("label", context.getPackageManager().getApplicationLabel(context.getPackageManager().getApplicationInfo(item.getString("packageName"), 0))); result.put(item); }
-            catch (PackageManager.NameNotFoundException removed) { /* Removed apps are unavailable until selected again. */ }
-        }
-        return result;
-    }
-    private JSONArray installedApps() throws Exception {
-        java.util.List<ApplicationInfo> apps = new ArrayList<>(context.getPackageManager().getInstalledApplications(0));
-        apps.removeIf(app -> app.packageName.equals(context.getPackageName()) || context.getPackageManager().getLaunchIntentForPackage(app.packageName) == null);
-        apps.sort(Comparator.comparing(app -> context.getPackageManager().getApplicationLabel(app).toString()));
-        JSONArray result = new JSONArray();
-        for (ApplicationInfo app : apps) result.put(new JSONObject().put("packageName", app.packageName).put("label", context.getPackageManager().getApplicationLabel(app)));
-        return result;
+        return true;
     }
     private JSONObject publicRecord(JSONObject record) throws Exception {
         JSONObject result = new JSONObject(record.toString());
@@ -281,7 +440,7 @@ final class ProactiveNotifications {
         return result;
     }
     private void save() throws Exception {
-        if (!preferences.edit().putString(DATA, store.snapshot().toString()).commit()) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("主动通知结果未保存", "Proactive notification results were not saved"));
+        if (!preferences.edit().putString(DATA, store.snapshot().toString()).putString(MESSAGE_POSITIONS, messageHistory.snapshot().toString()).commit()) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("主动通知结果未保存", "Proactive notification results were not saved"));
     }
     private static boolean bool(JSONObject args, String key) throws Exception {
         Object value = args.get(key); if (!(value instanceof Boolean)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("此设置需要开关值", "This setting requires a boolean value")); return (Boolean)value;

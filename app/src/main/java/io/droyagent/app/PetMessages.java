@@ -5,6 +5,7 @@ import java.util.function.IntUnaryOperator;
 
 /** Picks companion chatter when a new bubble is intentionally shown, not on every UI refresh. */
 final class PetMessages {
+    static String identity() { return "Droy"; }
     private static String[] workingDefaults() { return new String[] {
         NativeLocale.text("%s正在处理。", "%s is working on it."),
         NativeLocale.text("%s还在忙。", "%s is still busy."),

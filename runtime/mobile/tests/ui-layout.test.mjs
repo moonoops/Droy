@@ -128,6 +128,54 @@ test('the settings owner portals the shared model section into the wizard withou
   assert.equal(patched.split('"settings.section": {').length, 2);
 });
 
+test('mobile sidebar retains the settings owner while external navigation opens its panel without the old trigger', async () => {
+  const settingsSource=patchSettings(settings);
+  const sidebarSource=patchSidebar(await readFile(new URL('dsh-client-ui-sidebar/lib/client.js',packageRoot),'utf8'));
+  const listeners=new Map(),portals=[],slots=[];
+  const document={body:{},documentElement:{lang:'zh',hasAttribute:name=>name==='data-droy-mobile'},querySelector:()=>null};
+  const window={addEventListener:(name,listener)=>listeners.set(name,listener),removeEventListener(){}};
+  const jsx=(type,props)=>({type,props}),classes=new Proxy({},{get:(_target,key)=>String(key)});
+  const simpleReact={useRef:value=>({current:value}),useState:value=>[typeof value==='function'?value():value,()=>{}],useEffect(){},useLayoutEffect(){},useCallback:callback=>callback};
+  const primitives=new Proxy({isDarwinDesktop:()=>false},{get:(target,key)=>target[key]??String(key)});
+  const createShell=new Function('_deepseek_ai_dsh_client_store',`${functionExcerpt(settingsSource,'createSettingsShellStore')};return createSettingsShellStore;`)({defineStore:spec=>({create(){
+    const state=spec.init();return {getSnapshot:()=>state,actions:Object.fromEntries(Object.entries(spec.actions).map(([key,action])=>[key,(...args)=>action(state,...args)]))};
+  }})});
+  const shellInstance=createShell().create();
+  const handlerStart=settingsSource.indexOf('const openDroySettings = (event) => {');
+  const handlerEnd=settingsSource.indexOf('window.addEventListener("droy-mobile-open-settings", openDroySettings);',handlerStart)+'window.addEventListener("droy-mobile-open-settings", openDroySettings);'.length;
+  new Function('ctx','window','shellInstance',settingsSource.slice(handlerStart,handlerEnd))({slots:{entries:()=>[{options:{id:'general'}},{options:{id:'models'}}]}},window,shellInstance);
+  const setupTarget={name:'wizard-model-host'};
+  let stateIndex=0,ownerMounts=0;
+  const Root=new Function('react','react_jsx_runtime','react_dom','_deepseek_ai_dsh_client_ui_primitives','SettingsRoot_module_css_default','clsx','SettingsPanel','DesktopUpdateIndicator','document','window',
+    `${functionExcerpt(settingsSource,'SettingsRoot')};return SettingsRoot;`)(
+      {...simpleReact,useState(){return [[setupTarget,undefined,new Set(),false,false][stateIndex++],()=>{}];}},
+      {jsx,jsxs:jsx,Fragment:'fragment'},{createPortal:(tree,target)=>{portals.push({tree,target});return {type:'portal',props:{children:tree}};}},primitives,classes,
+      (...parts)=>parts.filter(Boolean).join(' '),'settings-panel','desktop-update',document,window);
+  const Sidebar=new Function('react','react_jsx_runtime','_deepseek_ai_dsh_client_ui_primitives','SidebarRoot_module_css_default','clsx','localBuildVersion','document','window',
+    `${functionExcerpt(sidebarSource,'SidebarRoot')};return SidebarRoot;`)(simpleReact,{jsx,jsxs:jsx},primitives,classes,(...parts)=>parts.filter(Boolean).join(' '),()=>undefined,document,window);
+  const owner=()=>{
+    ownerMounts++;stateIndex=0;
+    return Root({wide:true,reconnect(){},useConnectionState:()=> 'connected',useSections:()=>[{id:'general'},{id:'models'}],useOnboardingSteps:()=>[],
+      useSessions:select=>select({phase:'ready',byId:{}}),renderSlot:(name,props,options)=>{slots.push({name,options});return {type:name,props};},t:key=>key,useDesktopUpdate:()=>({}),openDesktopUpdate(){},
+      useStore:select=>select(shellInstance.getSnapshot()),actions:shellInstance.actions,useShortcuts:select=>select([])});
+  };
+  const render=()=>Sidebar({collapsed:false,width:320,startSession(){},toggleSidebar(){},selectPanel(){},setPinned(){},trackEntryClick(){},
+    usePanels:select=>select([]),useEntryPins:select=>select([]),useEntryActions:select=>select(false),useShortcuts:select=>select([]),usePanelInfo:select=>select({activePanelId:null}),t:key=>key,
+    renderSlot:(name,props)=>name==='sidebar.settings'?owner():{type:name,props}});
+  const closed=render();
+  assert.equal(ownerMounts,1,'the hidden conversation page keeps the Root owner mounted');
+  assert.equal(nodes(closed).some(node=>node.props?.className?.split(' ').includes('triggerRow')),false);
+  assert.equal(nodes(closed).some(node=>node.type==='settings.launcher'),false);
+  assert.equal(nodes(closed).some(node=>node.type==='settings-panel'),false);
+  assert.ok(portals.some(portal=>portal.target===setupTarget),'the original owner still renders the wizard model portal');
+  assert.ok(slots.some(slot=>slot.name==='settings.section'&&slot.options?.only==='models'));
+  listeners.get('droy-mobile-open-settings')({detail:{section:'general'}});
+  const opened=render(),panel=nodes(opened).find(node=>node.type==='settings-panel');
+  assert.ok(panel,'external openSection is consumed by the retained Root');
+  assert.equal(panel.props.activeId,'general');
+  panel.props.onClose();assert.equal(nodes(render()).some(node=>node.type==='settings-panel'),false);
+});
+
 test('phone settings omits the unsupported Host configuration document action', () => {
   const patched = patchSettings(settings);
   const start = patched.indexOf('const documentController =');
@@ -236,34 +284,30 @@ test('settings focus restoration leaves other modal focus and hidden or inert me
   assert.equal(desktop.focusCalls.length, 0);
 });
 
-test('mobile starts with zero sidebar track and a working top-left menu', () => {
+test('mobile starts with zero sidebar track and delegates navigation to the common work header', () => {
   const result = renderFrame();
   assert.match(result.frame.props.style.gridTemplateColumns,/^0px /);
   assert.equal(result.frame.props['data-droy-drawer-open'],undefined);
   const drawer = nodes(result.frame).find(node => node.props?.['data-droy-sidebar']);
   assert.equal(drawer.props.inert,'');
   assert.equal(drawer.props['aria-hidden'],true);
-  const menu = nodes(result.frame).find(node => node.props?.['data-droy-menu']);
-  assert.equal(menu.props['aria-label'],'打开菜单');
-  menu.props.onClick();
-  assert.equal(result.toggles,1);
+  assert.equal(nodes(result.frame).some(node => node.props?.['data-droy-menu']),false);
 });
 
-test('mobile drawer covers a full-width conversation and has an independent close backdrop', () => {
+test('conversation browser is a full-window page above the retained work view', () => {
   const result = renderFrame({open:true,width:320});
   assert.match(result.frame.props.style.gridTemplateColumns,/^0px /);
-  assert.equal(result.frame.props.style['--droy-drawer-width'],'272px');
+  assert.equal(result.frame.props.style['--droy-drawer-width'],'320px');
   const all = nodes(result.frame);
   const drawer = all.find(node => node.props?.['data-droy-sidebar']);
-  assert.equal(drawer.props.role,'dialog');
-  assert.equal(drawer.props['aria-modal'],'true');
+  assert.equal(drawer.props.role,'region');
+  assert.equal(drawer.props['aria-modal'],undefined);
   assert.equal(drawer.props.inert,undefined);
   assert.equal(drawer.props['aria-hidden'],undefined);
-  assert.equal(drawer.props.children.props.width,272);
+  assert.equal(drawer.props.children.props.width,320);
   const center = all.find(node => node.type?.name === 'CenterColumn');
   assert.equal(center.props.inert,true);
-  all.find(node => node.props?.['data-droy-backdrop']).props.onClick();
-  assert.equal(result.toggles,1);
+  assert.equal(all.some(node => node.props?.['data-droy-backdrop']),false);
   assert.equal(all.some(node => node.props?.side === 'sidebar'),false);
 });
 
@@ -274,7 +318,7 @@ test('mobile drawer retains the same wide sidebar and conversation geometry acro
   assert.equal(sidebar(closed).props.collapsed,false);
   assert.deepEqual(sidebar(closed),sidebar(opened));
   assert.equal(closed.frame.props.style.gridTemplateColumns,opened.frame.props.style.gridTemplateColumns);
-  assert.ok(nodes(closed.frame).find(node => node.props?.['data-droy-backdrop']));
+  assert.equal(nodes(closed.frame).some(node => node.props?.['data-droy-backdrop']),false);
 });
 
 test('desktop shell keeps its upstream rail and geometry', () => {
@@ -456,7 +500,7 @@ test('pending archive operations share one host request and release their guard 
   assert.equal(calls,2);
 });
 
-function composerHandlers({touch=true,mobile=true}={}) {
+function composerHandlers({touch=true,mobile=true,native=false}={}) {
   const source=patchConversation(conversation);
   const start=source.indexOf('const keepFocus = (e) => {');
   const end=source.indexOf('\n\t\t\tconst onWorkspaceKeyDown',start);
@@ -464,13 +508,13 @@ function composerHandlers({touch=true,mobile=true}={}) {
   const mouse=source.indexOf('onMouseDown: (event) => {',mark);
   const mouseEnd=source.indexOf('\n\t\t\t\t\t\t\t\t\t\t\t\tonClick:',mouse);
   const mouseCode=source.slice(mouse+'onMouseDown: '.length,mouseEnd).replace(/,$/,'');
-  const autoStart=source.indexOf('if (locked || editor === null || isDroyTouchInteraction()) return;');
+  const autoStart=source.indexOf('if (locked || editor === null ||');
   const autoEnd=source.indexOf('\n\t\t\t}, [',autoStart);
   const caret={anchor:2,focus:2};const calls=[];
   const editor={getRootElement:()=>({focus:()=>calls.push('root-focus')})};
-  const make=new Function('document','window','editor','keyboard','toggleCommandMenu','focusDraftEditor','revealSelection','keepDraftFocus',
-    `${functionExcerpt(source,'isDroyTouchInteraction')}\n${source.slice(start,end)};return {mouseDown:${mouseCode},click:onToggleCommandMenu,passiveFocus:()=>{const locked=false;${source.slice(autoStart,autoEnd)}}};`);
-  const handlers=make({documentElement:{hasAttribute:()=>mobile}},{DroyTouch:{isTouchInteraction:()=>touch}},editor,{caretSpan:()=>caret},span=>calls.push(['menu',span]),()=>calls.push('draft-focus'),()=>{},()=>calls.push('keep-focus'));
+  const make=new Function('document','window','editor','keyboard','toggleCommandMenu','focusDraftEditor','revealSelection','keepDraftFocus','Element',
+    `${functionExcerpt(source,'isDroyTouchInteraction')}\nconst editable=true,scrollRef={current:null};${source.slice(start,end)};return {mouseDown:${mouseCode},click:onToggleCommandMenu,card:onCardMouseDown,passiveFocus:()=>{const locked=false;${source.slice(autoStart,autoEnd)}}};`);
+  const handlers=make({documentElement:{hasAttribute:()=>mobile}},{DroyTouch:{isTouchInteraction:()=>touch},...(native?{DroyNative:{}}:{})},editor,{caretSpan:()=>caret},span=>calls.push(['menu',span]),()=>calls.push('draft-focus'),()=>{},()=>calls.push('keep-focus'),Object);
   return {handlers,calls,caret};
 }
 
@@ -482,8 +526,89 @@ test('touch plus preserves caret and menu action without either proactive editor
   for(const options of [{touch:false},{mobile:false,touch:true}]) {
     const desktop=composerHandlers(options);
     desktop.handlers.mouseDown({preventDefault(){}});desktop.handlers.click();desktop.handlers.passiveFocus();
-    assert.deepEqual(desktop.calls,['keep-focus','draft-focus',['menu',desktop.caret],'draft-focus']);
+    assert.deepEqual(desktop.calls,['keep-focus','draft-focus',['menu',desktop.caret],...(options.mobile===false?['draft-focus']:[])]);
   }
+});
+
+test('mobile work view mount and return never open the keyboard after keyboard or mouse input history', () => {
+  for (const touch of [true,false]) {
+    const f=composerHandlers({mobile:true,touch});
+    const caretBefore={...f.caret};
+    f.handlers.passiveFocus();
+    f.handlers.passiveFocus();
+    assert.deepEqual(f.calls,[],'mount and restored session leave IME closed');
+    assert.deepEqual(f.caret,caretBefore,'restoring a page does not rewrite the selection');
+    let prevented=0;
+    f.handlers.card({button:0,defaultPrevented:false,target:{closest:()=>null},currentTarget:{contains:()=>true},preventDefault:()=>prevented++});
+    assert.equal(prevented,1);
+    assert.deepEqual(f.calls,['draft-focus'],'a deliberate press on the input card still focuses the editor');
+  }
+  const nativeBeforeDocumentMarker=composerHandlers({mobile:false,native:true,touch:false});
+  nativeBeforeDocumentMarker.handlers.passiveFocus();
+  assert.deepEqual(nativeBeforeDocumentMarker.calls,[],'native shell does not wait for the HTML mobile marker to avoid autofocus');
+  const desktop=composerHandlers({mobile:false,touch:false});
+  desktop.handlers.passiveFocus();
+  assert.deepEqual(desktop.calls,['draft-focus'],'desktop retains the upstream autofocus');
+});
+
+function composerRootBinding({editor,editable=true,mobile=true,native=false,root={name:'composer'}}) {
+  const effects=[];
+  const react={useRef:()=>({current:root}),useLayoutEffect:effect=>effects.push(effect)};
+  const render=new Function('react','react_jsx_runtime','document','window',
+    `${functionExcerpt(patchConversation(conversation),'ComposerContentEditable')};return ComposerContentEditable;`)(
+      react,{jsx:(type,props)=>({type,props})},{documentElement:{hasAttribute:()=>mobile}},native?{DroyNative:{}}:{});
+  const view=render({editor,editable});
+  const cleanups=effects.map(effect=>effect());
+  return {view,root,cleanup:()=>cleanups.forEach(cleanup=>cleanup?.())};
+}
+
+function selectionRestoringEditor() {
+  const selection=Object.freeze({anchor:7,focus:11}),text='Retained draft 文本';
+  const events=[];
+  return {selection,text,events,editable:true,root:null,implicitFocus:0,explicitFocus:0,
+    setEditable(value){this.editable=value;events.push(['editable',value]);},
+    setRootElement(root){
+      this.root=root;events.push(['root',root]);
+      // Lexical's pinned root commit syncs the saved DOM selection only while
+      // editable (bi's _editable guard); WebView can focus as a side effect.
+      if(root && this.editable && this.text && this.selection)this.implicitFocus++;
+    },
+    focus(){if(this.root && this.editable)this.explicitFocus++;},
+  };
+}
+
+test('mobile root reattachment suppresses implicit selection focus and keeps draft, caret and explicit input usable', () => {
+  for(const options of [{mobile:true},{mobile:false,native:true}]) {
+    const editor=selectionRestoringEditor(),selection=editor.selection,text=editor.text;
+    const first=composerRootBinding({editor,...options});first.cleanup();
+    const restored=composerRootBinding({editor,...options});
+    assert.equal(editor.implicitFocus,0);
+    assert.equal(editor.editable,true);
+    assert.equal(restored.view.props.contentEditable,true);
+    assert.equal(editor.text,text);assert.equal(editor.selection,selection);
+    editor.focus();assert.equal(editor.explicitFocus,1,'the public focus operation still works after layout');
+    assert.deepEqual(editor.events.slice(-3),[['editable',false],['root',restored.root],['editable',true]]);
+    restored.cleanup();assert.equal(editor.root,null);
+  }
+});
+
+test('mobile root binding keeps readonly props and independent replacement editors intact', () => {
+  const first=selectionRestoringEditor(),second=selectionRestoringEditor();
+  const previous=composerRootBinding({editor:first,editable:false});
+  assert.equal(first.editable,false);assert.equal(previous.view.props.contentEditable,false);
+  assert.equal(first.implicitFocus,0);previous.cleanup();
+  const replacement=composerRootBinding({editor:second,root:previous.root});
+  assert.equal(first.root,null);assert.equal(first.editable,false);
+  assert.equal(second.root,previous.root);assert.equal(second.editable,true);assert.equal(second.implicitFocus,0);
+  replacement.cleanup();assert.equal(second.root,null);
+  assert.doesNotThrow(()=>composerRootBinding({editor:null,editable:false}).cleanup());
+});
+
+test('desktop root binding retains upstream selection focus and editability updates', () => {
+  const editor=selectionRestoringEditor(),binding=composerRootBinding({editor,mobile:false});
+  assert.equal(editor.implicitFocus,1);
+  assert.deepEqual(editor.events,[['root',binding.root],['editable',true]]);
+  binding.cleanup();assert.equal(editor.root,null);
 });
 
 test('client composition injects one controller into the existing ModuleLoader factory and rejects drift', async () => {
@@ -720,7 +845,7 @@ test('hardware keyboard menu dismissal remains immediate to preserve upstream fo
 });
 
 
-test('mobile landscape right panel owner uses full-window mode without reserving a desktop push track', async () => {
+test('mobile right panel owner uses full-window mode without reserving a desktop push track', async () => {
   const source=patchSidebarRight(await readFile(new URL('dsh-client-ui-sidebar-right/lib/client.js',packageRoot),'utf8'));
   const start=source.indexOf('const autoFullscreen =');
   const end=source.indexOf('\n\t\t\t(0, react.useEffect)',start);

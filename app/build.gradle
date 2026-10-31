@@ -1,4 +1,7 @@
-plugins { id 'com.android.application' }
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
 
 def nodeRuntimeDir = rootProject.file(providers.gradleProperty('droyNodeRuntimeDir').getOrElse('../artifacts/runtime-node'))
 def releaseSpec = new groovy.json.JsonSlurper().parse(rootProject.file('runtime/release.json'))
@@ -6,9 +9,11 @@ def brandingSpec = new groovy.json.JsonSlurper().parse(file('src/main/assets/bra
 
 abstract class GenerateBrandResources extends DefaultTask {
     @Input abstract Property<String> getAppName()
-    @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getLogo()
+    @org.gradle.api.tasks.Optional @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getLogo()
+    @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getDefaultArtwork()
     @OutputDirectory abstract DirectoryProperty getResourcesDirectory()
     @OutputDirectory abstract DirectoryProperty getAssetsDirectory()
+    @OutputDirectory abstract DirectoryProperty getNameResourcesDirectory()
 
     @TaskAction
     void generate() {
@@ -16,29 +21,38 @@ abstract class GenerateBrandResources extends DefaultTask {
         if (name.isEmpty() || name.codePointCount(0, name.length()) > 40
                 || name.codePoints().anyMatch { Character.isISOControl(it) } || name.contains('<') || name.contains('>'))
             throw new GradleException('droyAppName must contain 1–40 characters of plain single-line text.')
-        File imageFile = logo.get().asFile
-        if (imageFile.length() > 24 * 1024 * 1024) throw new GradleException('droyAppIcon PNG is too large.')
-        def stream = javax.imageio.ImageIO.createImageInputStream(imageFile)
-        def readers = javax.imageio.ImageIO.getImageReaders(stream)
-        if (!readers.hasNext()) { stream.close(); throw new GradleException('droyAppIcon must be a readable PNG.') }
-        def reader = readers.next()
+        File imageFile = logo.isPresent() ? logo.get().asFile : null
         java.awt.image.BufferedImage image
-        try {
-            reader.input = stream
-            int width = reader.getWidth(0), height = reader.getHeight(0)
-            if (!reader.formatName.equalsIgnoreCase('PNG') || width < 64 || height < 64 || width > 4096 || height > 4096)
-                throw new GradleException('droyAppIcon must be a PNG between 64 and 4096 pixels per side.')
-            image = reader.read(0)
-        } finally { reader.dispose(); stream.close() }
+        if (imageFile == null) {
+            image = javax.imageio.ImageIO.read(defaultArtwork.get().asFile)
+            if (image == null) throw new GradleException('The bundled Droy launcher artwork must be a readable PNG.')
+        }
+        else {
+            if (imageFile.length() > 24 * 1024 * 1024) throw new GradleException('droyAppIcon PNG is too large.')
+            def stream = javax.imageio.ImageIO.createImageInputStream(imageFile)
+            def readers = javax.imageio.ImageIO.getImageReaders(stream)
+            if (!readers.hasNext()) { stream.close(); throw new GradleException('droyAppIcon must be a readable PNG.') }
+            def reader = readers.next()
+            try {
+                reader.input = stream
+                int width = reader.getWidth(0), height = reader.getHeight(0)
+                if (!reader.formatName.equalsIgnoreCase('PNG') || width < 64 || height < 64 || width > 4096 || height > 4096)
+                    throw new GradleException('droyAppIcon must be a PNG between 64 and 4096 pixels per side.')
+                image = reader.read(0)
+            } finally { reader.dispose(); stream.close() }
+        }
         File res = resourcesDirectory.get().asFile, assets = assetsDirectory.get().asFile
-        project.delete(res, assets)
-        new File(res, 'values').mkdirs()
+        File names = nameResourcesDirectory.get().asFile
+        project.delete(res, assets, names)
+        new File(names, 'values').mkdirs()
         new File(res, 'drawable-nodpi').mkdirs()
         new File(res, 'drawable-anydpi-v26').mkdirs()
         assets.mkdirs()
         String quotedName = groovy.json.JsonOutput.toJson(name).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-        new File(res, 'values/droy_branding.xml').setText('<resources><string name="droy_app_name" formatted="false" translatable="false">' + quotedName + '</string></resources>\n', 'UTF-8')
-        java.nio.file.Files.copy(imageFile.toPath(), new File(assets, 'app-brand-logo.png').toPath())
+        new File(names, 'values/droy_branding.xml').setText('<resources><string name="droy_app_name" formatted="false" translatable="false">' + quotedName + '</string></resources>\n', 'UTF-8')
+        File installedLogo = new File(assets, 'app-brand-logo.png')
+        if (imageFile != null) java.nio.file.Files.copy(imageFile.toPath(), installedLogo.toPath())
+        else javax.imageio.ImageIO.write(image, 'png', installedLogo)
         for (boolean foreground : [false, true]) {
             def canvas = new java.awt.image.BufferedImage(512, 512, java.awt.image.BufferedImage.TYPE_INT_ARGB)
             def graphics = canvas.createGraphics()
@@ -57,17 +71,16 @@ abstract class GenerateBrandResources extends DefaultTask {
 </adaptive-icon>
 ''', 'UTF-8')
     }
+
 }
 
 def generateBrandResources = tasks.register('generateBrandResources', GenerateBrandResources) {
     appName.set(providers.gradleProperty('droyAppName').orElse(brandingSpec.name as String))
-    logo.set(rootProject.layout.file(providers.provider {
-        providers.gradleProperty('droyAppIcon').isPresent()
-            ? rootProject.file(providers.gradleProperty('droyAppIcon').get())
-            : rootProject.file('runtime/mobile/assets/brand-logo.png')
-    }))
+    logo.set(rootProject.layout.file(providers.gradleProperty('droyAppIcon').map { rootProject.file(it) }))
+    defaultArtwork.set(layout.projectDirectory.file('launcher-icons/01-closeup.png'))
     resourcesDirectory.set(layout.buildDirectory.dir('generated/droyBranding/res'))
     assetsDirectory.set(layout.buildDirectory.dir('generated/droyBranding/assets'))
+    nameResourcesDirectory.set(layout.buildDirectory.dir('generated/droyBranding/nameRes'))
 }
 
 abstract class GenerateDevelopmentResources extends DefaultTask {
@@ -186,16 +199,36 @@ def verifyQwenRuntime = tasks.register('verifyQwenRuntime') {
 }
 tasks.named('preBuild').configure { dependsOn verifyQwenRuntime }
 
+def verifyEmbeddingRuntime = tasks.register('verifyEmbeddingRuntime') {
+    def library = rootProject.layout.projectDirectory.file('runtime/generated/jniLibs/arm64-v8a/libdroy_embedding.so')
+    def manifest = rootProject.layout.projectDirectory.file('runtime/generated/assets/embedding/e5-small/manifest.json')
+    inputs.files(library, manifest)
+    doLast {
+        if (!library.asFile.isFile() || !manifest.asFile.isFile())
+            throw new GradleException('Missing local embedding resources. Run python3 tools/prepare_embedding.py with the Android NDK and CMake.')
+    }
+}
+tasks.named('preBuild').configure { dependsOn verifyEmbeddingRuntime }
+
 android {
     namespace 'io.droyagent.app'
-    compileSdk 36
+    compileSdk 37
+    buildFeatures { compose true; buildConfig true }
     defaultConfig {
         applicationId 'io.droyagent.app'
         minSdk 30
         targetSdk 36
         versionCode releaseSpec.versionCode
         versionName releaseSpec.droyVersion
-        manifestPlaceholders.droyLauncherIcon = '@drawable/droy_brand_launcher'
+        def customLauncher = providers.gradleProperty('droyAppIcon').isPresent()
+        manifestPlaceholders.droyLauncherIcon = customLauncher ? '@drawable/droy_brand_launcher' : '@mipmap/ic_launcher_closeup'
+        [Closeup: 'closeup', Sunglasses: 'sunglasses', Headphones: 'headphones', Programmer: 'programmer',
+         HatScarf: 'hat_scarf', SleepCurled: 'sleep_curled', SleepSide: 'sleep_side',
+         SleepBellyUp: 'sleep_belly_up', SleepSlumped: 'sleep_slumped'].each { name, resource ->
+            manifestPlaceholders["droyLauncher${name}Icon"] = customLauncher
+                ? '@drawable/droy_brand_launcher' : "@mipmap/ic_launcher_${resource}"
+        }
+        buildConfigField 'boolean', 'DROY_RANDOM_LAUNCHER_ICONS', customLauncher ? 'false' : 'true'
         ndk { abiFilters 'arm64-v8a' }
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
     }
@@ -204,10 +237,9 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
     sourceSets.main {
-        res.srcDir(generateBrandResources.map { it.resourcesDirectory })
-        assets.srcDir(generateBrandResources.map { it.assetsDirectory })
         jniLibs.srcDirs += [new File(nodeRuntimeDir, 'jniLibs'), '../runtime/generated/jniLibs']
         assets.srcDirs += [new File(nodeRuntimeDir, 'assets'), '../runtime/generated/assets', '../runtime/mobile/assets']
+        assets.srcDirs += [layout.buildDirectory.dir('generated/companion-artwork').get().asFile]
     }
     packaging {
         jniLibs { useLegacyPackaging = true; keepDebugSymbols += ['**/*.so'] }
@@ -222,6 +254,15 @@ android {
 }
 
 androidComponents {
+    onVariants(selector().all()) { variant ->
+        variant.sources.res.addGeneratedSourceDirectory(generateBrandResources) { it.resourcesDirectory }
+        variant.sources.assets.addGeneratedSourceDirectory(generateBrandResources) { it.assetsDirectory }
+    }
+    // Generated resource directories have equal priority. Keep the release name
+    // separate so debug uses only its paired development labels.
+    onVariants(selector().withBuildType('release')) { variant ->
+        variant.sources.res.addGeneratedSourceDirectory(generateBrandResources) { it.nameResourcesDirectory }
+    }
     onVariants(selector().withBuildType('debug')) { variant ->
         variant.sources.res.addGeneratedSourceDirectory(generateDevelopmentResources) { it.resourcesDirectory }
     }
@@ -229,8 +270,26 @@ androidComponents {
 
 dependencies {
     implementation project(':android-use')
+    implementation project(':terminal-ui')
+    implementation 'org.commonmark:commonmark:0.31.0'
+    implementation 'org.commonmark:commonmark-ext-gfm-tables:0.31.0'
+    implementation 'org.commonmark:commonmark-ext-gfm-strikethrough:0.31.0'
     implementation files(rootProject.file('runtime/generated/audio/sherpa-onnx-1.13.8.aar'))
-    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.0'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.2.21'
+    def composeBom = platform('androidx.compose:compose-bom:2026.09.00')
+    implementation composeBom
+    androidTestImplementation composeBom
+    implementation 'androidx.activity:activity-compose:1.11.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.9.4'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4'
+    implementation 'androidx.navigation:navigation-compose:2.9.8'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.foundation:foundation'
+    // Material 3 Expressive is pinned separately from the stable Compose BOM.
+    implementation 'androidx.compose.material3:material3:1.5.0-beta02'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2'
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
     implementation 'androidx.webkit:webkit:1.17.0'
     implementation 'androidx.core:core:1.17.0'
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
@@ -239,4 +298,13 @@ dependencies {
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }
+
+// Native and runtime consumers use the same artwork sources. Only public raster assets are copied.
+def prepareCompanionArtwork = tasks.register('prepareCompanionArtwork', Sync) {
+    from(rootProject.file('runtime/mobile/companions/assets')) {
+        include '*.png', '*.webp'
+    }
+    into(layout.buildDirectory.dir('generated/companion-artwork/droy-companion'))
+}
+tasks.named('preBuild').configure { dependsOn prepareCompanionArtwork }
 

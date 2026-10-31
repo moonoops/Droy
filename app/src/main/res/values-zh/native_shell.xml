@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_shell_messages">消息</string>
+    <string name="native_shell_settings">设置</string>
+    <string name="native_shell_pending_share">待发送分享</string>
+    <string name="native_shell_pending_voice">待处理录音</string>
+    <string name="native_shell_plugins_accounts">插件与账号</string>
+    <string name="native_shell_camera">拍照</string>
+    <string name="native_shell_discard_space_draft">舍弃%1$s的草稿？</string>
+</resources>

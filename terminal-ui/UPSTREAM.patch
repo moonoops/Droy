@@ -1,0 +1,193 @@
+--- upstream/terminal-emulator/src/main/java/com/termux/terminal/TerminalSessionClient.java
++++ terminal-ui/src/main/java/com/termux/terminal/TerminalSessionClient.java
+@@ -0,0 +1 @@
++// Droy modifications (2026): remote-only rendering integration; see terminal-ui/README.md.
+@@ -3,5 +4 @@
+-/**
+- * The interface for communication between {@link TerminalSession} and its client. It is used to
+- * send callbacks to the client when {@link TerminalSession} changes or for sending other
+- * back data to the client like logs.
+- */
++/** Emulator callbacks only. Local-process callbacks from upstream are deliberately absent. */
+@@ -9,15 +5,0 @@
+-
+-    void onTextChanged(TerminalSession changedSession);
+-
+-    void onTitleChanged(TerminalSession changedSession);
+-
+-    void onSessionFinished(TerminalSession finishedSession);
+-
+-    void onCopyTextToClipboard(TerminalSession session, String text);
+-
+-    void onPasteTextFromClipboard(TerminalSession session);
+-
+-    void onBell(TerminalSession session);
+-
+-    void onColorsChanged(TerminalSession session);
+-
+@@ -25,3 +6,0 @@
+-
+-
+-
+@@ -29,3 +7,0 @@
+-
+-
+-
+@@ -33 +8,0 @@
+-
+@@ -35 +9,0 @@
+-
+@@ -37 +10,0 @@
+-
+@@ -39 +11,0 @@
+-
+@@ -41,5 +13,2 @@
+-
+-    void logStackTraceWithMessage(String tag, String message, Exception e);
+-
+-    void logStackTrace(String tag, Exception e);
+-
++    void logStackTraceWithMessage(String tag, String message, Exception error);
++    void logStackTrace(String tag, Exception error);
+--- upstream/terminal-view/src/main/java/com/termux/view/TerminalView.java
++++ terminal-ui/src/main/java/com/termux/view/TerminalView.java
+@@ -0,0 +1 @@
++// Droy modifications (2026): remote-only rendering integration; see terminal-ui/README.md.
+@@ -42 +42,0 @@
+-import com.termux.terminal.TerminalSession;
+@@ -45,2 +45,2 @@
+-/** View displaying and interacting with a {@link TerminalSession}. */
+-public final class TerminalView extends View {
++/** View displaying and interacting with a {@link TerminalViewSession}. */
++public class TerminalView extends View {
+@@ -52 +52 @@
+-    public TerminalSession mTermSession;
++    public TerminalViewSession mTermSession;
+@@ -81,0 +82 @@
++    private Runnable mScrollRunner;
+@@ -204 +205 @@
+-                post(new Runnable() {
++                mScrollRunner = new Runnable() {
+@@ -221 +222,2 @@
+-                });
++                };
++                post(mScrollRunner);
+@@ -274,11 +276,11 @@
+-        TERMINAL_VIEW_KEY_LOGGING_ENABLED = value;
+-    }
+-
+-
+-
+-    /**
+-     * Attach a {@link TerminalSession} to this view.
+-     *
+-     * @param session The {@link TerminalSession} this view will be displaying.
+-     */
+-    public boolean attachSession(TerminalSession session) {
++        TERMINAL_VIEW_KEY_LOGGING_ENABLED = false;
++    }
++
++
++
++    /**
++     * Attach a {@link TerminalViewSession} to this view.
++     *
++     * @param session The {@link TerminalViewSession} this view will be displaying.
++     */
++    public boolean attachSession(TerminalViewSession session) {
+@@ -337,0 +340,5 @@
++            public boolean sendKeyEvent(KeyEvent event) {
++                return TerminalView.this.dispatchKeyEvent(event);
++            }
++
++            @Override
+@@ -375,0 +383,2 @@
++                mTermSession.beginInputBatch();
++                try {
+@@ -426,0 +436 @@
++                } finally { mTermSession.endInputBatch(); }
+@@ -1005 +1015 @@
+-    public TerminalSession getCurrentSession() {
++    public TerminalViewSession getCurrentSession() {
+@@ -1204 +1214 @@
+-     * {@link TerminalViewClient#onEmulatorSet()} event after calling {@link #attachSession(TerminalSession)}
++     * {@link TerminalViewClient#onEmulatorSet()} event after calling {@link #attachSession(TerminalViewSession)}
+@@ -1207 +1217 @@
+-     * call this directly after {@link #attachSession(TerminalSession)} since {@link #updateSize()}
++     * call this directly after {@link #attachSession(TerminalViewSession)} since {@link #updateSize()}
+@@ -1219 +1229 @@
+-     * It should also be called after terminal is reset with {@link TerminalSession#reset()} in case
++     * It should also be called after terminal is reset with {@link TerminalViewSession#reset()} in case
+@@ -1422,0 +1433 @@
++        stopUiWork();
+@@ -1433,0 +1445,15 @@
++
++    /** Stop view-owned timers and popups without closing its remote session. */
++    public void stopUiWork() {
++        setTerminalCursorBlinkerState(false, false);
++        mScroller.forceFinished(true);
++        if (mScrollRunner != null) removeCallbacks(mScrollRunner);
++        removeCallbacks(mShowFloatingToolbar);
++        if (mTextSelectionCursorController != null) {
++            mTextSelectionCursorController.onDetached();
++            mClient.copyModeChanged(false);
++        }
++    }
++
++    /** Retired IME connections cannot carry a dead-key accent to another attachment. */
++    public void clearInputState() { mCombiningAccent = 0; }
+--- upstream/terminal-view/src/main/java/com/termux/view/TerminalViewClient.java
++++ terminal-ui/src/main/java/com/termux/view/TerminalViewClient.java
+@@ -0,0 +1 @@
++// Droy modifications (2026): remote-only rendering integration; see terminal-ui/README.md.
+@@ -8 +8,0 @@
+-import com.termux.terminal.TerminalSession;
+@@ -45 +45 @@
+-    boolean onKeyDown(int keyCode, KeyEvent e, TerminalSession session);
++    boolean onKeyDown(int keyCode, KeyEvent e, TerminalViewSession session);
+@@ -63 +63 @@
+-    boolean onCodePoint(int codePoint, boolean ctrlDown, TerminalSession session);
++    boolean onCodePoint(int codePoint, boolean ctrlDown, TerminalViewSession session);
+--- upstream/terminal-view/src/main/java/com/termux/view/textselection/TextSelectionCursorController.java
++++ terminal-ui/src/main/java/com/termux/view/textselection/TextSelectionCursorController.java
+@@ -0,0 +1 @@
++// Droy modifications (2026): remote-only rendering integration; see terminal-ui/README.md.
+@@ -19 +20 @@
+-import com.termux.view.R;
++import io.droyagent.terminal.R;
+@@ -118,3 +119,2 @@
+-                menu.add(Menu.NONE, ACTION_COPY, Menu.NONE, R.string.copy_text).setShowAsAction(show);
+-                menu.add(Menu.NONE, ACTION_PASTE, Menu.NONE, R.string.paste_text).setEnabled(clipboard != null && clipboard.hasPrimaryClip()).setShowAsAction(show);
+-                menu.add(Menu.NONE, ACTION_MORE, Menu.NONE, R.string.text_selection_more);
++                menu.add(Menu.NONE, ACTION_COPY, Menu.NONE, terminalView.getContext().getString(R.string.copy_text)).setShowAsAction(show);
++                menu.add(Menu.NONE, ACTION_PASTE, Menu.NONE, terminalView.getContext().getString(R.string.paste_text)).setEnabled(terminalView.mTermSession.isWritable() && clipboard != null && clipboard.hasPrimaryClip()).setShowAsAction(show);
+@@ -139 +139 @@
+-                        terminalView.mTermSession.onCopyTextToClipboard(selectedText);
++                        terminalView.mTermSession.copySelection(selectedText);
+@@ -144 +144 @@
+-                        terminalView.mTermSession.onPasteTextFromClipboard();
++                        terminalView.mTermSession.pasteFromClipboard();
+@@ -349,0 +350,2 @@
++        mShowStartTime = 0;
++        hide();
+--- upstream/terminal-view/src/main/java/com/termux/view/textselection/TextSelectionHandleView.java
++++ terminal-ui/src/main/java/com/termux/view/textselection/TextSelectionHandleView.java
+@@ -0,0 +1 @@
++// Droy modifications (2026): remote-only rendering integration; see terminal-ui/README.md.
+@@ -15 +16 @@
+-import com.termux.view.R;
++import io.droyagent.terminal.R;
+@@ -60,2 +61,2 @@
+-        mHandleLeftDrawable = getContext().getDrawable(R.drawable.text_select_handle_left_material);
+-        mHandleRightDrawable = getContext().getDrawable(R.drawable.text_select_handle_right_material);
++        mHandleLeftDrawable = getContext().getDrawable(R.drawable.text_select_handle_left_material).mutate();
++        mHandleRightDrawable = getContext().getDrawable(R.drawable.text_select_handle_right_material).mutate();
+@@ -273,0 +275 @@
++        mHandleDrawable.setTint(terminalView.mEmulator.mColors.mCurrentColors[com.termux.terminal.TextStyle.COLOR_INDEX_CURSOR]);
+--- upstream/terminal-emulator/src/test/java/com/termux/terminal/TerminalTestCase.java
++++ terminal-ui/src/test/java/com/termux/terminal/TerminalTestCase.java
+@@ -0,0 +1 @@
++// Droy modifications (2026): remote-only rendering integration; see terminal-ui/README.md.
+@@ -114 +115 @@
+-		mTerminal = new TerminalEmulator(mOutput, columns, rows, INITIAL_CELL_WIDTH_PIXELS, INITIAL_CELL_HEIGHT_PIXELS, rows * 2, null);
++		mTerminal = new TerminalEmulator(mOutput, columns, rows, INITIAL_CELL_WIDTH_PIXELS, INITIAL_CELL_HEIGHT_PIXELS, rows * 2, new QuietTestClient());

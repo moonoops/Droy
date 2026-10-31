@@ -160,6 +160,9 @@ export function createDshMemoryExtraction({ ctx, privacy, settings,
     return result;
   }
   async function enqueueCompletedTurn(session, end, start, enqueueExtraction) {
+    // Companion learning has its own source scope; it must not populate the
+    // legacy shared work-memory extraction queue.
+    if (ctx.get?.('droyCompanions')?.ownsSession(session.id)) return;
     const signal = lifetime.signal; await enabled(signal, true);
     if (end.type !== 'turn/end' || end.data?.reason?.kind !== 'completed' || !start || start.turn !== end.data.turn
       || !Number.isSafeInteger(start.seq) || start.seq < 0 || start.seq >= end.seq || !session.isOwnSeq(start.seq)) fail('MEMORY_EXTRACTION_TURN_BOUNDARY');
@@ -204,5 +207,7 @@ export function createDshMemoryExtraction({ ctx, privacy, settings,
     await Promise.allSettled([...pending]);
   }
   return { extraction: { resolveRoute, authorize, readSource, countTokens, generate, language: () => resolveMobileLocale(ctx) },
-    subscribe, enqueueCompletedTurn, dispose };
+    subscribe, enqueueCompletedTurn, dispose,
+    pendingWork: () => Object.freeze([...pending]),
+    async whenIdle() { while (pending.size) await Promise.allSettled([...pending]); } };
 }

@@ -15,7 +15,7 @@ function load(window = {}, overrides = {}) {
     client = factory(name => {
       if (name === 'react') return overrides.React || {};
       if (name === '@deepseek-ai/dsh-client-ui-primitives') return {
-        Button: 'dsh-button', Switch: 'dsh-switch', Input: 'dsh-input',
+        Button: 'dsh-button', Switch: 'dsh-switch', Input: 'dsh-input', Toast: 'dsh-toast',
         closeTopModal() {}, modalSelector, ...overrides.primitives
       };
       throw new Error(`Unexpected dependency: ${name}`);
@@ -481,25 +481,37 @@ test('Back closes the controlled image preview before the registered settings mo
   assert.deepEqual(calls, ['image-preview', 'settings']);
 });
 
-function applyFixture(initial = state(), { deferTheme = false, ready = false, reactUseState, onNativeRequest, onNativeReply, reactHooks = {}, windowExtra = {}, locale } = {}) {
+function applyFixture(initial = state(), { deferTheme = false, ready = false, reactUseState, onNativeRequest, onNativeReply, reactHooks = {}, windowExtra = {}, locale, initialPanel = null } = {}) {
   const registrations = [];
   const disposers = [];
   const events = new Map();
   const requests = [];
   const listeners = new Map();
+  const addListener = (name, listener) => {
+    if (!listeners.has(name)) {
+      const callbacks = new Set(), dispatch = event => { for (const callback of [...callbacks]) callback(event); };
+      dispatch.callbacks = callbacks; listeners.set(name, dispatch);
+    }
+    listeners.get(name).callbacks.add(listener);
+  };
+  const removeListener = (name, listener) => {
+    const dispatch = listeners.get(name); if (!dispatch) return;
+    dispatch.callbacks.delete(listener); if (!dispatch.callbacks.size) listeners.delete(name);
+  };
   const document = {
-    body: {}, documentElement: { dataset: { droyInsetsReady: 'true' }, hasAttribute: () => true }, getElementById: () => ready ? {} : null,
+    body: { toggleAttribute() {}, removeAttribute() {} }, documentElement: { dataset: { droyInsetsReady: 'true' }, hasAttribute: () => true }, getElementById: () => ready ? {} : null,
     head: { appendChild() {} },
     createElement: () => ({ remove() {} }), querySelector: () => ready ? { hasAttribute: () => false } : null, querySelectorAll: () => [],
-    addEventListener: (key, callback) => listeners.set(key, callback), removeEventListener: key => listeners.delete(key)
+    addEventListener: addListener, removeEventListener: removeListener
   };
   const window = { document, setTimeout, clearTimeout,
+    fetch: async () => ({ok:true,json:async()=>({companions:[],settings:{defaultMode:'work'},stickers:[],models:[]})}),
     requestAnimationFrame: callback => setImmediate(callback), cancelAnimationFrame: clearImmediate,
     MutationObserver: class { observe() {} disconnect() {} },
     getComputedStyle: () => ({ getPropertyValue: key => key === '--droy-mobile-layout-ready' ? ready ? '1' : ''
       : theme.active.colorScheme === 'dark' ? '#1b1b1c' : '#fff' }),
     CustomEvent: class { constructor(type, options = {}) { this.type = type; this.detail = options.detail; } },
-    addEventListener: (key, callback) => listeners.set(key, callback), removeEventListener: key => listeners.delete(key),
+    addEventListener: addListener, removeEventListener: removeListener,
     dispatchEvent: event => { events.set(event.type, event); listeners.get(event.type)?.(event); },
     DroyNative: { postMessage(message) {
       const request = JSON.parse(message);
@@ -526,6 +538,7 @@ function applyFixture(initial = state(), { deferTheme = false, ready = false, re
   const themeWrites = [];
   const ctxEvents = new Map();
   const panelSubscribers = new Set();
+  let panelId = initialPanel;
   const ctx = {
     locale,
     slots: { inject(_slot, register) { register(); }, register(options, component) { registrations.push({ options, component }); } },
@@ -538,20 +551,58 @@ function applyFixture(initial = state(), { deferTheme = false, ready = false, re
       assert.equal(namespace, 'ui-theme');
       return { getSnapshot: () => durableTheme, subscribe(listener) { themeSubscribers.add(listener); return () => themeSubscribers.delete(listener); } };
     } },
-    layout: { panelInfo: { getSnapshot: () => ({ activePanelId: null }),
-      subscribe(listener) { panelSubscribers.add(listener); return () => panelSubscribers.delete(listener); } } },
+    layout: { panelInfo: { getSnapshot: () => ({ activePanelId: panelId }),
+      subscribe(listener) { panelSubscribers.add(listener); return () => panelSubscribers.delete(listener); } },
+      selectPanel(id) { panelId=id;for(const listener of panelSubscribers)listener(); } },
     sidebarRight: { mounted: { getSnapshot: () => undefined, subscribe: () => () => {} }, isExpanded: () => false },
+    sessions: { list: { getSnapshot: () => ({phase:'ready',ids:[],byId:{}}), subscribe: () => () => {} } },
+    workspaces: { list: { getSnapshot: () => ({phase:'ready',items:[]}), subscribe: () => () => {} }, initializeDefault: async () => undefined },
+    uiWorkspace: {startSession() {},connectWorkspace:async()=>undefined,openWorkspace:async()=>undefined,forkSession:async()=>undefined,openSession() {},restoreSelection:async()=>undefined},
+    conversation: {blocks:{set() {},storeFor:()=>({getSnapshot:()=>undefined})}},
     on: (event, listener) => { ctxEvents.set(event, listener); return () => ctxEvents.delete(event); },
     effect: callback => disposers.push(callback())
   };
   const React = { createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
-    Fragment: Symbol('fragment'), useId: () => 'droy-model-fixture', useEffect() {}, useState: reactUseState || (value => [value, () => {}]),
+    memo: component => component, useMemo: callback => callback(), Fragment: Symbol('fragment'), useId: () => 'droy-model-fixture', useEffect() {}, useState: reactUseState || (value => [value, () => {}]),
     useSyncExternalStore: (_subscribe, get) => get(), ...reactHooks };
   load(window, { React }).apply(ctx);
   return { registrations, requests, themeWrites, window, ctx, listeners, panelSubscribers, acceptTheme,
     refuseTheme() { durableTheme.status = 'unavailable'; for (const subscriber of themeSubscribers) subscriber(); },
     dispose: () => disposers.forEach(dispose => dispose?.()) };
 }
+
+test('the saved Work startup preference closes a restored companion panel', async () => {
+  const f=applyFixture(state(),{initialPanel:'droy-companions'});
+  await flush();await flush();
+  assert.equal(f.ctx.layout.panelInfo.getSnapshot().activePanelId,null);
+  f.dispose();
+});
+
+for(const supersededFailure of [false,true])test('concurrent workspace restoration follows the latest preference when the older read '+(supersededFailure?'fails':'succeeds'), async () => {
+  const reads=[];
+  const f=applyFixture(state(),{windowExtra:{fetch:async()=>new Promise((resolve,reject)=>reads.push({resolve,reject}))}});
+  const restoring=f.ctx.uiWorkspace.restoreSelection(f.ctx.workspaces.list.getSnapshot(),f.ctx.sessions.list.getSnapshot());
+  assert.equal(reads.length,2);
+  const response=()=>({ok:true,json:async()=>({companions:[],settings:{defaultMode:'work'},stickers:[],models:[]})});
+  if(supersededFailure)reads[0].reject(new Error('Fictional superseded request failure'));
+  else reads[0].resolve(response());
+  await flush();
+  reads[1].resolve(response());await restoring;await flush();
+  assert.equal(f.ctx.layout.panelInfo.getSnapshot().activePanelId,null);
+  assert.equal(f.requests.some(request=>request.action==='notifyError'),false);
+  f.dispose();
+});
+
+test('a late startup preference does not replace a destination the user already selected', async () => {
+  let release;
+  const response=new Promise(resolve=>{release=resolve;});
+  const f=applyFixture(state(),{initialPanel:'droy-companions',windowExtra:{fetch:async()=>response}});
+  f.ctx.layout.selectPanel('skills');f.listeners.get('pointerdown')?.({target:{}});
+  release({ok:true,json:async()=>({companions:[],settings:{defaultMode:'work'},stickers:[],models:[]})});
+  await flush();await flush();
+  assert.equal(f.ctx.layout.panelInfo.getSnapshot().activePanelId,'skills');
+  f.dispose();
+});
 
 function nodes(tree) {
   if (!tree || typeof tree !== 'object') return [];
@@ -681,7 +732,9 @@ test('older setup status cannot overwrite a model test that has already passed',
   const saved = { ...state(), setup: { required: true, step: 2, mode: 'dialogue', modeSelected: true,
     modelVerification: { passed: false }, identity: {} } };
   const fixture = applyFixture(saved, { windowExtra: { AbortController,
-    fetch: () => new Promise(resolve => responses.push(value => resolve({ ok: true, json: async () => value }))) }, reactHooks: {
+    fetch: path => path === '/droy/companions'
+      ? Promise.resolve({ok:true,json:async()=>({companions:[],settings:{defaultMode:'work'},stickers:[],models:[]})})
+      : new Promise(resolve => responses.push(value => resolve({ ok: true, json: async () => value }))) }, reactHooks: {
     useRef(value) { return refs[refIndex++] ?? (refs[refIndex - 1] = { current: value }); },
     useState(value) { const index = stateIndex++; if (!(index in states)) states[index] = value;
       return [states[index], next => { states[index] = typeof next === 'function' ? next(states[index]) : next; }]; },
@@ -888,6 +941,82 @@ test('general and permission controls reuse the upstream primitives and preserve
   fixture.dispose();
 });
 
+for (const active of ['zh', 'en']) test(`permission presets require a cancellable explanation before saving (${active})`, async () => {
+  const hooks = hookFixture();
+  const saved = state();
+  const fixture = applyFixture(saved, { reactHooks: hooks.hooks,
+    locale: { getSnapshot: () => ({ active }), subscribe: () => () => {} },
+    onNativeRequest({ action, args }) {
+      if (action === 'configurePermissions') saved.selectedPreset = args.mode;
+    } });
+  await flush();
+  const component = fixture.registrations.find(item => item.options.id === 'droy-permissions').component;
+  const render = () => nodes(hooks.render(component));
+  for (const mode of ['all', 'dialogue', 'assistant']) {
+    let tree = render();
+    assert.equal(tree.some(node => ['resumeOperations', 'pauseOperations'].includes(node.props['data-droy-action'])), false);
+    assert.equal(tree.some(node => node.children.includes(active === 'zh' ? '手机权限' : 'Phone permissions')), false);
+    const count = fixture.requests.filter(row => row.action === 'configurePermissions').length;
+    tree.find(node => node.props['data-droy-permission-preset'] === mode).props.onClick();
+    tree = render();
+    const confirmation = tree.find(node => node.type?.name === 'PermissionPresetConfirmation');
+    assert.ok(confirmation);
+    let dialog = nodes(confirmation.type(confirmation.props));
+    assert.equal(dialog.find(node => node.props['data-droy-permission-confirmation']).props['data-droy-permission-confirmation'], mode);
+    assert.ok(dialog.some(node => node.children.some(child => typeof child === 'string' && (active === 'zh' ? /系统|Android/.test(child) : /Android/.test(child)))));
+    assert.equal(fixture.requests.filter(row => row.action === 'configurePermissions').length, count);
+    dialog.find(node => node.props['data-droy-permission-cancel']).props.onClick();
+    assert.equal(render().some(node => node.type?.name === 'PermissionPresetConfirmation'), false);
+    assert.equal(fixture.requests.filter(row => row.action === 'configurePermissions').length, count);
+    render().find(node => node.props['data-droy-permission-preset'] === mode).props.onClick();
+    const confirmed = render().find(node => node.type?.name === 'PermissionPresetConfirmation');
+    dialog = nodes(confirmed.type(confirmed.props));
+    await dialog.find(node => node.props['data-droy-permission-confirm']).props.onClick();
+    await flush();
+    assert.equal(saved.selectedPreset, mode);
+    assert.deepEqual(fixture.requests.filter(row => row.action === 'configurePermissions').at(-1).args, { mode });
+    assert.equal(render().some(node => node.type?.name === 'PermissionPresetConfirmation'), false);
+  }
+  hooks.dispose(); fixture.dispose();
+});
+
+test('failed permission preset save preserves the explanation and does not start a second authorization request', async () => {
+  const hooks = hookFixture();
+  const fixture = applyFixture(state(), { reactHooks: hooks.hooks, onNativeRequest({ action }) {
+    if (action === 'configurePermissions') throw new Error('Permission configuration could not be saved');
+  } });
+  await flush();
+  const component = fixture.registrations.find(item => item.options.id === 'droy-permissions').component;
+  const render = () => nodes(hooks.render(component));
+  render().find(node => node.props['data-droy-permission-preset'] === 'all').props.onClick();
+  let confirmation = render().find(node => node.type?.name === 'PermissionPresetConfirmation');
+  await nodes(confirmation.type(confirmation.props)).find(node => node.props['data-droy-permission-confirm']).props.onClick();
+  await flush();
+  confirmation = render().find(node => node.type?.name === 'PermissionPresetConfirmation');
+  assert.ok(confirmation);
+  assert.equal(confirmation.props.snapshot.error, 'Permission configuration could not be saved');
+  assert.equal(fixture.requests.filter(row => row.action === 'configurePermissions').length, 1);
+  assert.equal(fixture.requests.some(row => row.action === 'requestPermission'), false);
+  hooks.dispose(); fixture.dispose();
+});
+
+test('permission queue can be stopped and onboarding uses the same confirmed presets', async () => {
+  const saved = { ...state(), permissionSetup: { active: true, current: 'contacts', pending: ['usage'] },
+    setup: { required: true, step: 5, mode: 'all', capabilities: {} } };
+  const fixture = applyFixture(saved, { reactHooks: { useRef: current => ({ current }) } });
+  await flush();
+  const component = fixture.registrations.find(item => item.options.id === 'droy-permissions').component;
+  const tree = nodes(component());
+  assert.ok(tree.find(node => node.props['data-droy-permission-queue']));
+  await tree.find(node => node.props['data-droy-action'] === 'cancelPermissionSetup').props.onClick();
+  await flush();
+  assert.equal(fixture.requests.filter(row => row.action === 'cancelPermissionSetup').length, 1);
+  const setup = nodes(fixture.registrations.find(item => item.options.id === 'droy-setup').component());
+  assert.ok(setup.find(node => node.type === component));
+  assert.equal(setup.some(node => node.props['data-droy-setup-dialogue']), false);
+  fixture.dispose();
+});
+
 test('screen display defaults on independently of the pet and preserves its explicit saved preference', async () => {
   const nativeState = { ...state(), petEnabled: false, petExternalDisplay: 'off', petInternalDisplay: 'off',
     automationScreenDisplayReady: true };
@@ -1070,7 +1199,7 @@ test('pet display modes are independent, preserve grants, and allow in-app previ
   fixture.dispose();
 });
 
-test('companion name stays editable while the appearance is off and saves independently of the page title', async () => {
+test('pet name stays editable while the appearance is off and saves independently of the page title', async () => {
   const nativeState = { ...state(), petEnabled: false, petName: 'Droy', petPermissionGranted: true };
   let draft;
   const fixture = applyFixture(nativeState, {
@@ -1149,6 +1278,7 @@ test('pet context follows public session and panel state, coalesces changes, and
   expanded = false; notify('panel'); await flush();
   assert.equal(calls.at(-1).args.chatVisible, true);
   const writing = controller.run('setPreference', { key: 'petName', value: '墨墨' }, false);
+  await Promise.resolve();
   taskId = 'chat-b'; notify('mounted');
   taskId = 'chat-c'; notify('mounted');
   finishWrite({}); await writing; await flush();
@@ -1258,7 +1388,7 @@ function readinessFixture() {
   const window = {
     document: { documentElement: root, getElementById: () => state.style ? {} : null,
       querySelector: selector => selector === '[data-droy-frame]' ? state.frame ? { hasAttribute: () => state.drawer } : null
-        : selector === '[data-droy-menu]' ? state.menu : selector === '[data-composer-input]' ? state.composer : null },
+        : selector === '[data-droy-im-screen]' ? state.im : selector === '[data-droy-menu]' ? state.menu : selector === '[data-composer-input]' ? state.composer : null },
     getComputedStyle: () => ({ getPropertyValue: () => state.css ? '1' : '' }),
     requestAnimationFrame(callback) { const id = ++sequence; frames.set(id, callback); return id; },
     cancelAnimationFrame: id => frames.delete(id),
@@ -1268,6 +1398,19 @@ function readinessFixture() {
     paint() { const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback()); },
     get pendingFrames() { return frames.size; } };
 }
+
+test('IM starts through the native loading screen without a hidden work composer', async () => {
+  const fixture=readinessFixture();let ready=0;
+  Object.assign(fixture.state,{style:true,css:true,menu:false,composer:false,im:{}});
+  const dispose=load().observeUiReady(fixture.window,()=>{ready++;},error=>{throw error;});
+  fixture.paint();fixture.paint();await flush();
+  assert.equal(ready,1);assert.equal(fixture.root.dataset.droyUiReady,'true');dispose();
+});
+
+test('opening settings over IM preserves the mode underneath', () => {
+  const calls=[];const ctx={layout:{panelInfo:{getSnapshot:()=>({activePanelId:'droy-companions'})},selectPanel:id=>calls.push(id)},sidebarRight:{isExpanded:()=>false}};
+  load().createSettingsOpenHandler(ctx,{querySelector:()=>null})();assert.deepEqual(calls,[]);
+});
 
 test('UI-ready waits for insets, applied mobile styles, closed drawer, mounted composer and two stable frames', async () => {
   const fixture = readinessFixture();
@@ -1401,6 +1544,28 @@ test('pet sprite preview animates real frames, holds an exited pet hidden, and d
   player.dispose(); assert.equal(callbacks.size, 0);
 });
 
+test('pet preview exposes manifest signature actions and keeps pixel art unsmoothed', () => {
+  const client = load(), callbacks = new Map(), draws = []; let next = 0;
+  const action = { atlas: 'body', frames: [0, 1], durationsMs: [100, 100], facing: 'front', mirrorSafe: false };
+  const manifest = { rendering: { style: 'pixel' }, atlases: { body: { file: 'body.png', frames: [
+    { sourceRect: [0, 0, 40, 50] }, { sourceRect: [40, 0, 40, 50] }
+  ] } }, states: Object.fromEntries(['idle', 'neckStretch', 'spitForward', 'spitScreen', 'completed', 'stopped', '../private']
+    .map(id => [id, { ...action, label: id, labelLocales: { zh: '动作', en: 'Action' } }])) };
+  assert.deepEqual(Array.from(client.petPreviewActions(manifest), item => item.id), ['idle', 'neckStretch', 'spitForward', 'spitScreen']);
+  const context = { imageSmoothingEnabled: true, shadowBlur: 3, setTransform() {}, clearRect() {}, save() {}, restore() {},
+    translate() {}, scale() {}, drawImage(...args) { draws.push(args); } };
+  const target = { performance: { now: () => 0 }, requestAnimationFrame(callback) { callbacks.set(++next, callback); return next; },
+    cancelAnimationFrame(id) { callbacks.delete(id); }, matchMedia: () => ({ matches: false }) };
+  const canvas = { getContext: () => context, getBoundingClientRect: () => ({ width: 260, height: 164 }) };
+  const player = client.createPetPreview(canvas, manifest, { 'body.png': {} }, target);
+  player.play('spitScreen');
+  const [id, draw] = callbacks.entries().next().value; callbacks.delete(id); draw(150);
+  assert.equal(draws.at(-1)[1], 40, 'The chosen signature must play its actual second frame');
+  assert.equal(context.imageSmoothingEnabled, false);
+  assert.equal(context.shadowBlur, 0);
+  player.dispose();
+});
+
 function hookFixture() {
   const components = new Map(); let active, cursor;
   const slot = () => { const index = cursor++; return [index, active.slots[index]]; };
@@ -1465,15 +1630,64 @@ test('pet creation saves editable personality drafts without a configured provid
   // Remount reflects the persisted candidate without issuing another generation.
   hooks.reset(body.type);
   render(); await flush(); tree = render();
-  assert.ok(tree.some(node => node.props['aria-label'] === '说话风格预览'));
+  assert.ok(tree.some(node => node.props['aria-label'] === '宠物互动短句预览'));
   assert.ok(tree.some(node => node.type === 'li' && node.children.includes('小灰再核实一下')));
   const use = tree.find(node => node.props['data-droy-action'] === 'selectPet');
-  assert.equal(use.children[0], '应用形象与性格');
+  assert.equal(use.children[0], '应用宠物形象');
   assert.equal(fixture.requests.some(request => request.action === 'selectPet'), false);
   await use.props.onClick(); await flush();
   assert.equal(nativeState.petId, 'draft-1');
-  assert.equal(nativeState.petName, 'Droy', 'Applying an appearance must preserve the companion name');
+  assert.equal(nativeState.petName, 'Droy', 'Applying an appearance must preserve the pet name');
   assert.equal(calls.filter(call => call.url.endsWith('/create')).length, 1);
+  hooks.dispose(); fixture.dispose();
+});
+
+test('three built-in pets remain selectable without image generation and preview does not select them', async () => {
+  const hooks = hookFixture(), calls = [];
+  const ids = ['default', '8dd37d0d-b6ed-47c2-9952-8f3be20fa6d0', 'cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2'];
+  const names = [['黑猫', 'Black cat'], ['土拨鼠', 'Marmot'], ['羊驼', 'Alpaca']];
+  const catalog = { available: false, imageAvailable: false, pets: [], builtIns: ids.map((id, index) => ({
+    id, name: names[index][0], nameLocales: { zh: names[index][0], en: names[index][1] },
+    description: '像素伙伴', descriptionLocales: { zh: '像素伙伴', en: 'Pixel companion' },
+    referenceUrl: `/droy/pets/asset?id=${id}&file=reference.png`, manifestUrl: `/droy/pets/asset?id=${id}&file=pet.json`
+  })) };
+  const nativeState = { ...state(), petId: 'retained-custom', petName: 'Droy', petExternalDisplay: 'off', petInternalDisplay: 'off' };
+  let failSelect = false;
+  const fixture = applyFixture(nativeState, { reactHooks: hooks.hooks,
+    windowExtra: { AbortController, fetch: async (url, options) => {
+      calls.push({ url, method: options.method }); return { ok: true, json: async () => structuredClone(catalog) };
+    } }, onNativeRequest(request, saved) {
+      if (request.action === 'selectPet') {
+        if (failSelect) throw new Error('Selection not saved');
+        saved.petId = request.args.id;
+      }
+    } });
+  await flush();
+  const settings = hooks.render(fixture.registrations.find(item => item.options.id === 'droy-pet').component);
+  const studio = nodes(settings).find(node => node.type?.name === 'PetStudio');
+  nodes(hooks.render(studio.type, studio.props)).find(node => node.props['data-droy-action'] === 'openPetStudio').props.onClick();
+  const body = nodes(hooks.render(studio.type, studio.props)).find(node => node.type?.name === 'PetStudioBody');
+  const render = () => nodes(hooks.render(body.type, body.props));
+  render(); await flush(); let tree = render();
+  const cards = tree.filter(node => node.props['data-droy-pet-builtin']);
+  assert.deepEqual(cards.map(card => card.props['data-droy-pet-builtin']), ids);
+  assert.deepEqual(cards.map(card => nodes(card).find(node => node.props.className === 'droy-row-title').children[0]), names.map(pair => pair[0]));
+  assert.equal(nativeState.petId, 'retained-custom', 'Reading built-ins must preserve an existing custom selection');
+  const marmot = cards[1];
+  nodes(marmot).find(node => node.props['data-droy-action'] === 'previewPetBuiltin').props.onClick();
+  tree = render();
+  assert.equal(tree.find(node => node.type?.name === 'PetAnimationPreview').props.pet.id, ids[1]);
+  assert.equal(fixture.requests.some(request => request.action === 'selectPet'), false);
+  assert.ok(calls.filter(call => call.url.startsWith('/droy/pets')).every(call => (call.method || 'GET') === 'GET'),
+    'Preview/list must not start paid generation');
+  let use = nodes(tree.find(node => node.props['data-droy-pet-builtin'] === ids[1])).find(node => node.props['data-droy-action'] === 'selectPet');
+  await use.props.onClick(); await flush(); tree = render();
+  assert.equal(nativeState.petId, ids[1]);
+  assert.equal(nativeState.petName, 'Droy');
+  failSelect = true;
+  use = nodes(tree.find(node => node.props['data-droy-pet-builtin'] === ids[2])).find(node => node.props['data-droy-action'] === 'selectPet');
+  await use.props.onClick(); await flush();
+  assert.equal(nativeState.petId, ids[1], 'A rejected selection must not replace the current built-in');
   hooks.dispose(); fixture.dispose();
 });
 
@@ -1541,7 +1755,7 @@ test('proactive notification settings retain a separate host entry when the plug
   fixture.dispose();
 });
 
-test('brand templates insert the current page name literally and keep installed versus companion logo ownership', () => {
+test('brand templates insert the current page name literally and keep the product logo independent of pets', () => {
   const client = load();
   const defaults = client.brandingSnapshot(null);
   assert.equal(defaults.welcome, '与Droy开始对话');
@@ -1553,7 +1767,8 @@ test('brand templates insert the current page name literally and keep installed 
   assert.equal(client.brandingSnapshot(state).welcome, '墨墨 · 墨墨');
   assert.equal(client.brandingSnapshot(state).logoUrl, '/droy/branding/installed-logo');
   state.petId = 'a00b0000-0000-4000-8000-000000000001';
-  assert.equal(client.brandingSnapshot(state).logoUrl, '/droy/branding/logo?petId=' + state.petId);
+  assert.equal(client.brandingSnapshot(state).logoUrl, '/droy/branding/installed-logo');
+  assert.equal(client.brandingSnapshot(state).logoPetId,'default');
   state.assistantName = '<img onerror=alert(1)>';
   assert.equal(client.brandingSnapshot(state).composer, '请告诉<img onerror=alert(1)>');
   for (const name of ['$&', '$$', "$`", "$'"])
@@ -1764,7 +1979,8 @@ test('the sixth setup page renders a saved user address without accessing locale
       const heading = nodes(tree).find(row => row.props['data-droy-setup-title']);
       const title = heading.children.filter(child => typeof child === 'string').join('');
       assert.ok(title.includes('Friend'), 'A nonempty saved address must be rendered');
-      assert.ok(title.includes('Momo'), 'The custom companion name must be rendered');
+      assert.ok(title.includes('Droy'), 'The welcome heading must name the product');
+      assert.equal(title.includes('Momo'), false, 'The pet name must not become the product or chat companion name');
       assert.ok(title.startsWith(active === 'en' ? 'Friend, ' : 'Friend，'), 'The captured locale must format the address');
       assert.ok(nodes(tree).some(row => row.props['data-droy-setup-finish']), 'Completion still requires its own action');
       assert.equal(nodes(tree).some(row => row.props['data-droy-setup-next']), false);
@@ -1785,4 +2001,362 @@ test('Back folds the inline speech choice and focuses its trigger before closing
   const back = load().createBackHandler({}, doc, () => calls.push('close-settings'));
   assert.equal(back(), true); assert.equal(choice.open, false); assert.deepEqual(calls, ['focus-choice']);
   assert.equal(back(), true); assert.deepEqual(calls, ['focus-choice', 'close-settings']);
+});
+
+function companionWorkbenchFixture({ initialSession = 'kaka-task', workspacePhase = 'ready', panel = null } = {}) {
+  const observable = initial => {
+    let value = initial; const listeners = new Set();
+    return { getSnapshot: () => value, subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+      set(next) { value = next; for (const listener of [...listeners]) listener(); } };
+  };
+  const companions = observable({ companions: [{ id: 'kaka', name: 'Kaka', workspaceId: 'owned' }] });
+  const workspaces = observable({ phase: workspacePhase, items: [
+    { workspaceId: 'owned', sessionIds: ['kaka-task'] }, { workspaceId: 'default', sessionIds: ['ordinary'] }] });
+  const sessions = observable({ phase: 'ready', ids: ['kaka-task', 'ordinary'], byId: Object.fromEntries(['kaka-task', 'ordinary'].map(id => [id, { id, retainedBy: { mainView: id === initialSession ? 1 : 0 } }])) });
+  const locale = observable({ active: 'en' }), blockStores = new Map(), registrations = [], calls = [], errors = [];
+  const blocks = { storeFor(id) { if (!blockStores.has(id)) blockStores.set(id, observable(undefined)); return blockStores.get(id); },
+    set(id, block) { blocks.storeFor(id).set(block); } };
+  const navigation = Object.fromEntries(['startSession', 'connectWorkspace', 'openWorkspace', 'forkSession'].map(name => [name, (...args) => {
+    calls.push([name, ...args]); return name === 'startSession' ? undefined : Promise.resolve(name === 'connectWorkspace' ? 'ordinary' : undefined);
+  }]));
+  navigation.openSession = id => { calls.push(['openSession', id]); sessions.set({ ...sessions.getSnapshot(), byId: Object.fromEntries(Object.values(sessions.getSnapshot().byId).map(row => [row.id, { ...row, retainedBy: { mainView: row.id === id ? 1 : 0 } }])) }); panel = null; };
+  navigation.restoreSelection = async (...args) => { calls.push(['restoreSelection', ...args]); };
+  const ctx = { locale, uiWorkspace: navigation, sessions: { list: sessions }, workspaces: { list: workspaces }, conversation: { blocks },
+    layout: { panelInfo: { getSnapshot: () => ({ activePanelId: panel }) }, selectPanel(id) { panel = id; } },
+    slots: { inject(_name, register) { return register(); }, register(options, component) { registrations.push({ options, component }); return () => {}; } } };
+  let allowed = true;
+  const client = load({}, { React: { createElement: (type, props, ...children) => ({ type, props, children }), useSyncExternalStore: (_subscribe, read) => read() } });
+  const policy = client.createCompanionWorkbench({ ctx, state: companions, reportError: error => errors.push(error.message), canInitialize: () => allowed });
+  return { policy, ctx, calls, errors, sessions, workspaces, companions, locale, blocks, registrations,
+    stopStartup() { allowed = false; }, panel: () => panel };
+}
+
+test('companion workspaces replace the composer and reject manual creation and forks without reaching work RPCs', async () => {
+  const f = companionWorkbenchFixture();
+  assert.match(f.blocks.storeFor('kaka-task').getSnapshot().reason, /Kaka/);
+  assert.equal(f.blocks.storeFor('ordinary').getSnapshot(), undefined);
+  f.ctx.uiWorkspace.startSession('owned'); f.ctx.uiWorkspace.startSession();
+  await assert.rejects(f.ctx.uiWorkspace.connectWorkspace('owned'), /Messages/);
+  await assert.rejects(f.ctx.uiWorkspace.openWorkspace('owned'), /Messages/);
+  await assert.rejects(f.ctx.uiWorkspace.forkSession('kaka-task'), /Messages/);
+  assert.deepEqual(f.calls, []);
+  const entry = f.registrations.find(row => row.options.name === 'conversation.composer');
+  assert.equal(entry.options.select({ sessionId: 'ordinary' }), null);
+  const matched = entry.options.select({ sessionId: 'kaka-task' });
+  assert.equal(matched.id, 'kaka');
+  assert.match(entry.component({ matched }).children.join(), /Go to Messages/);
+  f.ctx.uiWorkspace.startSession('default');
+  await f.ctx.uiWorkspace.forkSession('ordinary');
+  f.ctx.uiWorkspace.openSession('kaka-task');
+  assert.deepEqual(f.calls.map(row => row[0]), ['startSession', 'forkSession', 'openSession']);
+  f.locale.set({ active: 'zh-CN' });
+  assert.match(f.blocks.storeFor('kaka-task').getSnapshot().reason, /返回消息列表/);
+  f.policy.dispose();
+  assert.equal(f.blocks.storeFor('kaka-task').getSnapshot(), undefined);
+  await f.ctx.uiWorkspace.connectWorkspace('owned');
+  assert.equal(f.calls.at(-1)[0], 'connectWorkspace');
+});
+
+test('startup selects an ordinary workspace after companion spaces prepend and preserves the IM panel', async () => {
+  const f = companionWorkbenchFixture({ panel: 'droy-companions' });
+  await f.policy.initializeDefault();
+  assert.deepEqual(f.calls, [['connectWorkspace', 'default'], ['openSession', 'ordinary']]);
+  assert.equal(f.panel(), 'droy-companions');
+  f.policy.dispose();
+});
+
+test('companion draft and status updates skip workspace scans while ownership updates remain live', () => {
+  const f = companionWorkbenchFixture();
+  const readWorkspaces = f.workspaces.getSnapshot;
+  let scans = 0;
+  f.workspaces.getSnapshot = () => { scans++; return readWorkspaces(); };
+  const before = f.companions.getSnapshot();
+  f.companions.set({ ...before, draft: 'hello' });
+  f.companions.set({ ...before, status: 'typing' });
+  assert.equal(scans, 0);
+  f.companions.set({ ...before, companions: before.companions.map(row => ({ ...row, name: 'Renamed' })) });
+  assert.equal(scans, 1);
+  assert.match(f.blocks.storeFor('kaka-task').getSnapshot().reason, /Renamed/);
+  f.workspaces.set({ ...readWorkspaces(), items: readWorkspaces().items.map(row => row.workspaceId === 'owned'
+    ? { ...row, sessionIds: ['kaka-task', 'new-task'] } : row) });
+  assert.match(f.blocks.storeFor('new-task').getSnapshot().reason, /Renamed/);
+  f.policy.dispose();
+});
+
+test('automatic work restoration excludes companion spaces and saved companion sessions without showing a refusal', async () => {
+  const f=companionWorkbenchFixture();
+  await f.ctx.uiWorkspace.restoreSelection(f.workspaces.getSnapshot(),f.sessions.getSnapshot());
+  const [name,workspaces,sessions]=f.calls[0];
+  assert.equal(name,'restoreSelection');assert.deepEqual(workspaces.items.map(row=>row.workspaceId),['default']);
+  assert.deepEqual(sessions.ids,['ordinary']);assert.deepEqual(Object.keys(sessions.byId),['ordinary']);
+  const overlay=f.registrations.find(row=>row.options.id==='droy-workspace-readonly-notice');
+  assert.equal(overlay.component(),null);assert.deepEqual(f.errors,[]);
+  f.policy.dispose();
+});
+
+test('automatic restoration waits for the first companion ownership snapshot', async () => {
+  const f=companionWorkbenchFixture(),ready=f.companions.getSnapshot();
+  f.companions.set({companions:[]});
+  let release;f.companions.refreshRoot=()=>new Promise(resolve=>{release=()=>{f.companions.set(ready);resolve();};});
+  const restore=f.ctx.uiWorkspace.restoreSelection(f.workspaces.getSnapshot(),f.sessions.getSnapshot());
+  assert.deepEqual(f.calls,[]);release();await restore;
+  assert.deepEqual(f.calls[0][1].items.map(row=>row.workspaceId),['default']);
+  f.policy.dispose();
+});
+
+test('startup waits for workspace readiness and does not steal a user-selected workspace', async () => {
+  const f = companionWorkbenchFixture({ workspacePhase: 'following' });
+  await f.policy.initializeDefault(); assert.deepEqual(f.calls, []);
+  f.workspaces.set({ ...f.workspaces.getSnapshot(), phase: 'ready' }); await flush();
+  assert.equal(f.calls[0][1], 'default'); f.policy.dispose();
+  for (const options of [{ initialSession: 'ordinary' }, {}]) {
+    const second = companionWorkbenchFixture(options);
+    if (!options.initialSession) second.stopStartup();
+    await second.policy.initializeDefault(); assert.deepEqual(second.calls, []); second.policy.dispose();
+  }
+});
+
+test('setup introduces the initial companion and four presets and saves only the optional welcome address in both languages', async () => {
+  for (const active of ['zh', 'en']) {
+    const hooks = hookFixture(), locale = { getSnapshot: () => ({ active }), subscribe: () => () => {} };
+    const saved = { ...state(), setup: { required: true, step: 4, mode: 'dialogue', modeSelected: true,
+      identity: { companionName: 'Old pet', personality: 'Old global personality', userAddress: 'Friend' } } };
+    const fixture = applyFixture(saved, { locale, reactHooks: hooks.hooks,
+      onNativeRequest(request, state) { if (request.action === 'setupUpdate') Object.assign(state.setup.identity, request.args); } });
+    await flush();
+    const Setup = fixture.registrations.find(row => row.options.id === 'droy-setup').component;
+    let tree = nodes(hooks.render(Setup));
+    const strings = tree.flatMap(node => node.children.filter(value => typeof value === 'string'));
+    assert.ok(strings.some(value => value.includes(active === 'en' ? 'Your first installation includes Kaka' : '首次安装自带咔咔')));
+    for (const name of active === 'en' ? ['Kaka', 'Maimai', 'Dafeiyu', 'Lady Claude'] : ['咔咔', '麦麦', '大肥鱼', 'Claude 大小姐'])
+      assert.ok(strings.some(value => value.includes(name)), `Setup must introduce the ${name} preset in ${active}`);
+    assert.ok(strings.some(value => value.includes(active === 'en' ? 'first chat' : '首次聊天')));
+    assert.ok(strings.some(value => value.includes(active === 'en' ? 'without Root' : '无需 Root')));
+    const optional = tree.find(node => node.type === 'details'); assert.notEqual(optional.props.open, true);
+    assert.ok(nodes(optional).some(node => node.type?.name === 'PetStudio'));
+    const Identity = tree.find(node => node.type?.name === 'Identity');
+    let fields = nodes(hooks.render(Identity.type, Identity.props));
+    assert.equal(fields.some(node => ['droy-setup-name', 'droy-setup-personality'].includes(node.props.id)), false);
+    fields.find(node => node.props.id === 'droy-setup-address').props.onChange({ target: { value: 'New friend' } });
+    hooks.render(Identity.type, Identity.props);
+    tree = nodes(hooks.render(Setup)); tree.find(node => node.props['data-droy-setup-next']).props.onClick(); await flush();
+    const update = fixture.requests.find(request => request.action === 'setupUpdate');
+    assert.deepEqual(update.args, { userAddress: 'New friend', step: 5 });
+    assert.equal(saved.setup.identity.companionName, 'Old pet'); assert.equal(saved.setup.identity.personality, 'Old global personality');
+    fixture.dispose(); hooks.dispose();
+  }
+});
+
+test('legacy appearance settings and studio are explicitly pets and never configure chat companion identity', async () => {
+  for (const active of ['zh', 'en']) {
+    const hooks = hookFixture(), requests = [], locale = { getSnapshot: () => ({ active }), subscribe: () => () => {} };
+    const fixture = applyFixture({ ...state(), petName: 'Old pet', setup: { required: false, identity: { userAddress: 'Friend' } } }, { locale, reactHooks: hooks.hooks,
+      windowExtra: { AbortController, fetch: async (url, options = {}) => {
+        requests.push({ url, ...options }); return { ok: true, json: async () => url === '/droy/pets' ? { available: false, pets: [] } : { companions: [], settings: { defaultMode: 'work' } } };
+      } } });
+    await flush();
+    let tree = nodes(hooks.render(fixture.registrations.find(row => row.options.id === 'droy-pet').component));
+    const name = tree.find(node => node.props.id === 'droy-pet-name');
+    assert.equal(name.props['aria-label'], active === 'en' ? 'Pet name' : '宠物名字');
+    assert.ok(tree.some(node => node.children.includes(active === 'en' ? 'Pet' : '宠物')));
+    const Studio = tree.find(node => node.type?.name === 'PetStudio');
+    tree = nodes(hooks.render(Studio.type, Studio.props));
+    tree.find(node => node.props['data-droy-action'] === 'openPetStudio').props.onClick();
+    const Body = nodes(hooks.render(Studio.type, Studio.props)).find(node => node.type?.name === 'PetStudioBody');
+    hooks.render(Body.type, Body.props); await flush(); tree = nodes(hooks.render(Body.type, Body.props));
+    assert.ok(tree.some(node => node.children.some(value => typeof value === 'string' && value.includes(active === 'en' ? 'do not change chat companions' : '不会改变聊天伙伴'))));
+    assert.equal(requests.some(request => request.method === 'POST'), false, 'Opening optional pet settings must not generate a paid design');
+    assert.equal(fixture.requests.some(request => request.action === 'setupUpdate' || request.action === 'selectPet'), false);
+    assert.ok(fixture.registrations.some(row => row.options.id === 'droy-welcome-address'));
+    fixture.dispose(); hooks.dispose();
+  }
+});
+
+test('blocked companion workspace picks show a public shell Toast in both languages without changing the current workspace', async () => {
+  const f = companionWorkbenchFixture({ initialSession: 'ordinary' });
+  const entry = f.registrations.find(row => row.options.id === 'droy-workspace-readonly-notice');
+  assert.equal(entry.options.name, 'shell.overlay'); assert.equal(entry.component(), null);
+  await assert.rejects(f.ctx.uiWorkspace.connectWorkspace('owned'), /Go to Messages/);
+  const first = entry.component();
+  assert.equal(first.type, 'dsh-toast'); assert.match(first.props.text, /Kaka/);
+  assert.match(first.props.text, /open your companion’s chat/); assert.equal(first.props.holdMs, 8000);
+  f.locale.set({ active: 'zh' });
+  assert.match(entry.component().props.text, /返回消息列表，进入聊天后告诉伙伴要做什么/);
+  f.ctx.uiWorkspace.startSession('owned');
+  const second = entry.component(); assert.notEqual(second.props.key, first.props.key);
+  first.props.onDone(); assert.ok(entry.component(), 'A previous toast expiry must not dismiss a newer refusal');
+  assert.deepEqual(f.calls, []); assert.equal(f.sessions.getSnapshot().byId.ordinary.retainedBy.mainView, 1);
+  second.props.onDone(); assert.equal(entry.component(), null);
+  assert.deepEqual(f.errors, [], 'An expected read-only refusal must not be hidden in Settings feedback'); f.policy.dispose();
+});
+
+test('confirmed mutation state is adopted once and unrelated setting subscriptions stay idle', async () => {
+  const saved = { ...state(), petName: 'Pet', returnToDroyOnCompletion: false }, calls = [];
+  const controller = load().createController({ async request(action, args) {
+    calls.push(action);
+    if (action === 'getState') return structuredClone(saved);
+    saved[args.key] = args.value;
+    return structuredClone(saved);
+  } });
+  await controller.refresh();
+  const name = controller.view(['petName'], ['setPreference:petName']);
+  const navigation = controller.view(['returnToDroyOnCompletion'], ['setPreference:returnToDroyOnCompletion']);
+  let nameUpdates = 0, otherUpdates = 0;
+  const before = navigation.getSnapshot();
+  const stopName = name.subscribe(() => nameUpdates++), stopNavigation = navigation.subscribe(() => otherUpdates++);
+  await controller.run('setPreference', { key: 'petName', value: 'New pet name' });
+  assert.deepEqual(calls, ['getState', 'setPreference']);
+  assert.equal(name.getSnapshot().state.petName, 'New pet name');
+  assert.ok(nameUpdates >= 2);
+  assert.equal(otherUpdates, 0);
+  assert.equal(navigation.getSnapshot(), before);
+  stopName(); stopNavigation(); controller.dispose();
+});
+
+test('independent setting writes queue without losing either choice and same-control double taps coalesce', async () => {
+  const saved = state(), writes = [], releases = [];
+  const controller = load().createController({ request(action, args) {
+    if (action === 'getState') return Promise.resolve(structuredClone(saved));
+    writes.push(args);
+    return new Promise(resolve => releases.push(() => { saved[args.key] = args.value; resolve(structuredClone(saved)); }));
+  } });
+  await controller.refresh();
+  const first = controller.run('setPreference', { key: 'petName', value: 'First' });
+  assert.equal(controller.run('setPreference', { key: 'petName', value: 'First' }), first);
+  const second = controller.run('setPreference', { key: 'returnToDroyOnCompletion', value: true });
+  await Promise.resolve(); assert.equal(writes.length, 1);
+  releases.shift()(); await first; await Promise.resolve();
+  assert.equal(writes.length, 2); releases.shift()(); await second;
+  assert.equal(controller.getSnapshot().state.petName, 'First');
+  assert.equal(controller.getSnapshot().state.returnToDroyOnCompletion, true);
+  assert.equal(controller.getSnapshot().pending, null);
+  controller.dispose();
+});
+
+test('scoped audio reads coalesce and app inventories survive lightweight state responses', async () => {
+  const saved = { ...state(), notificationManagement: { exceptions: [], rules: [] } }, calls = [];
+  let finish;
+  const controller = load().createController({ request(action, args) {
+    calls.push([action, args]);
+    if (action === 'getState') return Promise.resolve(structuredClone(saved));
+    if (args.section === 'notificationManagement') return Promise.resolve({ notificationManagement: {
+      ...saved.notificationManagement, apps: [{ packageName: 'fictional.app', label: 'App', mode: 'managed' }] } });
+    return new Promise(resolve => { finish = resolve; });
+  } });
+  await controller.refresh(); await controller.refreshSection('notificationManagement');
+  await controller.refresh();
+  assert.equal(controller.getSnapshot().state.notificationManagement.apps[0].label, 'App');
+  const first = controller.refreshSection('audio');
+  assert.equal(controller.refreshSection('audio'), first);
+  await Promise.resolve();
+  finish({ audioCapture: { active: null }, audioTranscription: { ready: true } }); await first;
+  assert.equal(calls.filter(([action, args]) => action === 'getStateSection' && args.section === 'audio').length, 1);
+  assert.equal(controller.getSnapshot().state.audioTranscription.ready, true);
+  controller.dispose();
+});
+
+test('a failed scoped read preserves confirmed state and a refused write never appears saved', async () => {
+  const saved = { ...state(), petName: 'Original' };
+  const controller = load().createController({ request(action) {
+    if (action === 'getState') return Promise.resolve(structuredClone(saved));
+    if (action === 'getStateSection') return Promise.reject(new Error('Scoped read failed'));
+    return Promise.reject(new Error('Durable write failed'));
+  } });
+  await controller.refresh();
+  await assert.rejects(controller.refreshSection('audio'), /Scoped read failed/);
+  await assert.rejects(controller.run('setPreference', { key: 'petName', value: 'Unsaved' }), /Durable write failed/);
+  assert.equal(controller.getSnapshot().state.petName, 'Original');
+  assert.equal(controller.getSnapshot().pending, null);
+  controller.dispose();
+});
+
+test('a late app catalog cannot roll back a newer confirmed exception mode', async () => {
+  const saved = { ...state(), notificationManagement: { exceptions: [], rules: [] } };
+  let finish;
+  const controller = load().createController({ request(action) {
+    if (action === 'getState') return Promise.resolve(structuredClone(saved));
+    return new Promise(resolve => { finish = resolve; });
+  } });
+  await controller.refresh();
+  const catalog = controller.refreshSection('notificationManagement'); await Promise.resolve();
+  saved.notificationManagement.exceptions = [{ packageName: 'fictional.app', mode: 'block' }];
+  await controller.refresh();
+  finish({ notificationManagement: { exceptions: [], apps: [{ packageName: 'fictional.app', label: 'App', mode: 'managed' }] } });
+  await catalog;
+  assert.equal(controller.getSnapshot().state.notificationManagement.exceptions[0].mode, 'block');
+  assert.equal(controller.getSnapshot().state.notificationManagement.apps[0].mode, 'block');
+  controller.dispose();
+});
+
+test('lightweight notification refresh preserves only explicit app selections and defaults missing modes to allow', async () => {
+  const saved = { ...state(), notificationManagement: { appModes: { 'fictional.selected': 'managed', 'fictional.allowed': 'allow' }, exceptions: [] } };
+  const apps = [
+    { packageName: 'fictional.selected', label: 'Selected', mode: 'managed', managed: true },
+    { packageName: 'fictional.allowed', label: 'Allowed', mode: 'allow', managed: false },
+    { packageName: 'fictional.new', label: 'New app', mode: 'allow', managed: false },
+  ];
+  const controller = load().createController({ request(action) {
+    if (action === 'getState') return Promise.resolve(structuredClone(saved));
+    return Promise.resolve({ notificationManagement: { ...structuredClone(saved.notificationManagement), apps } });
+  } });
+  try {
+    await controller.refresh(); await controller.refreshSection('notificationManagement');
+    await controller.refresh();
+    const selected = () => Array.from(controller.getSnapshot().state.notificationManagement.apps,
+      app => ({ packageName: app.packageName, mode: app.mode, managed: app.managed }));
+    assert.deepEqual(selected(), apps.map(({ packageName, mode, managed }) => ({ packageName, mode, managed })));
+    saved.notificationManagement.appModes = {};
+    await controller.refresh();
+    assert.ok(selected().every(app => app.mode === 'allow' && app.managed === false));
+    assert.equal(controller.getSnapshot().state.notificationManagement.apps[0].label, 'Selected');
+  } finally { controller.dispose(); }
+});
+
+test('complete native notification app catalogs retain their authoritative modes', async () => {
+  const saved = { ...state(), notificationManagement: { appModes: { 'fictional.app': 'managed' }, exceptions: [],
+    apps: [{ packageName: 'fictional.app', label: 'Native app', mode: 'allow', managed: false }] } };
+  const controller = load().createController({ request: async () => structuredClone(saved) });
+  try {
+    await controller.refresh();
+    const app = controller.getSnapshot().state.notificationManagement.apps[0];
+    assert.equal(app.mode, 'allow'); assert.equal(app.managed, false);
+  } finally { controller.dispose(); }
+});
+
+test('a late notification catalog uses the latest explicit app modes without reviving deselected apps', async () => {
+  const saved = { ...state(), notificationManagement: { appModes: { 'fictional.app': 'managed' }, exceptions: [] } };
+  let finish;
+  const controller = load().createController({ request(action) {
+    if (action === 'getState') return Promise.resolve(structuredClone(saved));
+    return new Promise(resolve => { finish = resolve; });
+  } });
+  try {
+    await controller.refresh();
+    const catalog = controller.refreshSection('notificationManagement'); await Promise.resolve();
+    saved.notificationManagement.appModes = {};
+    await controller.refresh();
+    finish({ notificationManagement: { appModes: { 'fictional.app': 'managed' }, exceptions: [],
+      apps: [{ packageName: 'fictional.app', label: 'Late app label', mode: 'managed', managed: true }] } });
+    await catalog;
+    const current = controller.getSnapshot().state.notificationManagement;
+    assert.equal(current.apps[0].label, 'Late app label');
+    assert.equal(current.apps[0].mode, 'allow'); assert.equal(current.apps[0].managed, false);
+    assert.equal(Object.keys(current.appModes).length, 0);
+  } finally { controller.dispose(); }
+});
+
+test('native timezone is synchronized on startup and only after a changed device timezone', async () => {
+  const saved = { ...state(), timeZone: 'Asia/Shanghai' }, writes = [];
+  const fixture = applyFixture(saved, { windowExtra: { fetch: async (url, options) => {
+    if (url === '/droy/companions/settings' && options?.method === 'PATCH') writes.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ companions: [], settings: { defaultMode: 'work' }, stickers: [], models: [] }) };
+  } } });
+  await flush(); await flush();
+  assert.deepEqual(writes, [{ timeZone: 'Asia/Shanghai' }]);
+  await fixture.window.DroyMobile.refresh();
+  assert.equal(writes.length, 1);
+  saved.timeZone = 'America/New_York';
+  await fixture.window.DroyMobile.refresh();
+  assert.deepEqual(writes.at(-1), { timeZone: 'America/New_York' });
+  fixture.dispose();
 });

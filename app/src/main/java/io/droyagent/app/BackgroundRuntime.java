@@ -38,7 +38,8 @@ final class BackgroundRuntime {
     static void setEnabled(Context context, boolean enabled) {
         SharedPreferences.Editor editor = preferences(context).edit().putBoolean(ENABLED, enabled);
         if (enabled) editor.putBoolean(STOPPED, false);
-        editor.apply();
+        if (!editor.commit()) throw new IllegalStateException(NativeLocale.text(
+            "后台运行设置未保存，请重试", "Background runtime settings were not saved. Please try again"));
         settingsChanged(context);
     }
 
@@ -53,10 +54,12 @@ final class BackgroundRuntime {
 
     static synchronized boolean visible() { return visibleActivities > 0; }
 
-    static synchronized void activityStarted(Context context) {
+    static synchronized void activityStarted(Context context) { activityStarted(context, true); }
+
+    static synchronized void activityStarted(Context context, boolean startIfAllowed) {
         visibleActivities++;
         VoiceWake.visibilityChangedIfCreated();
-        if (!explicitlyStopped(context) && RuntimeService.instance == null)
+        if (startIfAllowed && !explicitlyStopped(context) && RuntimeService.canStart())
             context.startForegroundService(new Intent(context, RuntimeService.class).setAction(RuntimeService.REFRESH));
         RuntimeService.refreshBackgroundPolicy();
     }

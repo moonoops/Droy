@@ -224,7 +224,7 @@
     }
   ],
   "apache_2_0_full_text": "../speech/sherpa-onnx-LICENSE.txt",
-  "corresponding_source": "https://github.com/moonoops/Droy/releases/tag/v0.0.2",
-  "source_attachment": "sherpa-source-materials-v0.0.2.tar.gz",
+  "corresponding_source": "https://github.com/moonoops/Droy/releases/tag/v0.0.3",
+  "source_attachment": "sherpa-source-materials-v0.0.3.tar.gz",
   "license_boundary": "The sherpa source license is Apache-2.0. Its TTS-enabled Android native build also incorporates GPL-3.0-or-later eSpeak NG/ucd-tools. Those notices and corresponding-source obligations remain applicable; Droy code is separately AGPL-3.0-only."
 }

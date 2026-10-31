@@ -41,6 +41,10 @@ final class NotificationManagement {
     static final String TAG = "droy-managed";
     static final int SUMMARY_ID = 2000;
     private static final long ARCHIVE_LIFETIME = 7L * 24 * 60 * 60 * 1000;
+    private static final Set<String> MODEL_FAILURES = Set.of("DROY_NOTIFICATION_MODEL_REQUIRED",
+        "DROY_NOTIFICATION_MODEL_TIMEOUT", "DROY_NOTIFICATION_MODEL_INVALID_OUTPUT",
+        "DROY_NOTIFICATION_MODEL_AUTH_FAILED", "DROY_NOTIFICATION_MODEL_RATE_LIMITED",
+        "DROY_NOTIFICATION_MODEL_UNAVAILABLE", "DROY_NOTIFICATION_PROCESS_FAILED");
     private static volatile NotificationManagement singleton;
     private final Context context;
     private final SharedPreferences preferences;
@@ -59,6 +63,14 @@ final class NotificationManagement {
     private JSONArray records;
     private volatile DroyNotificationService listener;
     private volatile String error = "";
+    private boolean modelConfigured;
+    private String modelCode = "DROY_NOTIFICATION_MODEL_UNAVAILABLE";
+    private boolean checkingModel;
+    private long modelStatusCheckedAt;
+    private boolean takeoverSuspended;
+    private String takeoverSuspensionCode = "";
+    private JSONObject lastResult = new JSONObject();
+    private JSONObject lastFailure = new JSONObject();
     private final NotificationAccessPolicy accessPolicy = new NotificationAccessPolicy();
     private record AccessStatus(String state, boolean actionRequired, String action) { }
     private volatile AccessStatus accessStatus = new AccessStatus("connecting", false, "");
@@ -123,12 +135,107 @@ final class NotificationManagement {
     }
 
     private void refreshStatusNotification() { ForegroundStatusNotifications.refresh(context); }
+
+    private int selectedAppCount() {
+        int count = 0;
+        for (String packageName : applicationNames.keySet()) if (managed(packageName)) count++;
+        return count;
+    }
+
+    private JSONObject resultState(JSONObject source) throws Exception {
+        JSONObject result = new JSONObject(source.toString());
+        if (result.has("code")) result.put("message", resultMessage(result.getString("code")));
+        return result;
+    }
+
+    private JSONObject processingState(JSONObject autoSilence) throws Exception {
+        String state, code, message, action = "";
+        if (autoSilence.optInt("pendingRestoreCount") > 0 || channels.hasOwnedSettings() && !takeoverActive()) {
+            state = "restoration_required";
+            if (!ProductPermissions.allowed(preferences, "allowRoot") || autoSilence.optString("state").equals("root_required")) {
+                code = "restore_root_required"; action = "permissions";
+                message = NativeLocale.text("仍有通知设置待恢复。请授权 Root 后恢复，或在系统设置中手动调整。", "Some notification settings still need restoration. Allow Root to restore them, or adjust them manually in system settings.");
+            } else {
+                code = "restore_required"; action = "restore";
+                message = NativeLocale.text("原应用的通知设置尚未全部恢复，请完成恢复。", "Some original notification settings still need to be restored.");
+            }
+        } else if (!enabled()) {
+            state = "off"; code = "off";
+            message = NativeLocale.text("通知整理已关闭。", "Notification organization is off.");
+        } else if (config.optBoolean("requiresReview")) {
+            state = "setup_required"; code = "rules_review_required";
+            message = NativeLocale.text("请先检查并保存整理规则。", "Review and save the organization rules first.");
+        } else if (selectedAppCount() == 0) {
+            state = "setup_required"; code = "apps_required"; action = "apps";
+            message = NativeLocale.text("请选择需要整理通知的应用。", "Choose the apps whose notifications should be organized.");
+        } else if (!ProductPermissions.allowed(preferences, "allowNotifications")) {
+            state = "setup_required"; code = "product_permission_required"; action = "permissions";
+            message = NativeLocale.text("请允许 Droy 使用通知整理能力。", "Allow Droy to use notification organization.");
+        } else if (ProductPermissions.stopped(context) || BackgroundRuntime.explicitlyStopped(context)) {
+            state = "paused"; code = "paused"; action = "resume";
+            message = NativeLocale.text("通知整理已暂停，恢复 Droy 后继续。", "Notification organization is paused. Resume Droy to continue.");
+        } else if (!DroyNotificationService.hasAccess(context) || accessStatus.state().equals("listener_unavailable")
+                || !notifications.areNotificationsEnabled() || accessStatus.state().equals("post_permission_required")) {
+            state = "setup_required"; code = "permission_required"; action = "permissions";
+            message = NativeLocale.text("请检查通知读取和发送权限。", "Check notification access and notification permission.");
+        } else if (!RuntimeService.ready && !RuntimeService.isStartingOrRunning()) {
+            state = "paused"; code = "runtime_stopped"; action = "resume";
+            message = NativeLocale.text("引擎未运行，启动 Droy 后继续整理。", "The engine is not running. Start Droy to continue organizing notifications.");
+        } else if (!RuntimeService.ready || listener == null || checkingModel || scanQueued || applyingChannels) {
+            state = "preparing"; code = "preparing";
+            message = NativeLocale.text("正在准备通知整理。", "Preparing notification organization.");
+        } else if (!modelConfigured) {
+            state = "setup_required"; code = modelCode; action = "model";
+            message = resultMessage(modelCode);
+        } else if (takeoverSuspended) {
+            state = "limited"; code = "takeover_suspended";
+            action = takeoverSuspensionCode.startsWith("DROY_NOTIFICATION_MODEL_") ? "model" : "permissions";
+            message = NativeLocale.text("静默接管已暂停，原通知保留。处理问题后可重新检查接管。", "Silent takeover is paused and original notifications are kept. Resolve the issue before checking takeover again.");
+        } else if (config.optBoolean("silentTakeoverEnabled") && !autoSilence.optString("state").equals("ready")) {
+            state = "limited"; code = "silence_unavailable"; action = "permissions";
+            message = NativeLocale.text("静默接管尚未完成；可保留或清除通知，无法收纳或替换提醒时保留原通知。", "Silent takeover is incomplete. Notifications can be kept or cleared; originals are kept when collection or replacement alerts are unavailable.");
+        } else if (!lastResult.optBoolean("success", true)) {
+            state = "limited"; code = lastResult.optString("code");
+            action = code.startsWith("DROY_NOTIFICATION_MODEL_") ? "model" : "";
+            message = resultMessage(code);
+        } else {
+            state = "ready"; code = "ready";
+            message = config.optBoolean("silentTakeoverEnabled")
+                ? NativeLocale.text("已就绪，按所选应用和规则整理通知。", "Ready to organize notifications for the selected apps and rules.")
+                : NativeLocale.text("已就绪，保留原应用提醒并按规则整理。广告可能先提醒再被清除。", "Ready. Original app alerts are preserved while notifications are organized. Ads may alert before being cleared.");
+        }
+        return new JSONObject().put("state", state).put("code", code).put("message", message).put("action", action);
+    }
+
+    private static String resultMessage(String code) {
+        return switch (code) {
+            case "DROY_NOTIFICATION_MODEL_REQUIRED" -> NativeLocale.text("请先配置并选择默认文本模型。", "Configure and select a default text model first.");
+            case "DROY_NOTIFICATION_MODEL_TIMEOUT" -> NativeLocale.text("模型处理超时，已保留原通知。", "The model timed out. Original notifications are kept.");
+            case "DROY_NOTIFICATION_MODEL_INVALID_OUTPUT" -> NativeLocale.text("模型返回的整理结果无效，已保留原通知。", "The model returned an invalid decision. Original notifications are kept.");
+            case "DROY_NOTIFICATION_MODEL_AUTH_FAILED" -> NativeLocale.text("模型授权失败，请检查模型设置；原通知保留。", "Model authorization failed. Check model settings; original notifications are kept.");
+            case "DROY_NOTIFICATION_MODEL_RATE_LIMITED" -> NativeLocale.text("模型服务暂时限制请求，原通知保留。", "The model service is limiting requests. Original notifications are kept.");
+            case "DROY_NOTIFICATION_MODEL_UNAVAILABLE" -> NativeLocale.text("暂时无法确认模型状态，原通知保留。", "The model's status cannot currently be confirmed. Original notifications are kept.");
+            case "DROY_NOTIFICATION_SILENT_REQUIRED" -> NativeLocale.text("原应用尚未静默，本次收纳或替换提醒未执行，原通知保留。", "The source app is not silent. Collection or a replacement alert was not applied; the original notification is kept.");
+            case "DROY_NOTIFICATION_SUMMARY_UNAVAILABLE" -> NativeLocale.text("通知汇总暂时无法发布，请检查通知设置。重要提醒单独处理。", "The notification summary could not be published. Check notification settings. Important reminders are handled separately.");
+            case "DROY_NOTIFICATION_POST_UNAVAILABLE" -> NativeLocale.text("Droy 暂时无法发送提醒，请检查通知权限和通知类别。", "Droy cannot currently send reminders. Check notification permission and categories.");
+            case "DROY_NOTIFICATION_ORGANIZED" -> NativeLocale.text("本次通知整理完成。", "This notification was organized.");
+            case "DROY_NOTIFICATION_REMINDER_SENT" -> NativeLocale.text("重要通知提醒已发出。", "The important notification reminder was sent.");
+            default -> NativeLocale.text("通知处理未完成，请检查通知历史与权限。", "Notification processing did not complete. Check notification history and permissions.");
+        };
+    }
+
+    private void recordResult(boolean success, String code) throws Exception {
+        lastResult = new JSONObject().put("atMs", System.currentTimeMillis()).put("success", success).put("code", code);
+        error = success ? "" : resultMessage(code);
+        if (!success) lastFailure = new JSONObject(lastResult.toString());
+        save();
+    }
     private boolean scanQueued;
     private boolean applyingChannels;
     private volatile HttpURLConnection activeAnalysis;
 
     static boolean enabled(Context context) {
-        return context.getSharedPreferences("product", Context.MODE_PRIVATE).getBoolean("notificationManagementEnabled", true);
+        return context.getSharedPreferences("product", Context.MODE_PRIVATE).getBoolean("notificationManagementEnabled", false);
     }
 
     static void synchronizeInstalledApps(Context context) { get(context).rescan(); }
@@ -145,83 +252,115 @@ final class NotificationManagement {
         channels = new NotificationChannelControl(context);
         try {
             JSONObject data = new JSONObject(preferences.getString(DATA, "{}"));
-            config = NotificationManagementRules.configuration(data.optJSONObject("config"));
+            JSONObject previousConfig = data.optJSONObject("config");
+            if (previousConfig != null && !preferences.contains("notificationManagementEnabled")) {
+                if (!preferences.edit().putBoolean("notificationManagementEnabled", true).commit())
+                    throw new IllegalStateException("notification_migration_not_saved");
+            }
+            config = NotificationManagementRules.configuration(previousConfig);
             records = data.optJSONArray("records");
             if (records == null) records = new JSONArray();
+            takeoverSuspended = data.optBoolean("silentTakeoverSuspended");
+            takeoverSuspensionCode = data.optString("takeoverSuspensionCode");
+            JSONObject previousFailure = data.optJSONObject("lastFailure");
+            if (previousFailure != null) lastFailure = previousFailure;
+            JSONObject previousResult = data.optJSONObject("lastResult");
+            if (previousResult != null) lastResult = previousResult;
         } catch (Exception invalid) { throw new IllegalStateException(io.droyagent.app.NativeLocale.text("通知管理配置无法读取", "Unable to read notification management configuration"), invalid); }
         notifications.createNotificationChannel(new NotificationChannel("managed_alerts", io.droyagent.app.NativeLocale.text("重要通知", "Important notifications"), NotificationManager.IMPORTANCE_HIGH));
         NotificationChannel summary = new NotificationChannel("managed_summary", io.droyagent.app.NativeLocale.text("通知汇总", "Notification summary"), NotificationManager.IMPORTANCE_LOW);
         summary.setSound(null, null); summary.enableVibration(false);
         notifications.createNotificationChannel(summary);
-        installedApps();
+        try {
+            if (config.optBoolean("requiresReview") || config.optBoolean("needsModelConsent")) {
+                if (!preferences.edit().putBoolean("notificationManagementEnabled", false).commit())
+                    throw new IllegalStateException("notification_migration_not_saved");
+            }
+            save();
+        } catch (Exception invalid) { throw new IllegalStateException(NativeLocale.text("通知设置迁移失败", "Notification settings migration failed"), invalid); }
         queueAccessCheck();
     }
 
-    synchronized JSONObject request(JSONObject request) throws Exception {
+    synchronized JSONObject request(JSONObject request) throws Exception { return request(request, true); }
+
+    synchronized JSONObject request(JSONObject request, boolean includeApps) throws Exception {
         switch (request.getString("operation")) {
-            case "get": return state();
+            case "get": return state(includeApps, false);
+            case "classificationContext": {
+                String packageName = NotificationManagementRules.packageName(request.get("packageName"));
+                return new JSONObject().put("enabled", enabled()).put("revision", revision())
+                    .put("requiresReview", config.optBoolean("requiresReview"))
+                    .put("ruleText", NotificationManagementRules.ruleText(config))
+                    .put("managed", managed(packageName)).put("allowed", processingActive() && managed(packageName)
+                        && !config.optBoolean("requiresReview"))
+                    .put("defaultRule", !config.has("ruleText"));
+            }
             case "archive": return new JSONObject().put("items", archive());
             case "configure": {
-                Boolean nextEnabled = booleanOption(request, "enabled"), nextCloud = booleanOption(request, "cloudAnalysisEnabled");
-                JSONObject nextConfig = new JSONObject(config.toString());
-                if (request.has("packages")) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("请通过例外应用调整通知方式", "Please adjust notification handling through app exceptions"));
-                if (request.has("exceptions")) {
-                    JSONObject exceptions = NotificationManagementRules.exceptions(request.getJSONArray("exceptions"));
-                    Set<String> installed = installedApps().keySet();
-                    for (java.util.Iterator<String> names = exceptions.keys(); names.hasNext(); )
-                        if (!installed.contains(names.next())) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("例外应用无效", "Invalid app exception"));
-                    nextConfig.put("exceptions", exceptions);
+                Boolean nextEnabled = booleanOption(request, "enabled"), reset = booleanOption(request, "resetRule");
+                Boolean takeover = booleanOption(request, "silentTakeoverEnabled");
+                if (request.has("cloudAnalysisEnabled") || request.has("exceptions") || request.has("packages"))
+                    throw new IllegalArgumentException(NativeLocale.text("请使用应用管理和整理规则设置", "Use app management and organization rules"));
+                if (Boolean.TRUE.equals(nextEnabled) && config.optBoolean("selectionMigrationPending")) installedApps();
+                JSONObject next = new JSONObject(config.toString());
+                if (request.has("ruleText") && Boolean.TRUE.equals(reset)) throw new IllegalArgumentException("rule_reset_conflict");
+                if (request.has("ruleText")) NotificationManagementRules.setRuleText(next,
+                    NotificationManagementRules.text(request.get("ruleText"), 24000, false), false);
+                else if (Boolean.TRUE.equals(reset)) NotificationManagementRules.setRuleText(next, "", true);
+                if (request.has("reminderMinutes")) next.put("reminderMinutes", NotificationManagementRules.reminderMinutes(request.get("reminderMinutes")));
+                if (takeover != null) { next.put("silentTakeoverEnabled", takeover); takeoverSuspended = false; takeoverSuspensionCode = ""; }
+                if (Boolean.TRUE.equals(nextEnabled)) {
+                    if (next.optBoolean("requiresReview")) throw new IllegalStateException(NativeLocale.text("请先检查并保存整理规则", "Review and save the organization rules first"));
+                    next.put("needsModelConsent", false);
                 }
-                if (request.has("reminderMinutes")) nextConfig.put("reminderMinutes", NotificationManagementRules.reminderMinutes(request.get("reminderMinutes")));
-                if (nextCloud != null) nextConfig.put("cloudAnalysisEnabled", nextCloud);
-                config = nextConfig;
-                if (nextEnabled != null) preferences.edit().putBoolean("notificationManagementEnabled", nextEnabled).apply();
+                config = next;
+                if (nextEnabled != null && !preferences.edit().putBoolean("notificationManagementEnabled", nextEnabled).commit())
+                    throw new IllegalStateException(NativeLocale.text("通知设置未保存", "Notification settings were not saved"));
                 changed();
-                if (request.optBoolean("enabled")) BackgroundRuntime.startedByUser(context);
+                if (Boolean.TRUE.equals(nextEnabled)) BackgroundRuntime.startedByUser(context);
                 BackgroundRuntime.settingsChanged(context);
                 if (!enabled()) { cancelManaged(); error = ""; }
-                rescan();
-                return state();
+                rescan(); return state(includeApps);
             }
             case "setAppMode": {
                 String packageName = NotificationManagementRules.packageName(request.get("packageName"));
                 String mode = NotificationManagementRules.appMode(request.get("mode"));
-                if (!installedApps().containsKey(packageName)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("此应用不支持通知接管", "Notification management is not supported for this app"));
-                JSONObject exceptions = config.getJSONObject("exceptions");
-                if (mode.equals("managed")) exceptions.remove(packageName); else exceptions.put(packageName, mode);
-                changed(); rescan(); return state();
+                if (!installedApps().containsKey(packageName)) throw new IllegalArgumentException(NativeLocale.text("此应用不支持通知接管", "Notification management is not supported for this app"));
+                config.getJSONObject("exceptions").put(packageName, mode);
+                changed(); rescan(); return state(includeApps);
             }
-            case "upsertRule": {
-                JSONArray next = new JSONArray(), rules = config.getJSONArray("rules");
-                JSONObject source = new JSONObject(request.getJSONObject("rule").toString());
-                if (!source.has("id")) for (int i = rules.length() - 1; i >= 0; i--)
-                    if (rules.getJSONObject(i).optString("packageName").equals(source.optString("packageName"))) {
-                        source.put("id", rules.getJSONObject(i).getString("id")); break;
-                    }
-                JSONObject rule = NotificationManagementRules.rule(source);
-                for (int i = 0; i < rules.length(); i++)
-                    if (!rules.getJSONObject(i).getString("id").equals(rule.getString("id"))
-                            && !rules.getJSONObject(i).getString("packageName").equals(rule.getString("packageName"))) next.put(rules.get(i));
-                if (next.length() >= 100) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("规则过多", "Too many rules"));
-                next.put(rule); config.put("rules", next); changed(); rescan(); return state();
-            }
-            case "deleteRule": {
-                String id = NotificationManagementRules.text(request.get("id"), 80, false);
-                JSONArray next = new JSONArray(), rules = config.getJSONArray("rules");
-                for (int i = 0; i < rules.length(); i++) if (!rules.getJSONObject(i).getString("id").equals(id)) next.put(rules.get(i));
-                config.put("rules", next); changed(); rescan(); return state();
+            case "setApps": {
+                Boolean selected = booleanOption(request, "enabled");
+                if (selected == null) throw new IllegalArgumentException("enabled_required");
+                Set<String> installed = installedApps().keySet(), requested = new HashSet<>();
+                JSONArray names = request.getJSONArray("packageNames");
+                for (int i = 0; i < names.length(); i++) requested.add(NotificationManagementRules.packageName(names.get(i)));
+                if (!requested.equals(installed)) throw new IllegalStateException(NativeLocale.text("应用列表已更新，请重新打开", "The app list changed. Reopen it and try again"));
+                JSONObject selectedApps = config.getJSONObject("exceptions");
+                for (String name : requested) selectedApps.put(name, selected ? "managed" : "allow");
+                changed(); rescan(); return state(includeApps);
             }
             default: throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("通知管理操作无效", "Invalid notification management operation"));
         }
     }
 
-    synchronized JSONObject state() throws Exception {
+    synchronized JSONObject state() throws Exception { return state(true); }
+
+    synchronized JSONObject state(boolean includeApps) throws Exception { return state(includeApps, true); }
+
+    private JSONObject state(boolean includeApps, boolean includeArchive) throws Exception {
+        if (includeArchive) queueModelStatusRefresh();
         queueAccessCheck();
         JSONArray apps = new JSONArray(), exceptions = new JSONArray();
-        for (Map.Entry<String, String> app : installedApps().entrySet()) {
+        Map<String, String> visibleApps = includeApps ? installedApps() : new LinkedHashMap<>();
+        if (!includeApps) for (java.util.Iterator<String> keys = config.getJSONObject("exceptions").keys(); keys.hasNext();) {
+            String key = keys.next();
+            if (applicationNames.containsKey(key)) visibleApps.put(key, applicationNames.get(key));
+        }
+        for (Map.Entry<String, String> app : visibleApps.entrySet()) {
             String mode = appMode(app.getKey());
             Boolean confirmed = silentApps.get(app.getKey());
-            if (confirmed == null) confirmed = channels.packageSilent(app.getKey());
+            if (confirmed == null && includeApps) confirmed = channels.packageSilent(app.getKey());
             JSONObject item = new JSONObject().put("packageName", app.getKey()).put("label", app.getValue())
                     .put("mode", mode).put("managed", !mode.equals("allow"))
                     .put("silent", confirmed == null ? JSONObject.NULL : confirmed);
@@ -232,11 +371,19 @@ final class NotificationManagement {
         JSONObject autoSilence = new JSONObject(channels.status().toString());
         if (scanQueued || applyingChannels) autoSilence.put("state", "syncing").put("message", "");
         autoSilence.put("actionRequired", !autoSilence.optString("state").equals("ready") && !autoSilence.optString("message").isEmpty());
-        return new JSONObject().put("enabled", enabled()).put("revision", revision()).put("apps", apps)
-                .put("exceptions", exceptions).put("rules", new JSONArray(config.getJSONArray("rules").toString()))
-                .put("reminderMinutes", config.optInt("reminderMinutes", 5)).put("cloudAnalysisEnabled", config.optBoolean("cloudAnalysisEnabled", true)).put("autoSilence", autoSilence)
+        return new JSONObject().put("enabled", enabled()).put("revision", revision()).put("apps", includeApps ? apps : null)
+                .put("exceptions", exceptions).put("appModes", new JSONObject(config.getJSONObject("exceptions").toString()))
+                .put("ruleText", NotificationManagementRules.ruleText(config))
+                .put("requiresReview", config.optBoolean("requiresReview"))
+                .put("silentTakeoverEnabled", config.optBoolean("silentTakeoverEnabled"))
+                .put("silentTakeoverSuspended", takeoverSuspended).put("selectedAppCount", selectedAppCount())
+                .put("model", new JSONObject().put("configured", modelConfigured).put("code", modelCode))
+                .put("processing", processingState(autoSilence)).put("lastResult", resultState(lastResult))
+                .put("lastFailure", resultState(lastFailure))
+                .put("reminderMinutes", config.optInt("reminderMinutes", 5)).put("autoSilence", autoSilence)
                 .put("permissionGranted", access.optBoolean("permissionGranted")).put("connected", listener != null && access.optBoolean("connected"))
-                .put("error", error).put("access", accessState()).put("clearedAdsCount", clearedAdsCount()).put("archive", archive());
+                .put("error", !lastResult.optBoolean("success", true) ? resultMessage(lastResult.optString("code")) : "").put("access", accessState()).put("clearedAdsCount", clearedAdsCount())
+                .put("archive", includeArchive ? archive() : null);
     }
 
     synchronized void connected(DroyNotificationService service) {
@@ -313,19 +460,23 @@ final class NotificationManagement {
         worker.execute(() -> {
             synchronized (this) { scanQueued = false; }
             try {
+                refreshModelStatus();
                 synchronizeChannels();
                 DroyNotificationService service;
                 synchronized (this) { service = listener; if (service == null || !enabled()) return; }
                 StatusBarNotification[] items = service.getActiveNotifications();
                 NotificationListenerService.RankingMap rankings = service.getCurrentRanking();
-                if (items != null) for (StatusBarNotification item : items) receive(item, rankings);
+                if (items != null) for (StatusBarNotification item : items) {
+                    try { receive(item, rankings); }
+                    catch (Exception failure) { failed(failure); }
+                }
                 maintain();
             } catch (Exception failure) { failed(failure); }
         });
     }
 
     private synchronized boolean needsChannelSync(StatusBarNotification item, NotificationListenerService.RankingMap rankings) {
-        if (!enabled() || listener == null || !managed(item.getPackageName()) || !RuntimeService.ready
+        if (!takeoverActive() || listener == null || !managed(item.getPackageName()) || !RuntimeService.ready
                 || ProductPermissions.stopped(context) || !ProductPermissions.allowed(preferences, "allowNotifications")
                 || channels.status().optString("state").equals("root_required")) return false;
         NotificationListenerService.Ranking ranking = new NotificationListenerService.Ranking();
@@ -338,18 +489,90 @@ final class NotificationManagement {
         boolean active;
         long expectedRevision;
         synchronized (this) {
-            for (String packageName : installedApps().keySet()) modes.put(packageName, appMode(packageName));
-            active = processingActive();
+            if (enabled()) installedApps();
+            active = takeoverActive();
+            if (active) for (String packageName : applicationNames.keySet()) modes.put(packageName, appMode(packageName));
             expectedRevision = revision();
             applyingChannels = true;
         }
         try { channels.synchronize(modes, active, () -> {
-            synchronized (NotificationManagement.this) { return revision() == expectedRevision && processingActive() == active; }
+            synchronized (NotificationManagement.this) { return revision() == expectedRevision && takeoverActive() == active; }
         }); }
         finally { synchronized (this) { applyingChannels = false; } }
     }
 
-    private synchronized Map<String, String> installedApps() {
+    private synchronized boolean takeoverActive() {
+        return processingActive() && modelConfigured && ProductPermissions.allowed(preferences, "allowRoot")
+            && config.optBoolean("silentTakeoverEnabled") && !takeoverSuspended;
+    }
+
+    private void refreshModelStatus() {
+        synchronized (this) {
+            if (!RuntimeService.ready) {
+                modelConfigured = false; modelCode = "DROY_NOTIFICATION_MODEL_UNAVAILABLE";
+                return;
+            }
+            checkingModel = true;
+        }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL("http://127.0.0.1:" + RuntimeService.webPort + "/droy/notifications/status").openConnection();
+            connection.setRequestMethod("GET"); connection.setConnectTimeout(1000); connection.setReadTimeout(3000);
+            connection.setRequestProperty("Cookie", "droy_session=" + RuntimeService.webToken);
+            if (connection.getResponseCode() != 200) throw new java.io.IOException("notification_model_status_unavailable");
+            JSONObject result = readResponse(connection.getInputStream());
+            if (!(result.opt("configured") instanceof Boolean)) throw new java.io.IOException("notification_model_status_invalid");
+            synchronized (this) {
+                modelConfigured = result.getBoolean("configured");
+                modelCode = modelConfigured ? "ready" : result.optString("code").equals("DROY_NOTIFICATION_MODEL_REQUIRED")
+                    ? "DROY_NOTIFICATION_MODEL_REQUIRED" : "DROY_NOTIFICATION_MODEL_UNAVAILABLE";
+            }
+        } catch (Exception unavailable) {
+            synchronized (this) { modelConfigured = false; modelCode = "DROY_NOTIFICATION_MODEL_UNAVAILABLE"; }
+            Log.w("DroyNotifications", "notification_model_status_unavailable: " + unavailable.getClass().getSimpleName());
+        } finally {
+            if (connection != null) connection.disconnect();
+            synchronized (this) { checkingModel = false; modelStatusCheckedAt = android.os.SystemClock.elapsedRealtime(); }
+        }
+    }
+
+    private void queueModelStatusRefresh() {
+        if (!RuntimeService.ready || checkingModel || scanQueued
+                || android.os.SystemClock.elapsedRealtime() - modelStatusCheckedAt <= 1000) return;
+        checkingModel = true;
+        worker.execute(() -> {
+            boolean previouslyConfigured;
+            synchronized (this) { previouslyConfigured = modelConfigured; }
+            refreshModelStatus();
+            boolean changed;
+            synchronized (this) { changed = previouslyConfigured != modelConfigured; }
+            if (changed) {
+                if (modelConfigured) rescan();
+                else suspendTakeover(modelCode);
+            }
+        });
+    }
+
+    void prepareRootRevocation() {
+        try {
+            synchronized (this) {
+                config.put("silentTakeoverEnabled", false);
+                takeoverSuspended = false; takeoverSuspensionCode = "";
+                changed();
+            }
+        } catch (Exception failure) { failed(failure); }
+        restoreOwnedChannels();
+    }
+
+    void restoreBeforeRuntimeStop() { restoreOwnedChannels(); }
+
+    private void restoreOwnedChannels() {
+        channels.cancelCurrent();
+        channels.synchronize(Map.of(), false);
+        refreshStatusNotification();
+    }
+
+    private synchronized Map<String, String> installedApps() throws Exception {
         PackageManager packages = context.getPackageManager();
         Set<String> launchable = new HashSet<>(), protectedApps = new HashSet<>(Set.of(
                 "android", "com.android.systemui", "com.android.phone", "com.android.server.telecom",
@@ -361,21 +584,26 @@ final class NotificationManagement {
         for (ResolveInfo alarm : packages.queryIntentActivities(new Intent(AlarmClock.ACTION_SET_ALARM), 0))
             protectedApps.add(alarm.activityInfo.packageName);
         List<ApplicationInfo> applications = new ArrayList<>(packages.getInstalledApplications(0));
-        applications.sort(Comparator.comparing(info -> info.loadLabel(packages).toString(), String.CASE_INSENSITIVE_ORDER));
-        Map<String, String> names = new LinkedHashMap<>();
+        Map<String, String> eligible = new LinkedHashMap<>();
         for (ApplicationInfo info : applications)
             if (NotificationManagementRules.eligibleApplication(info.packageName, info.uid,
                     (info.flags & ApplicationInfo.FLAG_SYSTEM) != 0, launchable.contains(info.packageName),
-                    context.getPackageName(), protectedApps)) names.put(info.packageName, info.loadLabel(packages).toString());
+                    context.getPackageName(), protectedApps)) eligible.put(info.packageName, info.loadLabel(packages).toString());
+        Map<String, String> names = new LinkedHashMap<>();
+        eligible.entrySet().stream().sorted(Map.Entry.comparingByValue(String.CASE_INSENSITIVE_ORDER))
+                .forEach(entry -> names.put(entry.getKey(), entry.getValue()));
         applicationNames = names;
+        if (config.optBoolean("selectionMigrationPending")) {
+            NotificationManagementRules.migrateApplications(config, names.keySet());
+            save();
+        }
         return new LinkedHashMap<>(names);
     }
 
     private void receive(StatusBarNotification source, NotificationListenerService.RankingMap rankings) throws Exception {
         JSONObject item;
         long revision;
-        JSONArray rules;
-        boolean cloud;
+        String ruleText;
         synchronized (this) {
             if (!enabled() || listener == null || BackgroundRuntime.explicitlyStopped(context) || !managed(source.getPackageName()) || ProductPermissions.stopped(context)
                     || !ProductPermissions.allowed(preferences, "allowNotifications")) return;
@@ -383,9 +611,6 @@ final class NotificationManagement {
             NotificationListenerService.Ranking ranking = new NotificationListenerService.Ranking();
             boolean silent = rankings != null && rankings.getRanking(source.getKey(), ranking) && silent(ranking.getChannel());
             silentApps.put(source.getPackageName(), silent);
-            if (appMode(source.getPackageName()).equals("block")) {
-                internalRemovals.add(source.getKey()); listener.cancelNotification(source.getKey()); return;
-            }
             if ((source.getNotification().flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
             android.os.Bundle extras = source.getNotification().extras;
             CharSequence[] lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
@@ -404,14 +629,19 @@ final class NotificationManagement {
                     return;
                 }
             }
-            if (fingerprint.equals(inFlight.get(source.getKey())) || !RuntimeService.ready) return;
-            revision = revision(); rules = new JSONArray(config.getJSONArray("rules").toString()); cloud = config.optBoolean("cloudAnalysisEnabled", true);
+            if (fingerprint.equals(inFlight.get(source.getKey())) || !RuntimeService.ready || !modelConfigured) return;
+            revision = revision(); ruleText = NotificationManagementRules.ruleText(config);
             inFlight.put(source.getKey(), fingerprint);
         }
         try {
             JSONObject response = analyze(new JSONObject().put("revision", revision).put("notification", item)
-                    .put("rules", rules).put("cloudAnalysisEnabled", cloud));
-            apply(source, item, revision, NotificationManagementRules.decision(response));
+                    .put("ruleText", ruleText));
+            JSONObject decision;
+            try { decision = NotificationManagementRules.decision(response); }
+            catch (IllegalArgumentException | org.json.JSONException invalid) {
+                throw new NotificationFailure("DROY_NOTIFICATION_MODEL_INVALID_OUTPUT");
+            }
+            apply(source, item, revision, decision);
         } finally {
             synchronized (this) { if (item.getString("fingerprint").equals(inFlight.get(source.getKey()))) inFlight.remove(source.getKey()); }
         }
@@ -427,7 +657,17 @@ final class NotificationManagement {
         NotificationListenerService.Ranking ranking = new NotificationListenerService.Ranking();
         boolean silent = service.getCurrentRanking().getRanking(source.getKey(), ranking) && silent(ranking.getChannel());
         String action = decision.getString("action");
+        if (!config.has("ruleText") && (!Set.of("retain", "clear").contains(action)
+                || action.equals("clear") && !decision.optBoolean("advertisement")))
+            throw new NotificationFailure("DROY_NOTIFICATION_MODEL_INVALID_OUTPUT");
         boolean preservesOrClears = action.equals("retain") || action.equals("clear");
+        String requestedAction = action;
+        boolean limited = !preservesOrClears && !silent;
+        if (limited) {
+            decision = new JSONObject().put("action", "retain");
+            action = "retain";
+            preservesOrClears = true;
+        }
         if (!NotificationManagementRules.current(revision(), expectedRevision, latest.getString("fingerprint"), item.getString("fingerprint"),
                 enabled(), managed(source.getPackageName()), silent || preservesOrClears, DroyNotificationService.hasAccess(context),
                 ProductPermissions.stopped(context) || BackgroundRuntime.explicitlyStopped(context) || !RuntimeService.ready
@@ -444,6 +684,7 @@ final class NotificationManagement {
                 .put("repeatAt", action.equals("notify") && repeat > 0 ? System.currentTimeMillis() + repeat * 60000L : 0)
                 .put("clearAt", clear > 0 ? item.optLong("postedAtMs") + clear * 3600000L : 0)
                 .put("notificationId", stableId(source.getPackageName() + ":" + (action.equals("retain") ? source.getKey() : decision.optString("groupKey", source.getKey()))));
+        if (limited) record.put("requestedAction", requestedAction).put("limitationCode", "DROY_NOTIFICATION_SILENT_REQUIRED");
         JSONArray next = new JSONArray();
         List<Integer> obsolete = new ArrayList<>();
         boolean previousCollection = false;
@@ -464,11 +705,13 @@ final class NotificationManagement {
             }
             if (!old.optString("key").equals(source.getKey())) next.put(old);
         }
-        if (action.equals("retain") || action.equals("clear"))
-            for (String field : new String[]{"title", "text", "subtext", "displayTitle", "displayText"}) record.remove(field);
         records = next; records.put(record); trim(); save();
         if (action.equals("notify")) publish(record, false);
-        if (action.equals("collect") || previousCollection) publishSummary();
+        if (action.equals("collect")) publishSummary(record);
+        else if (previousCollection) {
+            try { publishSummary(); }
+            catch (Exception failure) { Log.w("DroyNotifications", "notification_summary_refresh_failed: " + failure.getClass().getSimpleName()); }
+        }
         for (int id : obsolete) notifications.cancel(TAG, id);
         for (StatusBarNotification own : notifications.getActiveNotifications())
             if (TAG.equals(own.getTag()) && source.getKey().equals(own.getNotification().extras.getString("droySourceKey"))
@@ -478,7 +721,8 @@ final class NotificationManagement {
         if (!action.equals("retain")) {
             internalRemovals.add(source.getKey()); service.cancelNotification(source.getKey());
         }
-        error = ""; refreshStatusNotification(); schedule();
+        recordResult(!limited, limited ? "DROY_NOTIFICATION_SILENT_REQUIRED" : "DROY_NOTIFICATION_ORGANIZED");
+        refreshStatusNotification(); schedule();
     }
 
     private JSONObject analyze(JSONObject payload) throws Exception {
@@ -494,25 +738,45 @@ final class NotificationManagement {
             byte[] data = payload.toString().getBytes(StandardCharsets.UTF_8);
             connection.setFixedLengthStreamingMode(data.length);
             try (java.io.OutputStream output = connection.getOutputStream()) { output.write(data); }
-            if (connection.getResponseCode() != 200) throw new java.io.IOException(io.droyagent.app.NativeLocale.text("通知分析不可用", "Notification analysis is unavailable"));
-            try (InputStream input = connection.getInputStream(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-                byte[] buffer = new byte[4096]; int count;
-                while ((count = input.read(buffer)) != -1) { if (output.size() + count > 16384) throw new java.io.IOException(io.droyagent.app.NativeLocale.text("通知分析结果过长", "Notification analysis result is too long")); output.write(buffer, 0, count); }
-                return new JSONObject(output.toString(StandardCharsets.UTF_8.name()));
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                JSONObject result = connection.getErrorStream() == null ? new JSONObject() : readResponse(connection.getErrorStream());
+                String code = result.optString("error");
+                if (Set.of("DROY_NOTIFICATION_CONFIGURATION_CHANGED", "DROY_NOTIFICATION_APP_UNAVAILABLE").contains(code)) throw new PolicyChanged();
+                if (!MODEL_FAILURES.contains(code)) code = "DROY_NOTIFICATION_PROCESS_FAILED";
+                throw new NotificationFailure(code);
             }
+            try { return readResponse(connection.getInputStream()); }
+            catch (org.json.JSONException invalid) { throw new NotificationFailure("DROY_NOTIFICATION_MODEL_INVALID_OUTPUT"); }
         } catch (java.io.IOException failure) {
             synchronized (this) {
                 if (!processingActive() || revision() != payload.getLong("revision")) throw new PolicyChanged();
             }
-            throw failure;
+            if (failure instanceof NotificationFailure) throw failure;
+            throw new NotificationFailure(failure instanceof java.net.SocketTimeoutException
+                ? "DROY_NOTIFICATION_MODEL_TIMEOUT" : "DROY_NOTIFICATION_MODEL_UNAVAILABLE");
+        } catch (org.json.JSONException invalid) {
+            throw new NotificationFailure("DROY_NOTIFICATION_MODEL_INVALID_OUTPUT");
         } finally {
             if (activeAnalysis == connection) activeAnalysis = null;
             connection.disconnect();
         }
     }
 
+    private static JSONObject readResponse(InputStream stream) throws Exception {
+        try (InputStream input = stream; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096]; int count;
+            while ((count = input.read(buffer)) != -1) {
+                if (output.size() + count > 16384) throw new java.io.IOException("notification_response_too_large");
+                output.write(buffer, 0, count);
+            }
+            return new JSONObject(output.toString(StandardCharsets.UTF_8.name()));
+        }
+    }
+
     private void maintain() {
         List<JSONObject> due = new ArrayList<>();
+        List<Exception> failures = new ArrayList<>();
         try {
             synchronized (this) {
                 if (!enabled() || listener == null || !RuntimeService.ready || BackgroundRuntime.explicitlyStopped(context)
@@ -522,40 +786,50 @@ final class NotificationManagement {
                 StatusBarNotification[] active = notifications.getActiveNotifications();
                 for (int i = 0; i < records.length(); i++) {
                     JSONObject record = records.getJSONObject(i);
-                    if (!NotificationManagementRules.scheduled(record, revision(), managed(record.optString("packageName")))) continue;
-                    if (record.optBoolean("important") && record.optString("action").equals("retain") && !originalPresent(record)) {
-                        record.put("dismissed", true).put("reminderAt", 0);
-                        notifications.cancel(TAG, record.optInt("notificationId"));
-                        continue;
-                    }
-                    if (record.optLong("clearAt") > 0 && record.optLong("clearAt") <= now) {
-                        String key = record.optString("key");
-                        if (originalPresent(record)) {
-                            internalRemovals.add(key); listener.cancelNotification(key);
+                    try {
+                        if (!NotificationManagementRules.scheduled(record, revision(), managed(record.optString("packageName")))) continue;
+                        if (record.optBoolean("important") && record.optString("action").equals("retain") && !originalPresent(record)) {
+                            record.put("dismissed", true).put("reminderAt", 0);
+                            notifications.cancel(TAG, record.optInt("notificationId"));
+                            continue;
                         }
-                        notifications.cancel(TAG, record.optInt("notificationId"));
-                        record.put("clearAt", 0).put("repeatAt", 0).put("reminderAt", 0).put("dismissed", true);
-                    }
-                    if (!record.optBoolean("dismissed") && record.optLong("repeatAt") > 0 && record.optLong("repeatAt") <= now) {
-                        record.put("repeatAt", 0);
-                        for (StatusBarNotification own : active) if (TAG.equals(own.getTag()) && own.getId() == record.optInt("notificationId")) {
-                            publish(record, true); break;
+                        if (record.optLong("clearAt") > 0 && record.optLong("clearAt") <= now) {
+                            String key = record.optString("key");
+                            if (originalPresent(record)) {
+                                internalRemovals.add(key); listener.cancelNotification(key);
+                            }
+                            notifications.cancel(TAG, record.optInt("notificationId"));
+                            record.put("clearAt", 0).put("repeatAt", 0).put("reminderAt", 0).put("dismissed", true);
                         }
-                    }
-                    if (!record.optBoolean("dismissed") && record.optLong("reminderAt") > 0 && record.optLong("reminderAt") <= now) {
-                        // Persist the single attempt before showing UI, including across process restarts.
-                        record.put("reminderAt", 0).put("reminderAttemptedAt", now);
-                        due.add(record);
-                    }
+                        if (!record.optBoolean("dismissed") && record.optLong("repeatAt") > 0 && record.optLong("repeatAt") <= now) {
+                            record.put("repeatAt", 0);
+                            for (StatusBarNotification own : active) if (TAG.equals(own.getTag()) && own.getId() == record.optInt("notificationId")) {
+                                publish(record, true); break;
+                            }
+                        }
+                        if (!record.optBoolean("dismissed") && record.optLong("reminderAt") > 0 && record.optLong("reminderAt") <= now)
+                            due.add(record);
+                    } catch (Exception failure) { failures.add(failure); }
                 }
-                trim(); save(); publishSummary(); refreshStatusNotification(); schedule();
+                trim(); save(); refreshStatusNotification(); schedule();
             }
-            // Rendering waits for the main thread. Never hold the management lock while waiting.
+            for (Exception failure : failures) failed(failure);
+            try {
+                synchronized (this) { publishSummary(); }
+            } catch (Exception failure) { failed(failure); }
+            // A summary failure must not consume the independent important reminders.
             boolean bubbleUsed = false;
             for (JSONObject record : due) {
-                try { bubbleUsed |= remind(record, !bubbleUsed); }
-                catch (Exception failure) { failed(failure); }
+                try {
+                    synchronized (this) {
+                        if (record.optLong("reminderAt") <= 0 || !reminderAllowed(record)) continue;
+                        record.put("reminderAt", 0).put("reminderAttemptedAt", System.currentTimeMillis());
+                        save();
+                    }
+                    bubbleUsed |= remind(record, !bubbleUsed);
+                } catch (Exception failure) { failed(failure); }
             }
+            synchronized (this) { schedule(); }
         } catch (Exception failure) { failed(failure); }
     }
 
@@ -603,8 +877,9 @@ final class NotificationManagement {
         synchronized (this) {
             if (!reminderAllowed(record)) return false;
             if (!shown) {
-                if (!notifications.areNotificationsEnabled() || notifications.getNotificationChannel("managed_alerts").getImportance() == NotificationManager.IMPORTANCE_NONE)
-                    throw new IllegalStateException(NativeLocale.text("请开启 Droy 通知", "Please enable Droy notifications"));
+                NotificationChannel channel = notifications.getNotificationChannel("managed_alerts");
+                if (!notifications.areNotificationsEnabled() || channel == null || channel.getImportance() == NotificationManager.IMPORTANCE_NONE)
+                    throw new NotificationFailure("DROY_NOTIFICATION_POST_UNAVAILABLE");
                 PendingIntent open = intents.get(record.optString("key"));
                 if (open == null) open = openDroy();
                 Notification publicVersion = publicReminder();
@@ -615,7 +890,7 @@ final class NotificationManagement {
                         .setContentIntent(open).setAutoCancel(true).setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(publicVersion).build());
             }
             record.put("remindedAt", System.currentTimeMillis()).put("reminderDelivery", shown ? "companion" : "notification");
-            save();
+            recordResult(true, "DROY_NOTIFICATION_REMINDER_SENT");
         }
         return shown;
     }
@@ -627,9 +902,9 @@ final class NotificationManagement {
     }
 
     private void publish(JSONObject record, boolean repeat) throws Exception {
-        if (!notifications.areNotificationsEnabled()) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("请开启 Droy 通知", "Please enable Droy notifications"));
+        if (!notifications.areNotificationsEnabled()) throw new NotificationFailure("DROY_NOTIFICATION_POST_UNAVAILABLE");
         NotificationChannel channel = notifications.getNotificationChannel("managed_alerts");
-        if (channel == null || channel.getImportance() == NotificationManager.IMPORTANCE_NONE) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("请开启 Droy 通知", "Please enable Droy notifications"));
+        if (channel == null || channel.getImportance() == NotificationManager.IMPORTANCE_NONE) throw new NotificationFailure("DROY_NOTIFICATION_POST_UNAVAILABLE");
         PendingIntent open = intents.get(record.optString("key"));
         if (open == null) open = openDroy();
         boolean onlyAlertOnce = false;
@@ -648,15 +923,19 @@ final class NotificationManagement {
         notifications.notify(TAG, record.getInt("notificationId"), notification);
     }
 
-    private void publishSummary() throws Exception {
+    private void publishSummary() throws Exception { publishSummary(null); }
+
+    private void publishSummary(JSONObject pending) throws Exception {
         List<JSONObject> collected = new ArrayList<>();
         for (int i = 0; i < records.length(); i++) {
             JSONObject item = records.getJSONObject(i);
-            if (item.optString("action").equals("collect") && !item.optBoolean("dismissed") && managed(item.optString("packageName"))) collected.add(item);
+            if (item.optString("action").equals("collect") && (item.optBoolean("applied") || item == pending)
+                    && !item.optBoolean("dismissed") && managed(item.optString("packageName"))) collected.add(item);
         }
         if (collected.isEmpty()) { notifications.cancel(TAG, SUMMARY_ID); return; }
-        if (!notifications.areNotificationsEnabled() || notifications.getNotificationChannel("managed_summary").getImportance() == NotificationManager.IMPORTANCE_NONE)
-            throw new IllegalStateException(io.droyagent.app.NativeLocale.text("请开启 Droy 通知", "Please enable Droy notifications"));
+        NotificationChannel channel = notifications.getNotificationChannel("managed_summary");
+        if (!notifications.areNotificationsEnabled() || channel == null || channel.getImportance() == NotificationManager.IMPORTANCE_NONE)
+            throw new NotificationFailure("DROY_NOTIFICATION_SUMMARY_UNAVAILABLE");
         Notification.InboxStyle style = new Notification.InboxStyle();
         for (int i = Math.max(0, collected.size() - 5); i < collected.size(); i++) {
             JSONObject item = collected.get(i); style.addLine(item.optString("appName") + " · " + item.optString("displayTitle"));
@@ -668,7 +947,7 @@ final class NotificationManagement {
     }
 
     private PendingIntent openDroy() {
-        return PendingIntent.getActivity(context, 2000, new Intent(context, MainActivity.class).putExtra("notificationManagement", true)
+        return PendingIntent.getActivity(context, 2000, new Intent(context, NativeAppActivity.class).putExtra("notificationManagement", true)
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
@@ -689,33 +968,26 @@ final class NotificationManagement {
 
     private synchronized JSONArray archive() throws Exception {
         JSONArray result = new JSONArray();
-        for (int i = records.length() - 1; i >= 0 && result.length() < 50; i--) {
+        for (int i = records.length() - 1; i >= 0 && result.length() < 200; i--) {
             JSONObject item = records.getJSONObject(i);
-            if (item.optBoolean("applied") && (item.optString("action").equals("collect") || item.optString("action").equals("notify"))) result.put(new JSONObject(item.toString()));
+            if (item.optBoolean("applied") && item.optLong("savedAtMs") >= System.currentTimeMillis() - ARCHIVE_LIFETIME)
+                result.put(new JSONObject(item.toString()));
         }
         return result;
     }
 
     private void trim() throws Exception {
-        JSONArray next = new JSONArray(); long earliest = System.currentTimeMillis() - ARCHIVE_LIFETIME;
-        for (int i = Math.max(0, records.length() - 200); i < records.length(); i++)
-            if (records.getJSONObject(i).optLong("savedAtMs") >= earliest) next.put(records.get(i));
-        records = next;
+        Set<String> managedApps = new HashSet<>();
+        for (String packageName : applicationNames.keySet()) if (managed(packageName)) managedApps.add(packageName);
+        records = NotificationManagementRules.trimHistory(records, System.currentTimeMillis() - ARCHIVE_LIFETIME,
+            revision(), managedApps);
         Set<String> kept = new HashSet<>();
         for (int i = 0; i < records.length(); i++) kept.add(records.getJSONObject(i).optString("key"));
         intents.keySet().retainAll(kept);
     }
 
-    private int explicitLimit(String packageName, String key, int requested) throws Exception {
-        if (requested == 0) return 0;
-        JSONArray rules = config.getJSONArray("rules");
-        for (int i = rules.length() - 1; i >= 0; i--) {
-            JSONObject rule = rules.getJSONObject(i);
-            if (rule.optString("packageName").equals(packageName) || rule.optString("packageName").equals("*"))
-                if (rule.optInt(key) == requested) return requested;
-        }
-        return 0;
-    }
+    // Timing is product-owned; text rules do not authorize hidden recurring or destructive schedules.
+    private int explicitLimit(String packageName, String key, int requested) { return 0; }
 
     private boolean enabled() { return enabled(context); }
     private boolean processingActive() {
@@ -734,7 +1006,7 @@ final class NotificationManagement {
     private boolean managed(String packageName) {
         return applicationNames.containsKey(packageName) && !appMode(packageName).equals("allow");
     }
-    private String appMode(String packageName) { return config.optJSONObject("exceptions").optString(packageName, "managed"); }
+    private String appMode(String packageName) { return config.optJSONObject("exceptions").optString(packageName, "allow"); }
     private void changed() throws Exception {
         cancelAnalysis();
         channels.cancelCurrent();
@@ -749,20 +1021,48 @@ final class NotificationManagement {
         save(); refreshStatusNotification(); schedule();
     }
     private void save() throws Exception {
-        if (!preferences.edit().putString(DATA, new JSONObject().put("config", config).put("records", records).toString()).commit())
+        if (!preferences.edit().putString(DATA, new JSONObject().put("config", config).put("records", records)
+                .put("silentTakeoverSuspended", takeoverSuspended).put("takeoverSuspensionCode", takeoverSuspensionCode)
+                .put("lastResult", lastResult).put("lastFailure", lastFailure).toString()).commit())
             throw new java.io.IOException(io.droyagent.app.NativeLocale.text("通知管理设置未保存", "Notification management settings were not saved"));
     }
     private void cancelManaged() {
         handler.removeCallbacks(maintenance);
         for (StatusBarNotification own : notifications.getActiveNotifications()) if (TAG.equals(own.getTag())) notifications.cancel(TAG, own.getId());
     }
-    private synchronized void failed(Exception failure) {
+    private void failed(Exception failure) {
         if (failure instanceof PolicyChanged) return;
-        error = failure instanceof SecurityException ? io.droyagent.app.NativeLocale.text("通知访问已断开", "Notification access disconnected")
-                : failure instanceof IllegalStateException && io.droyagent.app.NativeLocale.text("请开启 Droy 通知", "Please enable Droy notifications").equals(failure.getMessage()) ? failure.getMessage() : io.droyagent.app.NativeLocale.text("通知处理失败", "Notification processing failed");
+        String code = failure instanceof NotificationFailure controlled ? controlled.code : "DROY_NOTIFICATION_PROCESS_FAILED";
+        synchronized (this) {
+            try { recordResult(false, code); }
+            catch (Exception persistenceFailure) {
+                error = resultMessage(code);
+                Log.w("DroyNotifications", "notification_failure_not_saved: " + persistenceFailure.getClass().getSimpleName());
+            }
+        }
+        // Some permission checks report failure while holding the management monitor.
+        // Channel restoration calls back into policy checks, so it must run after that monitor is released.
+        if (Thread.holdsLock(this)) worker.execute(() -> suspendTakeover(code));
+        else suspendTakeover(code);
         ForegroundStatusNotifications.refresh(context);
         Log.w("DroyNotifications", "notification_processing_failed: " + failure.getClass().getSimpleName());
     }
+
+    private void suspendTakeover(String code) {
+        synchronized (this) {
+            if (config.optBoolean("silentTakeoverEnabled")) {
+                takeoverSuspended = true; takeoverSuspensionCode = code;
+                channels.cancelCurrent();
+                try { save(); }
+                catch (Exception persistenceFailure) {
+                    error = resultMessage("DROY_NOTIFICATION_PROCESS_FAILED");
+                    Log.w("DroyNotifications", "notification_takeover_pause_not_saved: " + persistenceFailure.getClass().getSimpleName());
+                }
+            }
+        }
+        if (channels.hasOwnedSettings()) restoreOwnedChannels();
+    }
+
     private String appName(String packageName) {
         try { return context.getPackageManager().getApplicationLabel(context.getPackageManager().getApplicationInfo(packageName, 0)).toString(); }
         catch (android.content.pm.PackageManager.NameNotFoundException missing) { return packageName; }
@@ -791,6 +1091,10 @@ final class NotificationManagement {
         Object value = source.get(key);
         if (!(value instanceof Boolean)) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("通知管理开关无效", "Invalid notification management switch"));
         return (Boolean) value;
+    }
+    private static final class NotificationFailure extends java.io.IOException {
+        final String code;
+        NotificationFailure(String code) { super(code); this.code = code; }
     }
     private static final class PolicyChanged extends Exception { }
 }

@@ -38,19 +38,20 @@ public final class MediaInputController {
 
     public JSONObject request(JSONObject args) throws Exception {
         if (pending != null && pending.optBoolean("resultReady") && !pendingFile().exists()) pending = null;
+        String consumer = MediaInputPolicy.consumer(args.has("consumer") ? args.getString("consumer") : null);
         return switch (args.getString("operation")) {
             case "pick" -> pick(args);
-            case "list" -> new JSONObject().put("imports", store.list());
+            case "list" -> new JSONObject().put("imports", store.list()).put("pending", pendingSummary());
             case "bind" -> store.bind(args.getString("id"), args.getString("targetSessionId"),
                 optionalBoolean(args, "textApplied"), optionalBoolean(args, "textPrepared"),
-                args.has("textBeforeHash") ? args.getString("textBeforeHash") : null);
-            case "removeItems" -> store.removeItems(args.getString("id"), args.getJSONArray("itemIds"));
-            case "complete" -> { store.complete(args.getString("id")); yield new JSONObject().put("completed", true); }
+                args.has("textBeforeHash") ? args.getString("textBeforeHash") : null, consumer);
+            case "removeItems" -> store.removeItems(args.getString("id"), args.getJSONArray("itemIds"), consumer);
+            case "complete" -> { store.complete(args.getString("id"), consumer); yield new JSONObject().put("completed", true); }
             case "retryAlbum" -> {
                 String id = MediaInputPolicy.id(args.getString("id"));
                 new Thread(() -> {
-                    try { store.saveAlbum(id); }
-                    catch (Exception failure) { report("camera", null, failure); }
+                    try { store.saveAlbum(id, consumer); }
+                    catch (Exception failure) { report("camera", args.optString("targetSessionId", null), consumer, failure); }
                     notifyChanged();
                 }, "droy-media-album").start();
                 yield new JSONObject().put("started", true);
@@ -66,8 +67,10 @@ public final class MediaInputController {
         if (!source.equals("album") && !source.equals("camera")) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("照片来源无效", "Invalid photo source"));
         int remaining = args.getInt("remaining");
         if (remaining < 1 || remaining > MediaInputPolicy.MAX_IMAGES) throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("每条消息最多添加10张图片", "Each message supports up to 10 images"));
-        String target = MediaInputPolicy.session(args.getString("targetSessionId"));
-        pending = new JSONObject().put("operationId", UUID.randomUUID().toString()).put("source", source).put("targetSessionId", target).put("remaining", remaining);
+        String consumer = MediaInputPolicy.consumer(args.has("consumer") ? args.getString("consumer") : null);
+        String target = MediaInputPolicy.targetSession(consumer, args.getString("targetSessionId"));
+        pending = new JSONObject().put("operationId", UUID.randomUUID().toString()).put("source", source)
+            .put("targetSessionId", target).put("consumer", consumer).put("remaining", remaining);
         Intent intent;
         int requestCode;
         if (source.equals("album")) {
@@ -97,7 +100,8 @@ public final class MediaInputController {
             persistPending();
             pickerOpen = true; OPEN_PICKERS.incrementAndGet();
             activity.startActivityForResult(intent, requestCode);
-            return new JSONObject().put("started", true);
+            return new JSONObject().put("started", true).put("operationId", pending.getString("operationId"))
+                .put("consumer", consumer).put("targetSessionId", target);
         } catch (Exception failure) {
             releasePicker(); cleanPendingCapture(); clearPending(); throw failure;
         }
@@ -110,7 +114,7 @@ public final class MediaInputController {
         if (operation == null) return true;
         if (result != Activity.RESULT_OK) {
             deleteCapture(operation);
-            try { clearPending(); } catch (IOException failure) { report(operation.optString("source"), operation.optString("targetSessionId"), failure); }
+            try { clearPending(); } catch (IOException failure) { report(operation, failure); }
             notifyChanged(); return true;
         }
         try {
@@ -132,9 +136,9 @@ public final class MediaInputController {
             persistPending();
             processResult(operation);
         } catch (Exception failure) {
-            report(operation.optString("source"), operation.optString("targetSessionId"), failure);
+            report(operation, failure);
             deleteCapture(operation);
-            try { clearPending(); } catch (IOException cleanup) { report(operation.optString("source"), null, cleanup); }
+            try { clearPending(); } catch (IOException cleanup) { report(operation, cleanup); }
             notifyChanged();
         }
         return true;
@@ -156,16 +160,16 @@ public final class MediaInputController {
             return;
         }
         new Thread(() -> {
-            String source = operation.optString("source"), target = operation.optString("targetSessionId");
+            String source = operation.optString("source"), target = operation.optString("targetSessionId"), consumer = operation.optString("consumer", "work");
             try {
-                if (source.equals("camera")) store.importCapture(captureFile(operation), target, operation.getInt("remaining"), applicationName());
+                if (source.equals("camera")) store.importCapture(captureFile(operation), target, operation.getInt("remaining"), applicationName(), consumer);
                 else {
                     JSONArray values = operation.getJSONArray("uris");
                     java.util.ArrayList<Uri> uris = new java.util.ArrayList<>();
                     for (int i = 0; i < values.length(); i++) uris.add(Uri.parse(values.getString(i)));
-                    store.importUrisForOperation(operationId, "album", target, uris, "", true, operation.getInt("remaining"));
+                    store.importUrisForOperation(operationId, "album", target, uris, "", true, operation.getInt("remaining"), consumer);
                 }
-            } catch (Exception failure) { report(source, target, failure); }
+            } catch (Exception failure) { report(source, target, consumer, failure); }
             finally {
                 deleteCapture(operation);
                 JSONArray persisted = operation.optJSONArray("persistedUris");
@@ -175,7 +179,7 @@ public final class MediaInputController {
                 }
                 try {
                     if (pendingFile().isFile() && MediaInputStore.readJson(pendingFile()).optString("operationId").equals(operationId)) Files.deleteIfExists(pendingFile().toPath());
-                } catch (Exception cleanup) { report(source, target, cleanup); }
+                } catch (Exception cleanup) { report(source, target, consumer, cleanup); }
                 PROCESSING.remove(operationId);
                 activity.runOnUiThread(() -> {
                     if (pending != null && pending.optString("operationId").equals(operationId)) pending = null;
@@ -193,19 +197,19 @@ public final class MediaInputController {
         try {
             if (pendingFile().isFile()) pending = MediaInputStore.readJson(pendingFile());
             if (pending != null) {
-                MediaInputPolicy.session(pending.getString("targetSessionId"));
+                MediaInputPolicy.targetSession(MediaInputPolicy.consumer(pending.optString("consumer", null)), pending.getString("targetSessionId"));
                 if (pending.has("captureId")) MediaInputPolicy.id(pending.getString("captureId"));
                 if (state == null && !pending.optBoolean("resultReady")) {
                     JSONObject abandoned = pending;
                     deleteCapture(abandoned); clearPending();
-                    report(abandoned.optString("source"), abandoned.optString("targetSessionId"),
+                    report(abandoned,
                         new IOException(io.droyagent.app.NativeLocale.text("上次照片选择已中断，请重新选择", "The previous photo selection was interrupted. Please select again")));
                     return;
                 }
                 if (pending.optBoolean("resultReady")) processResult(pending);
                 else { pickerOpen = true; OPEN_PICKERS.incrementAndGet(); }
             }
-        } catch (Exception failure) { pending = null; report("camera", null, failure); }
+        } catch (Exception failure) { JSONObject failed = pending; pending = null; report(failed, failure); }
     }
 
     public void close() { closed = true; releasePicker(); }
@@ -247,6 +251,14 @@ public final class MediaInputController {
     }
 
     private String applicationName() { return activity.getApplicationInfo().loadLabel(activity.getPackageManager()).toString(); }
+    private Object pendingSummary() throws Exception {
+        JSONObject operation = pending;
+        if (operation == null) return JSONObject.NULL;
+        return new JSONObject().put("operationId", operation.getString("operationId"))
+            .put("consumer", MediaInputPolicy.consumer(operation.optString("consumer", null)))
+            .put("targetSessionId", operation.getString("targetSessionId")).put("source", operation.getString("source"))
+            .put("state", operation.optBoolean("resultReady") ? "importing" : "picking");
+    }
     private File pendingFile() { return new File(activity.getFilesDir(), "media-input/pending.json"); }
     private File captureFile(JSONObject operation) throws Exception {
         return new File(activity.getFilesDir(), "media-input/captures/" + MediaInputPolicy.id(operation.getString("captureId")) + ".jpg");
@@ -264,12 +276,16 @@ public final class MediaInputController {
             if (operation.has("captureUri")) activity.revokeUriPermission(Uri.parse(operation.getString("captureUri")),
                 Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
             Files.deleteIfExists(captureFile(operation).toPath());
-        } catch (Exception failure) { report("camera", operation.optString("targetSessionId", null), failure); }
+        } catch (Exception failure) { report(operation, failure); }
     }
     private void releasePicker() { if (pickerOpen) { pickerOpen = false; OPEN_PICKERS.decrementAndGet(); } }
     private void notifyChanged() { activity.runOnUiThread(() -> { if (!closed && !activity.isDestroyed()) changed.run(); }); }
-    private void report(String source, String target, Exception failure) {
-        try { store.error(source, target == null || target.isBlank() ? null : target, failure); }
+    private void report(JSONObject operation, Exception failure) {
+        report(operation == null ? "camera" : operation.optString("source"), operation == null ? null : operation.optString("targetSessionId", null),
+            operation == null ? "work" : operation.optString("consumer", "work"), failure);
+    }
+    private void report(String source, String target, String consumer, Exception failure) {
+        try { store.error(source, target == null || target.isBlank() ? null : target, consumer, failure); }
         catch (Exception storageFailure) {
             activity.runOnUiThread(() -> android.widget.Toast.makeText(activity,
                 io.droyagent.app.NativeLocale.text("附件导入失败：", "Attachment import failed: ") + (failure.getMessage() == null ? io.droyagent.app.NativeLocale.text("无法读取附件", "Unable to read attachment") : failure.getMessage()), android.widget.Toast.LENGTH_LONG).show());

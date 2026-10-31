@@ -1,0 +1,14 @@
+**Inference Result 1 (based on context)**
+{inference1}
+
+**Inference Result 2 (based only on the term itself)**
+{inference2}
+
+Please compare these two inference results and determine whether they are the same or similar.
+Ignore minor differences and focus on whether the main meanings are similar.
+
+Output in JSON format:
+{{
+  "is_similar": true/false,
+  "reason": "Reason for the judgment"
+}}

@@ -4,8 +4,6 @@ import { pipeline } from 'node:stream/promises';
 import { MemoryStore } from '../memory/store.mjs';
 import { PrivacyStore } from '../privacy/store.mjs';
 import { createMemoryMaintenance } from '../memory/maintenance.mjs';
-import { RootExecutor } from '../execution/launcher.mjs';
-import { createExecutionProxy } from '../execution/proxy.mjs';
 import { createBridge } from './bridge.mjs';
 import { requireMobileSession } from './auth.mjs';
 import { createMemoryFeatureLifecycle } from './memory-lifecycle.mjs';
@@ -15,34 +13,6 @@ export const inject = ['llm', 'webServer', 'tools'];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const failure = code => Object.assign(new Error(code), { code });
 const PURPOSES = ['conversation', 'session-title', 'compaction', 'extraction'];
-// These tools either use the isolated FS/subprocess services, or fixed product
-// operations. Host-code loaders, process-memory access and arbitrary native
-// compute are deliberately absent: their old app-UID paths are not isolated.
-const REVIEWED_TOOLS = new Set([
-  'droy_memory_query', 'droy_memory_get', 'droy_memory_record', 'droy_memory_update', 'droy_memory_forget',
-  'glob', 'grep', 'working_directory', 'job_list', 'job_output', 'job_kill',
-  'ask_user_question', 'exit_plan_mode', 'todo_write', 'droy_load_tools',
-  'android_capabilities', 'android_find_apps', 'android_open_app', 'android_observe', 'android_screenshot',
-  'android_sequence', 'android_tap', 'android_input_text', 'android_swipe', 'android_gesture', 'android_node_action',
-  'android_global_action', 'android_back', 'android_wait_for', 'android_verification', 'android_system_info',
-  'android_open_settings', 'android_file_grants', 'android_file_list', 'android_file_read', 'android_file_export',
-  'android_settings_get', 'android_settings_set', 'android_settings_restore', 'android_app_info',
-  'android_app_exit_info', 'android_battery_usage', 'android_network_usage', 'android_privacy_usage',
-  'android_usage_query', 'android_calendar_query', 'android_contacts_query',
-  'android_audio_start', 'android_audio_status', 'android_audio_stop', 'audio_transcribe', 'audio_transcript_read',
-  'audio_transcription_stop', 'droy_voice', 'droy_pet_progress',
-]);
-const CLEAN_NETWORK_TOOLS = new Set(['web_search', 'web_fetch']);
-const PRIVATE_LOCAL_TOOLS = new Set([
-  'droy_memory_query', 'droy_memory_get', 'droy_memory_record', 'droy_memory_update', 'droy_memory_forget',
-  'glob', 'grep', 'working_directory', 'job_list', 'job_output', 'job_kill',
-  'ask_user_question', 'exit_plan_mode', 'todo_write', 'droy_load_tools',
-  'android_capabilities', 'android_find_apps', 'android_observe', 'android_screenshot', 'android_system_info',
-  'android_file_grants', 'android_file_list', 'android_file_read', 'android_settings_get', 'android_app_info',
-  'android_app_exit_info', 'android_battery_usage', 'android_network_usage', 'android_privacy_usage',
-  'android_usage_query', 'android_calendar_query', 'android_contacts_query', 'android_wait_for',
-  'android_audio_status', 'android_audio_stop', 'audio_transcript_read', 'audio_transcription_stop',
-]);
 function hostPaths(value) {
   const match = /^\/data\/user\/(0|[1-9]\d*)\/io\.droyagent\.app(?:\.dev)?\/files$/.exec(value?.filesDir);
   if (!match || !value.nativeDir?.startsWith('/data/app/') || !Number.isSafeInteger(value.appUid)
@@ -56,12 +26,11 @@ function hostPaths(value) {
 /** Android host adapter. The memory package itself has no Android dependency. */
 export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
   openMemory = options => MemoryStore.open(options), openPrivacy = options => PrivacyStore.open(options),
-  executorFactory = options => new RootExecutor(options), qualify = qualifyExecutor,
   paths = hostPaths, clock = Date.now, reportError = () => {}, archiveFactory, featureAvailable = () => false } = {}) {
-  let snapshot, host, executor, memory, privacyStore, initialization, activation, closed = false;
+  let snapshot, host, memory, privacyStore, privacyOpening, privacyInspection, initialization, activation, closed = false;
   let initialized = false, ready = false, active = environment.DROY_MEMORY_PROTECTION_REQUIRED === '1', reason = 'MEMORY_DISABLED';
   let maintenance, extraction, archives, lastHousekeeping = 0, tickBusy = false, timer;
-  let startup, shutdown, tickCompletion, createArchives = archiveFactory;
+  let startup, shutdown, tickCompletion, createArchives = archiveFactory, maintenanceOwner;
   const routes = new Map();
   const privacy = () => ctx.get('droyPrivacy');
   const boundary = () => ctx.get('droyExecution');
@@ -90,12 +59,12 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
     return next;
   }
   async function status() {
-    if (closed) return { active, ready: false, reason: 'MEMORY_HOST_CLOSED', rootAuthorized: false, rootCheckedAt: 0 };
+    if (closed) return { active, ready: false, reason: 'MEMORY_HOST_CLOSED' };
     try { await refresh(); }
     catch (error) {
       ready = false; reason = error.code ?? 'MEMORY_NATIVE_UNAVAILABLE'; privacy()?.invalidate();
       stopMaintenance(reason);
-      // Once activated, connection failure can never restore the local provider.
+      // Keep existing model-processing grants authoritative across a host outage.
       if (!snapshot) throw error;
     }
     if (ready && (!privacy() || !boundary()?.installed?.())) {
@@ -105,8 +74,7 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       catch { /* Missing native acknowledgement cannot restore readiness. */ }
     }
     return { active, ready: ready && initialized && !closed,
-      reason: ready && initialized ? null : reason,
-      rootAuthorized: snapshot?.root?.authorized === true, rootCheckedAt: snapshot?.root?.checkedAt ?? 0 };
+      reason: ready && initialized ? null : reason };
   }
   function policy() {
     if (!host) throw failure('MEMORY_HOST_NOT_READY');
@@ -118,6 +86,12 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       privateRoots: ['droy-memory', 'droy-privacy', 'droy-history-spool', 'droy-execution', '.dsh', 'dsh-home']
         .map(name => join(host.filesDir, name)) };
   }
+  async function openPrivacyOnce(options) {
+    if (privacyStore) return privacyStore;
+    privacyOpening ??= openPrivacy(options).then(value => { privacyStore = value; return value; })
+      .finally(() => { privacyOpening = undefined; });
+    return privacyOpening;
+  }
   async function initializeStores() {
     ensureOpen();
     if (initialized) return;
@@ -126,7 +100,7 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       ensureOpen();
       const trusted = paths(permission.host);
       if (trusted.filesDir !== host.filesDir || typeof permission.initialize !== 'boolean') throw failure('MEMORY_INITIALIZATION_DENIED');
-      privacyStore = await openPrivacy({ directory: join(host.filesDir, 'droy-privacy'),
+      privacyStore = await openPrivacyOnce({ directory: join(host.filesDir, 'droy-privacy'),
         markerPath: join(host.filesDir, 'droy-privacy.identity.json'), initialize: permission.initialize });
       ensureOpen();
       memory = await openMemory({ directory: join(host.filesDir, 'droy-memory'), initialize: permission.initialize });
@@ -152,26 +126,15 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
     if (ready && initialized) return;
     if (activation) return activation;
     activation = (async () => {
-      ready = false; reason = 'MEMORY_EXECUTION_QUALIFYING';
+      ready = false; reason = 'MEMORY_HOST_INITIALIZING';
       if (!privacy() || !boundary()?.installed?.()) throw failure('MEMORY_REQUIRED_PLUGIN_MISSING');
       const prepared = await bridge.memory({ operation: 'activation.prepare' });
       ensureOpen();
-      if (prepared.restartRequired) {
-        active = true; reason = 'MEMORY_RESTART_REQUIRED';
-        throw failure(reason);
-      }
       host = paths(prepared.host);
-      executor ??= executorFactory({ launcherPath: join(host.nativeDir, 'libdroy_exec.so'), filesDir: host.filesDir,
-        uid: host.appUid, proxyFactory: createExecutionProxy });
-      const report = await qualify(executor, host);
-      ensureOpen();
-      // Native stopped legacy app-UID children before this engine started.
-      // New calls await the durable active state and cannot use local fallback.
-      // Waiting on those calls here would deadlock their store-ready barrier.
       if (!boundary().installed()) throw failure('MEMORY_REQUIRED_PLUGIN_MISSING');
       await bridge.memory({ operation: 'protection-activate', challenge: prepared.challenge,
         runtimeEpoch: prepared.runtimeEpoch,
-        qualificationId: hash(JSON.stringify({ native: prepared.nativeQualificationId, report })) });
+        qualificationId: hash(JSON.stringify({ runtimeEpoch: prepared.runtimeEpoch, challenge: prepared.challenge })) });
       active = true;
       await initializeStores();
       ensureOpen(); setupArchives();
@@ -184,10 +147,8 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       maintenance?.resume();
     })().catch(async error => {
       ready = false; reason = error.code ?? 'MEMORY_ACTIVATION_FAILED'; privacy()?.invalidate();
-      if (reason !== 'MEMORY_RESTART_REQUIRED') {
-        try { await bridge.memory({ operation: 'activation.invalidate' }); }
-        catch { /* The local unavailable state is already authoritative. */ }
-      }
+      try { await bridge.memory({ operation: 'activation.invalidate' }); }
+      catch { /* The local unavailable state is already authoritative. */ }
       throw error;
     }).finally(() => { activation = null; });
     return activation;
@@ -210,6 +171,38 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
     return hash(JSON.stringify(Object.fromEntries(['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
       'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_USE_ENV_PROXY', 'NODE_EXTRA_CA_CERTS']
       .map(key => [key, environment[key] ?? '']))));
+  }
+  async function existingAuthorizationStore() {
+    ensureOpen();
+    if (privacyStore) return privacyStore;
+    privacyInspection ??= (async () => {
+      const inspection = await bridge.memory({ operation: 'authorization.inspect' });
+      ensureOpen();
+      if (inspection.available !== true) return null;
+      const existing = paths(inspection.host);
+      // This path opens only an existing identity. It never initializes memory,
+      // starts capture or enables model disclosure.
+      privacyStore = await openPrivacyOnce({ directory: join(existing.filesDir, 'droy-privacy'),
+        markerPath: join(existing.filesDir, 'droy-privacy.identity.json'), initialize: false });
+      return privacyStore;
+    })().finally(() => { privacyInspection = undefined; });
+    return privacyInspection;
+  }
+  const storedAuthorizationId = grant => hash(JSON.stringify([grant.url, grant.purpose, grant.configVersion]));
+  async function storedAuthorizations() {
+    const store = await existingAuthorizationStore();
+    if (!store) return [];
+    return (await store.listGrants()).map(grant => ({ id: storedAuthorizationId(grant), purpose: grant.purpose,
+      label: new URL(grant.url).host, model: new URL(grant.url).host, url: grant.url, authorized: true,
+      categories: grant.categories, configVersion: grant.configVersion }));
+  }
+  async function revokeStoredAuthorization(id, purpose) {
+    const store = await existingAuthorizationStore();
+    const grant = store && (await store.listGrants()).find(value => storedAuthorizationId(value) === id && value.purpose === purpose);
+    if (!grant) throw failure('MEMORY_ENDPOINT_REFRESH_REQUIRED');
+    // Invalidate waiters and active dispatch before committing the exact revoke.
+    privacy()?.invalidate();
+    return store.revokeEndpoint({ url: grant.url, purpose: grant.purpose, configVersion: grant.configVersion });
   }
   async function processingEndpoints() {
     if (!(await status()).ready) return [];
@@ -251,10 +244,9 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
     if (!archives) throw failure('MEMORY_ARCHIVE_UNAVAILABLE');
   }
   function tick() {
-    if (closed || tickBusy || !active) return;
+    if (closed || tickBusy || !active || maintenanceOwner?.held) return;
     tickBusy = true;
     tickCompletion = (async () => { try {
-      await bridge.memory({ operation: 'root-check' });
       if (!(await status()).ready) return;
       const settings = await getSettings();
       if (settings.enabled) {
@@ -268,7 +260,30 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
     finally { tickBusy = false; } })();
     return tickCompletion;
   }
+  function maintenanceLease({ operationId }) {
+    ensureOpen();
+    if (typeof operationId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)) throw failure('MEMORY_MAINTENANCE_INVALID');
+    if (maintenanceOwner?.operationId === operationId) return maintenanceOwner.api;
+    if (maintenanceOwner?.held) throw failure('MEMORY_MAINTENANCE_CONFLICT');
+    const owner = { operationId, held: false, observedTick: undefined, observedRevision: undefined };
+    const status = () => ({ scope: 'memory-producers', operationId,
+      quiet: !closed && owner.held && !tickBusy && owner.observedTick === tickCompletion
+        && owner.observedRevision === maintenance?.revision() && !(extraction?.pendingWork?.().length),
+      producersSuspended: owner.held && !closed });
+    owner.api = Object.freeze({
+      async suspend() {
+        ensureOpen(); owner.held = true;
+        await startup; await tickCompletion;
+        await extraction?.whenIdle?.(); await maintenance?.whenIdle();
+        owner.observedTick = tickCompletion; owner.observedRevision = maintenance?.revision();
+        return status();
+      },
+      resume() { owner.held = false; return status(); }, status,
+    });
+    maintenanceOwner = owner; return owner.api;
+  }
   const memoryHost = {
+    maintenanceLease, storedAuthorizations, revokeStoredAuthorization,
     executionStatus: status, managementStatus, store, authorizeUi: requireMobileSession, getSettings, saveSettings,
     async featureStop() { if (!closed) await saveSettings({ enabled: false }); },
     capture: (operation, args) => bridge.history(operation === 'configure'
@@ -296,28 +311,8 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       await pipeline(value.stream, res);
     },
   };
-  const privacyHost = { status, store: getPrivacyStore, activate, routingIdentity };
-  const executionHost = { status, policy, get executor() {
-    if (!executor) throw failure('MEMORY_EXECUTION_NOT_READY'); return executor;
-  }, async authorizeTool(exec, state) {
-    if (!REVIEWED_TOOLS.has(exec.name) && !CLEAN_NETWORK_TOOLS.has(exec.name)) return false;
-    if (state.state === 'known-clean' || PRIVATE_LOCAL_TOOLS.has(exec.name)) return true;
-    // Processing trust is not permission to publish the retrieved content into
-    // another app/site. Bind this one-time decision to the actual dispatch.
-    const questions = ctx.get('userQuestions');
-    if (!questions || !exec.callId || !exec.agent || !exec.arguments) return false;
-    const detail = JSON.stringify(exec.arguments);
-    if (detail.length > 16000) throw failure('MEMORY_DISCLOSURE_REQUEST_TOO_LARGE');
-    const id = 'private-action-' + hash(`${exec.agent.session.id}:${exec.callId}:${exec.name}:${detail}`).slice(0, 32);
-    const english = resolveMobileLocale(ctx) === 'en';
-    const allow = english ? 'Allow this operation' : '允许本次操作';
-    const answer = await questions.ask({ agent: exec.agent, signal: exec.signal, questions: [{ id,
-      question: `${english ? 'This operation may send personal memory to another app or website. Allow this operation?' : '本次操作可能把个人记忆带到其他应用或网站。允许这一项操作？'}\n${exec.name}\n${detail}`,
-      options: [{ label: english ? 'Cancel' : '取消' }, { label: allow }] }] });
-    exec.signal?.throwIfAborted();
-    const selected = answer.answers?.find(item => item.id === id);
-    return !selected?.custom && selected?.selected?.length === 1 && selected.selected[0] === allow;
-  } };
+  const privacyHost = { nativeAccessPrompts: true, status, store: getPrivacyStore, activate, routingIdentity };
+  const executionHost = { isolationRequired: false, status, policy };
   return {
     memoryHost, privacyHost, executionHost,
     start({ extractionAdapter, createArchives: archiveConstructor = archiveFactory } = {}) {
@@ -325,7 +320,9 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       startup ??= (async () => {
         extraction = extractionAdapter; createArchives = archiveConstructor;
         await refresh();
-        if (active) { try { await activate(); } catch (error) { reportError(error.code ?? 'MEMORY_ACTIVATION_FAILED'); } }
+        if (active || snapshot.settings.enabled && featureAvailable()) {
+          try { await activate(); } catch (error) { reportError(error.code ?? 'MEMORY_ACTIVATION_FAILED'); }
+        }
         if (closed) return;
         maintenance = createMemoryMaintenance({ store, existingStore: () => memory ?? null,
         executionStatus: status, settings: getSettings, privacy: { forgetSources: refs => privacy().forgetSources(refs) },
@@ -344,12 +341,11 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       if (shutdown) return shutdown;
       closed = true; ready = false; clearInterval(timer); privacy()?.invalidate(); stopMaintenance('MEMORY_HOST_CLOSED');
       shutdown = (async () => {
-        // Cancel a qualification first, then wait for in-flight store opens so
-        // no worker can be created after the teardown has already returned.
+        // Await in-flight store opens before closing their workers.
         const nativeStop = active ? bridge.memory({ operation: 'host-stop' })
           .catch(error => reportError(error.code ?? 'MEMORY_NATIVE_UNAVAILABLE')) : undefined;
-        const outcomes = await Promise.allSettled([nativeStop, extraction?.dispose?.(), executor?.close()]);
-        await Promise.allSettled([activation, initialization, startup].filter(Boolean));
+        const outcomes = await Promise.allSettled([nativeStop, extraction?.dispose?.()]);
+        await Promise.allSettled([activation, initialization, privacyInspection, privacyOpening, startup].filter(Boolean));
         outcomes.push(...await Promise.allSettled([maintenance?.close(), archives?.close()]));
         await Promise.allSettled([tickCompletion].filter(Boolean));
         outcomes.push(...await Promise.allSettled([memory?.close(), privacyStore?.close()]));
@@ -359,29 +355,6 @@ export function createMobileMemoryHost({ ctx, bridge, environment = process.env,
       return shutdown;
     },
   };
-}
-
-export async function qualifyExecutor(executor, host) {
-  const userBase = Math.floor(host.appUid / 100000) * 100000;
-  const script = "const fs=require('fs');const uid=process.getuid(),gid=process.getgid();"
-    + `if(uid<${userBase + 80000}||uid>${userBase + 80007}||uid===${host.appUid}||process.geteuid()!==uid||gid!==${host.appUid})process.exit(71);`
-    + "let blocked=false;try{fs.readFileSync(" + JSON.stringify(join(host.filesDir, 'droy-privacy.identity.json')) + ")}catch{blocked=true}"
-    + "if(!blocked||process.env.DROY_BRIDGE_TOKEN||process.env.DROY_WEB_TOKEN)process.exit(72);"
-    + `if(fs.existsSync('/proc/uptime')||fs.existsSync('/proc/${process.pid}'))process.exit(73);`
-    + "process.stdout.write(JSON.stringify({marker:'DROY_HOST_QUALIFIED_V2',uid,gid,pid:process.pid}));";
-  const handle = executor.spawn({ argv: [join(host.nativeDir, 'libdroy_node.so'), '-e', script],
-    cwd: join(host.filesDir, 'workspace'), workspaceId: '0'.repeat(64), env: {}, timeoutMs: 15000,
-    stdio: { stdin: 'ignore', stdout: { maxBytes: 128 }, stderr: { maxBytes: 1024 } } });
-  const exit = await handle.done;
-  if (exit.exitCode !== 0 || await handle.waitForExit() !== true) throw failure('MEMORY_HOST_QUALIFICATION_FAILED');
-  const ready = await handle.ready, output = handle.collected.stdout.readFrom(0);
-  let observation; try { observation = JSON.parse(output.text); } catch { throw failure('MEMORY_HOST_QUALIFICATION_FAILED'); }
-  if (output.lossy || observation.marker !== 'DROY_HOST_QUALIFIED_V2' || observation.uid !== ready.uid
-    || observation.gid !== host.appUid || observation.pid !== ready.workloadPid
-    || ready.processIsolation !== 'dedicated-uid' || ready.procIsolation !== 'private-hidepid-subset'
-    || ready.uidLease !== true || ready.descendantsManaged !== true) throw failure('MEMORY_HOST_QUALIFICATION_FAILED');
-  return { protocol: 1, node: true, privatePathDenied: true, credentialsAbsent: true,
-    processIsolation: 'dedicated-uid', procIsolation: 'private-hidepid-subset', descendantsReaped: true };
 }
 
 export function apply(ctx) {

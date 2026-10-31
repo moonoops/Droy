@@ -58,24 +58,66 @@
         <intent><action android:name="android.media.action.IMAGE_CAPTURE" /></intent>
         <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
     </queries>
-    <application android:name=".DroyApplication" android:label="@string/droy_app_name" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:icon="${droyLauncherIcon}"
+    <application android:name=".DroyApplication" android:label="@string/droy_app_name" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:icon="${droyLauncherIcon}" android:roundIcon="${droyLauncherIcon}"
         android:allowBackup="false" android:extractNativeLibs="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:networkSecurityConfig="@xml/network_security_config">
-        <activity android:name=".MainActivity" android:theme="@style/DroyChatTheme" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden" android:enableOnBackInvokedCallback="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-        <activity android:name=".TestPageActivity" android:exported="false" />
-        <activity android:name=".AudioPermissionActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".MemoryPermissionActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".NfcReaderActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".NfcCredentialActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".WifiCredentialActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".HardwareShortcutActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
-        <activity android:name=".HealthPermissionRationaleActivity" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <!-- Keep the portrait policy when targeting Android 16, including large displays. -->
+        <property android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY" android:value="true" />
+        <property android:name="android.window.PROPERTY_COMPAT_ALLOW_ORIENTATION_OVERRIDE" android:value="false" />
+        <activity android:name=".TestPageActivity" android:screenOrientation="portrait" android:exported="false" />
+        <activity android:name=".NativeAppActivity" android:screenOrientation="portrait" android:exported="true" android:launchMode="singleTask"
+            android:theme="@style/DroyChatTheme" android:windowSoftInputMode="adjustResize"
+            android:enableOnBackInvokedCallback="true" />
+        <!-- A transient launcher task keeps disabled icon aliases out of the persistent UI task. -->
+        <activity android:name=".LauncherEntryActivity" android:screenOrientation="portrait" android:exported="false"
+            android:theme="@android:style/Theme.NoDisplay" android:taskAffinity=""
+            android:noHistory="true" android:excludeFromRecents="true" />
+        <activity-alias android:name=".launcher.Closeup" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="true" android:exported="true" android:icon="${droyLauncherCloseupIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.Sunglasses" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSunglassesIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.Headphones" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherHeadphonesIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.Programmer" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherProgrammerIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.HatScarf" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherHatScarfIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.SleepCurled" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSleepCurledIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.SleepSide" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSleepSideIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.SleepBellyUp" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSleepBellyUpIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".launcher.SleepSlumped" android:targetActivity=".LauncherEntryActivity"
+            android:enabled="false" android:exported="true" android:icon="${droyLauncherSleepSlumpedIcon}" android:label="@string/droy_app_name">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <!-- Existing shortcuts and pending intents keep their component, but open the native UI. -->
+        <activity-alias android:name=".MainActivity" android:exported="true" android:targetActivity=".NativeAppActivity" />
+        <activity android:name=".AudioPermissionActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".MemoryPermissionActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".NfcReaderActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".NfcCredentialActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".WifiCredentialActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".HardwareShortcutActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
+        <activity android:name=".HealthPermissionRationaleActivity" android:screenOrientation="portrait" android:exported="false" android:theme="@style/DroyChatTheme" />
         <activity-alias android:name=".HealthPermissionUsageActivity" android:exported="true"
             android:targetActivity=".HealthPermissionRationaleActivity" android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
             <intent-filter>
@@ -83,7 +125,7 @@
                 <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
             </intent-filter>
         </activity-alias>
-        <activity android:name=".media.ShareReceiveActivity" android:exported="true" android:theme="@style/DroyChatTheme"
+        <activity android:name=".media.ShareReceiveActivity" android:screenOrientation="portrait" android:exported="true" android:theme="@style/DroyChatTheme"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -123,6 +165,7 @@
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter><action android:name="android.service.notification.NotificationListenerService" /></intent-filter>
         </service>
+        <receiver android:name=".CompanionNotificationReceiver" android:exported="false" />
         <service android:name=".RuntimeService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-started on-device AI conversation and Android automation with visible stop control" />
         </service>

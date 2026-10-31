@@ -131,6 +131,12 @@ final class AudioTranscription {
         }
         for(Job job:jobs.values()) if(job.owner.equals(owner) && job.requestId.equals(requestId)) job.cancel();
     }
+    synchronized void stopOwner(String owner) {
+        for (Job job : jobs.values()) if (job.owner.equals(owner) && !job.terminal()) job.cancel();
+    }
+    synchronized java.util.concurrent.CompletableFuture<Void> completion(String id, String owner) throws Exception {
+        return job(id, owner).settled;
+    }
 
     private Path temporaryInputDirectory() throws IOException {
         Path path = context.getFilesDir().toPath().toRealPath();
@@ -409,6 +415,7 @@ final class AudioTranscription {
         final List<JSONObject> segments=new ArrayList<>();
         volatile String state="queued",error,cancelReason=io.droyagent.app.NativeLocale.text("用户停止转录", "The user stopped transcription");
         volatile boolean cancelled,finished,speechActive;
+        final java.util.concurrent.CompletableFuture<Void> settled = new java.util.concurrent.CompletableFuture<>();
         volatile long audioSamples,inferenceMillis,offsetMs;
         volatile int sampleRate=16000;
         private int utterance;
@@ -422,6 +429,7 @@ final class AudioTranscription {
             if (cleanupError != null) { state="failed"; error=cleanupError; }
             else if(cancelled) { state="cancelled"; error=cancelReason; }
             finished=true;
+            settled.complete(null);
         }
         void check() throws Exception { if(cancelled || Thread.currentThread().isInterrupted()) throw new InterruptedIOException(io.droyagent.app.NativeLocale.text("转录已取消", "Transcription cancelled")); checkAllowed(); }
         synchronized void add(long from,long to,String text,boolean endOfUtterance) throws Exception {

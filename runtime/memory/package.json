@@ -10,13 +10,19 @@
     "./schema": "./schema.mjs",
     "./maintenance": "./maintenance.mjs",
     "./client": "./client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./memos": "./memos/store.mjs"
   },
   "dsh": {
     "client": {
-      "inject": ["@deepseek-ai/dsh-client-ui-settings-general"],
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings-general"
+      ],
       "platform": "web"
     }
   },
-  "dependencies": { "@deepseek-ai/dsh-tools": "0.2.1-rc.4", "@deepseek-ai/dsh-token-meter": "0.2.1-rc.4" }
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-token-meter": "0.2.1-rc.5"
+  }
 }

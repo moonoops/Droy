@@ -162,7 +162,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(all(call[:2] == ["-s", "chosen-device"] for call in self.calls()))
         self.assertIn(["-s", "chosen-device", "shell", "am", "start", "-W", "-n",
-                       "io.droyagent.app.dev/io.droyagent.app.MainActivity"], self.calls())
+                       "io.droyagent.app.dev/io.droyagent.app.NativeAppActivity"], self.calls())
 
     def test_environment_serial_is_used(self):
         result = self.run_installer(serial="environment-device")
@@ -223,7 +223,7 @@ class InstallerTests(unittest.TestCase):
         result = self.run_installer("--package", "io.droyagent.app", "--launch")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(["-s", "phone-1", "shell", "am", "start", "-W", "-n",
-                       "io.droyagent.app/io.droyagent.app.MainActivity"], self.calls())
+                       "io.droyagent.app/io.droyagent.app.NativeAppActivity"], self.calls())
         self.assertEqual(self.permission_calls(), [[str(PERMISSION_RUNNER), "--adb", str(self.adb),
             "--serial", "phone-1", "--package", "io.droyagent.app", "--preserve-accessibility"]])
 

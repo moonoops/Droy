@@ -27,17 +27,22 @@ final class CommandRunner {
                       Cancellation cancellation, Runnable started) throws Exception {
         cancellation.check();
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(cancellation.remainingMillis(timeoutMs));
-        Process process = new ProcessBuilder(command).start();
-        started.run();
+        java.util.concurrent.CompletableFuture<Void> settled = new java.util.concurrent.CompletableFuture<>();
+        cancellation.track("root_process", java.util.UUID.randomUUID().toString(), settled);
+        Process process;
+        try { process = new ProcessBuilder(command).start(); }
+        catch (IOException | RuntimeException failure) { settled.complete(null); throw failure; }
         AtomicReference<IOException> readFailure = new AtomicReference<>();
         ByteArrayOutputStream stdout = new ByteArrayOutputStream();
         Thread out = drain(process.getInputStream(), stdout, outputLimit, readFailure, process);
         Thread err = drain(process.getErrorStream(), new ByteArrayOutputStream(), 8192, readFailure, process);
         try {
+            started.run();
             while (!process.waitFor(50, TimeUnit.MILLISECONDS)) {
                 cancellation.remainingMillis(1);
                 checkDeadline(deadline);
             }
+            settled.complete(null);
             while (out.isAlive() || err.isAlive()) {
                 cancellation.remainingMillis(1);
                 checkDeadline(deadline);
@@ -55,6 +60,8 @@ final class CommandRunner {
             // Killing this invocation cannot undo an input already delivered to Android.
             process.destroy();
             if (process.isAlive()) process.destroyForcibly();
+            // Killing su's waiter does not prove that its privileged child stopped.
+            // Keep cancelled invocations pending unless normal exit was observed above.
             close(process.getInputStream());
             close(process.getErrorStream());
             close(process.getOutputStream());

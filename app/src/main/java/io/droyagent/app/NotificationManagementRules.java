@@ -9,23 +9,83 @@ import org.json.JSONObject;
 
 final class NotificationManagementRules {
     static final Set<String> ACTIONS = Set.of("retain", "clear", "collect", "notify");
-    private static final Set<String> APP_MODES = Set.of("managed", "allow", "block");
+    private static final Set<String> APP_MODES = Set.of("managed", "allow");
 
     static JSONObject configuration(JSONObject source) throws Exception {
         JSONObject config = source == null ? new JSONObject() : new JSONObject(source.toString());
-        boolean oldSelection = config.has("packages");
-        config.remove("packages");
-        config.put("revision", config.optLong("revision", 1) + (oldSelection ? 1 : 0));
-        if (!config.has("rules")) config.put("rules", new JSONArray());
-        if (!config.has("cloudAnalysisEnabled")) config.put("cloudAnalysisEnabled", true);
+        if (config.optInt("schemaVersion") < 2) {
+            JSONArray rules = config.optJSONArray("rules");
+            if (rules != null && rules.length() > 0) {
+                config.put("legacyRules", rules).put("ruleText", migrationText(rules)).put("requiresReview", true);
+            }
+            if (source != null && !config.optBoolean("cloudAnalysisEnabled", true)) config.put("needsModelConsent", true);
+            JSONObject oldModes = config.optJSONObject("exceptions");
+            if (oldModes != null) for (java.util.Iterator<String> keys = oldModes.keys(); keys.hasNext();)
+                if (oldModes.optString(keys.next()).equals("block")) config.put("requiresReview", true);
+            config.put("selectionMigrationPending", source != null).put("schemaVersion", 2);
+        }
+        config.remove("rules"); config.remove("cloudAnalysisEnabled");
+        config.put("revision", config.optLong("revision", 1));
+        if (!config.has("silentTakeoverEnabled")) config.put("silentTakeoverEnabled", false);
+        if (!(config.get("silentTakeoverEnabled") instanceof Boolean))
+            throw new IllegalArgumentException(NativeLocale.text("静默接管开关无效", "Invalid silent takeover switch"));
         if (!config.has("reminderMinutes")) config.put("reminderMinutes", 5);
         reminderMinutes(config.get("reminderMinutes"));
         if (!config.has("exceptions")) config.put("exceptions", new JSONObject());
-        JSONObject exceptions = config.getJSONObject("exceptions");
-        for (java.util.Iterator<String> names = exceptions.keys(); names.hasNext(); ) {
-            String name = names.next(); packageName(name); appMode(exceptions.get(name));
-        }
         return config;
+    }
+
+    static void migrateApplications(JSONObject config, Set<String> installed) throws Exception {
+        if (!config.optBoolean("selectionMigrationPending")) return;
+        JSONObject old = config.getJSONObject("exceptions"), selected = new JSONObject();
+        JSONArray packages = config.optJSONArray("packages");
+        Set<String> legacySelection = new java.util.HashSet<>();
+        if (packages != null) for (int i = 0; i < packages.length(); i++) legacySelection.add(packageName(packages.get(i)));
+        for (String name : installed) {
+            String previous = old.optString(name, packages == null || legacySelection.contains(name) ? "managed" : "allow");
+            if (previous.equals("block")) {
+                selected.put(name, "allow");
+                config.put("requiresReview", true);
+                config.put("ruleText", ruleText(config) + "\n" + NativeLocale.text(
+                    "旧屏蔽设置已移除，当前按原应用规则通知；若需 Droy 管理，请在应用管理中开启：",
+                    "Legacy blocking was removed; this app now uses its own notification rules. Enable it in app management if Droy should manage it: ") + name);
+            } else selected.put(name, appMode(previous));
+        }
+        config.put("exceptions", selected).put("selectionMigrationPending", false);
+        config.remove("packages");
+    }
+
+    static String defaultRule() {
+        return NativeLocale.text("保留有用通知及原应用的提醒方式，清除广告和营销推广。需要及时处理的重要事项持续未清理时，按提醒间隔补充提醒一次；普通信息不追加提醒。无法确定时保留，不清除。",
+            "Keep useful notifications and their original app alert settings, and remove advertising and promotions. Add one reminder at the configured interval if an important matter requiring timely action remains uncleared; do not add reminders for ordinary information. When uncertain, keep the notification rather than clearing it.");
+    }
+
+    static String ruleText(JSONObject config) { return config.optString("ruleText", defaultRule()); }
+
+    static void setRuleText(JSONObject config, String text, boolean reset) throws Exception {
+        if (reset) config.remove("ruleText"); else config.put("ruleText", NotificationManagementRules.text(text, 24000, false));
+        config.remove("legacyRules"); config.put("requiresReview", false);
+    }
+
+    private static String migrationText(JSONArray rules) throws Exception {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < rules.length(); i++) {
+            JSONObject rule = rules.getJSONObject(i);
+            text.append(rule.optString("packageName", "*")).append(": ").append(rule.optString("instruction")).append('\n');
+            JSONArray entries = rule.optJSONArray("entries");
+            if (entries != null) for (int j = 0; j < entries.length(); j++) {
+                JSONObject entry = entries.getJSONObject(j);
+                text.append(NativeLocale.text("任一包含 ", "Contains any ")).append(entry.optJSONArray("containsAny"))
+                    .append(NativeLocale.text("；全部包含 ", "; contains all ")).append(entry.optJSONArray("containsAll"))
+                    .append(" → ").append(entry.optString("action")).append('\n');
+            }
+            text.append(NativeLocale.text("其他情况：", "Otherwise: ")).append(rule.optString("defaultAction", "analyze")).append('\n');
+            if (rule.optInt("repeatMinutes") > 0 || rule.optInt("clearAfterHours") > 0)
+                text.append(NativeLocale.text("旧定时要求需重新确认：重复提醒分钟=", "Review legacy timing: repeat minutes="))
+                    .append(rule.optInt("repeatMinutes")).append(NativeLocale.text("，清理小时=", ", cleanup hours="))
+                    .append(rule.optInt("clearAfterHours")).append('\n');
+        }
+        return text.toString().trim();
     }
 
     static String appMode(Object value) {
@@ -39,7 +99,7 @@ final class NotificationManagementRules {
         for (int i = 0; i < source.length(); i++) {
             JSONObject item = source.getJSONObject(i);
             String name = packageName(item.get("packageName")), mode = appMode(item.get("mode"));
-            if (!mode.equals("managed")) result.put(name, mode);
+            result.put(name, mode);
         }
         return result;
     }
@@ -142,6 +202,22 @@ final class NotificationManagementRules {
 
     static boolean scheduled(JSONObject receipt, long revision, boolean managed) {
         return managed && !receipt.optBoolean("dismissed") && receipt.optBoolean("applied") && receipt.optLong("revision") == revision;
+    }
+
+    static JSONArray trimHistory(JSONArray source, long earliest, long revision, Set<String> managed) throws Exception {
+        java.util.List<JSONObject> kept = new java.util.ArrayList<>();
+        int history = 0;
+        for (int i = source.length() - 1; i >= 0; i--) {
+            JSONObject record = source.getJSONObject(i);
+            boolean pending = scheduled(record, revision, managed.contains(record.optString("packageName")))
+                && record.optString("action").equals("retain") && record.optBoolean("important")
+                && record.optLong("reminderAt") > 0 && record.optLong("reminderAttemptedAt") == 0;
+            if (pending) kept.add(record);
+            else if (record.optLong("savedAtMs") >= earliest && history < 200) { kept.add(record); history++; }
+        }
+        JSONArray result = new JSONArray();
+        for (int i = kept.size() - 1; i >= 0; i--) result.put(kept.get(i));
+        return result;
     }
 
     static boolean obsoleteAlert(JSONObject previous, String sourceKey, String action, int nextId) {

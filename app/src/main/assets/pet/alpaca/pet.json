@@ -1,0 +1,2062 @@
+{
+  "formatVersion": 2,
+  "id": "cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2",
+  "name": "Alpaca",
+  "nameLocales": {
+    "zh": "羊驼",
+    "en": "Alpaca"
+  },
+  "description": "A white-and-pink pixel alpaca that stretches its neck and spits sideways or toward the screen.",
+  "descriptionLocales": {
+    "zh": "白粉色的像素羊驼，会伸脖子、侧向吐水和朝屏幕吐水。",
+    "en": "A white-and-pink pixel alpaca that stretches its neck and spits sideways or toward the screen."
+  },
+  "reference": "reference.png",
+  "atlases": {
+    "core": {
+      "file": "core.png",
+      "width": 1024,
+      "height": 1536,
+      "frames": [
+        {
+          "sourceRect": [
+            54,
+            33,
+            170,
+            198
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            310,
+            33,
+            170,
+            198
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            566,
+            33,
+            170,
+            198
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            822,
+            33,
+            170,
+            198
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            47,
+            272,
+            177,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            303,
+            272,
+            177,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            559,
+            272,
+            177,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            815,
+            272,
+            177,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            31,
+            531,
+            197,
+            212
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            287,
+            531,
+            197,
+            212
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            543,
+            531,
+            197,
+            212
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            799,
+            531,
+            197,
+            212
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            34,
+            786,
+            191,
+            213
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            290,
+            786,
+            191,
+            213
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            546,
+            786,
+            191,
+            213
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            802,
+            786,
+            191,
+            213
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            30,
+            1025,
+            194,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            286,
+            1025,
+            194,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            542,
+            1025,
+            194,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            798,
+            1025,
+            194,
+            231
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            27,
+            1280,
+            203,
+            232
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            283,
+            1280,
+            203,
+            232
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            539,
+            1280,
+            203,
+            232
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            795,
+            1280,
+            203,
+            232
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        }
+      ]
+    },
+    "interaction": {
+      "file": "interaction.png",
+      "width": 1024,
+      "height": 1536,
+      "frames": [
+        {
+          "sourceRect": [
+            47,
+            28,
+            193,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            303,
+            28,
+            193,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            559,
+            28,
+            193,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            815,
+            28,
+            193,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            40,
+            285,
+            205,
+            215
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            296,
+            285,
+            205,
+            215
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            552,
+            285,
+            205,
+            215
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            808,
+            285,
+            205,
+            215
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            58,
+            537,
+            182,
+            220
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            314,
+            537,
+            182,
+            220
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            570,
+            537,
+            182,
+            220
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            826,
+            537,
+            182,
+            220
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            40,
+            797,
+            206,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            296,
+            797,
+            206,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            552,
+            797,
+            206,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            808,
+            797,
+            206,
+            216
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            54,
+            1050,
+            196,
+            218
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            310,
+            1050,
+            196,
+            218
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            566,
+            1050,
+            196,
+            218
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            822,
+            1050,
+            196,
+            218
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            11,
+            1309,
+            233,
+            215
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            267,
+            1309,
+            233,
+            215
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            523,
+            1309,
+            233,
+            215
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            779,
+            1309,
+            233,
+            215
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        }
+      ]
+    },
+    "movement": {
+      "file": "movement.png",
+      "width": 1024,
+      "height": 1536,
+      "frames": [
+        {
+          "sourceRect": [
+            52,
+            40,
+            172,
+            192
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            308,
+            40,
+            172,
+            192
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            564,
+            40,
+            172,
+            192
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            820,
+            40,
+            172,
+            192
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            37,
+            285,
+            194,
+            210
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            293,
+            285,
+            194,
+            210
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            549,
+            285,
+            194,
+            210
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            805,
+            285,
+            194,
+            210
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            53,
+            535,
+            167,
+            206
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            309,
+            535,
+            167,
+            206
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            565,
+            535,
+            167,
+            206
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            821,
+            535,
+            167,
+            206
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            39,
+            795,
+            184,
+            194
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            295,
+            795,
+            184,
+            194
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            551,
+            795,
+            184,
+            194
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            807,
+            795,
+            184,
+            194
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            46,
+            1066,
+            181,
+            193
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            302,
+            1066,
+            181,
+            193
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            558,
+            1066,
+            181,
+            193
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            814,
+            1066,
+            181,
+            193
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            38,
+            1303,
+            193,
+            198
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            294,
+            1303,
+            193,
+            198
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            550,
+            1303,
+            193,
+            198
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            806,
+            1303,
+            193,
+            198
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        }
+      ]
+    },
+    "signature": {
+      "file": "signature.png",
+      "width": 1536,
+      "height": 1024,
+      "frames": [
+        {
+          "sourceRect": [
+            64,
+            9,
+            162,
+            221
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            320,
+            9,
+            162,
+            221
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            576,
+            9,
+            162,
+            221
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            832,
+            9,
+            162,
+            221
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            1088,
+            9,
+            162,
+            221
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            1344,
+            9,
+            162,
+            221
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            12,
+            304,
+            228,
+            179
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            268,
+            304,
+            228,
+            179
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            524,
+            304,
+            228,
+            179
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            780,
+            304,
+            228,
+            179
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            1036,
+            304,
+            228,
+            179
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            1292,
+            304,
+            228,
+            179
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            44,
+            551,
+            195,
+            191
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            300,
+            551,
+            195,
+            191
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            556,
+            551,
+            195,
+            191
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            812,
+            551,
+            195,
+            191
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            1068,
+            551,
+            195,
+            191
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            1324,
+            551,
+            195,
+            191
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            36,
+            820,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            292,
+            820,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            548,
+            820,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            804,
+            820,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            1060,
+            820,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            1316,
+            820,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        }
+      ]
+    },
+    "peekRight": {
+      "file": "peek-right.png",
+      "width": 402,
+      "height": 374,
+      "frames": [
+        {
+          "sourceRect": [
+            8,
+            8,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            142,
+            8,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            276,
+            8,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            8,
+            195,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            142,
+            195,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            276,
+            195,
+            118,
+            171
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        }
+      ]
+    },
+    "screenEffect": {
+      "file": "spit-screen-effect.png",
+      "width": 1024,
+      "height": 1536,
+      "frames": [
+        {
+          "sourceRect": [
+            0,
+            0,
+            512,
+            512
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            512,
+            0,
+            512,
+            512
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            0,
+            512,
+            512,
+            512
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            512,
+            512,
+            512,
+            512
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            0,
+            1024,
+            512,
+            512
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        },
+        {
+          "sourceRect": [
+            512,
+            1024,
+            512,
+            512
+          ],
+          "anchor": [
+            0.5,
+            1
+          ]
+        }
+      ]
+    }
+  },
+  "states": {
+    "idle": {
+      "label": "Idle blink",
+      "labelLocales": {
+        "zh": "待机眨眼",
+        "en": "Idle blink"
+      },
+      "atlas": "core",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        800,
+        110,
+        100,
+        550
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "working": {
+      "label": "Focused observation",
+      "labelLocales": {
+        "zh": "专注观察",
+        "en": "Focused observation"
+      },
+      "atlas": "core",
+      "frames": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "durationsMs": [
+        280,
+        220,
+        220,
+        420
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "speaking": {
+      "label": "Speaking",
+      "labelLocales": {
+        "zh": "开口回应",
+        "en": "Speaking"
+      },
+      "atlas": "core",
+      "frames": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "durationsMs": [
+        200,
+        140,
+        160,
+        300
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "waiting": {
+      "label": "Waiting",
+      "labelLocales": {
+        "zh": "歪头等待",
+        "en": "Waiting"
+      },
+      "atlas": "core",
+      "frames": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "durationsMs": [
+        300,
+        240,
+        300,
+        450
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "tap": {
+      "label": "Tap response",
+      "labelLocales": {
+        "zh": "轻触回应",
+        "en": "Tap response"
+      },
+      "atlas": "core",
+      "frames": [
+        16,
+        17,
+        18,
+        19
+      ],
+      "durationsMs": [
+        140,
+        100,
+        160,
+        300
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "success": {
+      "label": "Happy celebration",
+      "labelLocales": {
+        "zh": "开心庆祝",
+        "en": "Happy celebration"
+      },
+      "atlas": "core",
+      "frames": [
+        20,
+        21,
+        22,
+        23
+      ],
+      "durationsMs": [
+        180,
+        140,
+        180,
+        380
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "tapTilt": {
+      "label": "Curious tilt",
+      "labelLocales": {
+        "zh": "好奇歪头",
+        "en": "Curious tilt"
+      },
+      "atlas": "interaction",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        240,
+        230,
+        230,
+        350
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "tapWave": {
+      "label": "Greeting wave",
+      "labelLocales": {
+        "zh": "抬爪招呼",
+        "en": "Greeting wave"
+      },
+      "atlas": "interaction",
+      "frames": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "durationsMs": [
+        220,
+        200,
+        220,
+        350
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "pet": {
+      "label": "Enjoying a pet",
+      "labelLocales": {
+        "zh": "享受抚摸",
+        "en": "Enjoying a pet"
+      },
+      "atlas": "interaction",
+      "frames": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "durationsMs": [
+        220,
+        220,
+        300,
+        350
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "petShy": {
+      "label": "Shy response",
+      "labelLocales": {
+        "zh": "害羞缩身",
+        "en": "Shy response"
+      },
+      "atlas": "interaction",
+      "frames": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "durationsMs": [
+        200,
+        200,
+        260,
+        350
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "idleTail": {
+      "label": "Tail sway",
+      "labelLocales": {
+        "zh": "轻摆尾巴",
+        "en": "Tail sway"
+      },
+      "atlas": "interaction",
+      "frames": [
+        16,
+        17,
+        18,
+        19
+      ],
+      "durationsMs": [
+        350,
+        220,
+        220,
+        350
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "idleStretch": {
+      "label": "Relaxed stretch",
+      "labelLocales": {
+        "zh": "伸个懒腰",
+        "en": "Relaxed stretch"
+      },
+      "atlas": "interaction",
+      "frames": [
+        20,
+        21,
+        22,
+        23
+      ],
+      "durationsMs": [
+        350,
+        240,
+        350,
+        450
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "enterWalk": {
+      "label": "Walking entrance",
+      "labelLocales": {
+        "zh": "走路入场",
+        "en": "Walking entrance"
+      },
+      "atlas": "movement",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        150,
+        150,
+        150,
+        150
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "enterJump": {
+      "label": "Jumping entrance",
+      "labelLocales": {
+        "zh": "蹦跳入场",
+        "en": "Jumping entrance"
+      },
+      "atlas": "movement",
+      "frames": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "durationsMs": [
+        180,
+        120,
+        160,
+        260
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "enterPeek": {
+      "label": "Peeking entrance",
+      "labelLocales": {
+        "zh": "探身入场",
+        "en": "Peeking entrance"
+      },
+      "atlas": "movement",
+      "frames": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "durationsMs": [
+        250,
+        200,
+        200,
+        350
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "right",
+      "mirrorSafe": true
+    },
+    "exitWalk": {
+      "label": "Walking exit",
+      "labelLocales": {
+        "zh": "转身离开",
+        "en": "Walking exit"
+      },
+      "atlas": "movement",
+      "frames": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "durationsMs": [
+        230,
+        180,
+        150,
+        150
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "exitHide": {
+      "label": "Hiding exit",
+      "labelLocales": {
+        "zh": "缩身躲藏",
+        "en": "Hiding exit"
+      },
+      "atlas": "movement",
+      "frames": [
+        16,
+        17,
+        18,
+        19
+      ],
+      "durationsMs": [
+        240,
+        200,
+        200,
+        350
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "blocked": {
+      "label": "Puzzled stop",
+      "labelLocales": {
+        "zh": "困惑停住",
+        "en": "Puzzled stop"
+      },
+      "atlas": "movement",
+      "frames": [
+        20,
+        21,
+        22,
+        23
+      ],
+      "durationsMs": [
+        200,
+        180,
+        260,
+        400
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "neckStretch": {
+      "label": "Neck stretch",
+      "labelLocales": {
+        "zh": "伸长脖子",
+        "en": "Neck stretch"
+      },
+      "atlas": "signature",
+      "frames": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "durationsMs": [
+        300,
+        180,
+        200,
+        450,
+        220,
+        400
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "spitForward": {
+      "label": "Sideways spit",
+      "labelLocales": {
+        "zh": "朝前吐口水",
+        "en": "Sideways spit"
+      },
+      "atlas": "signature",
+      "frames": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "durationsMs": [
+        300,
+        160,
+        140,
+        140,
+        180,
+        400
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "spitScreen": {
+      "label": "Spit toward viewer",
+      "labelLocales": {
+        "zh": "朝屏幕吐口水",
+        "en": "Spit toward viewer"
+      },
+      "atlas": "signature",
+      "frames": [
+        12,
+        13,
+        14,
+        15,
+        16,
+        17
+      ],
+      "durationsMs": [
+        280,
+        180,
+        180,
+        120,
+        180,
+        400
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "front",
+      "mirrorSafe": false
+    },
+    "peekLeft": {
+      "label": "Left edge peek",
+      "labelLocales": {
+        "zh": "左侧探头",
+        "en": "Left edge peek"
+      },
+      "atlas": "signature",
+      "frames": [
+        18,
+        19,
+        20,
+        21,
+        22,
+        23
+      ],
+      "durationsMs": [
+        600,
+        160,
+        100,
+        350,
+        220,
+        450
+      ],
+      "displayHeightDp": 36,
+      "playback": "once_then_hold",
+      "facing": "right",
+      "mirrorSafe": false
+    },
+    "peekRight": {
+      "label": "Right edge peek",
+      "labelLocales": {
+        "zh": "右侧探头",
+        "en": "Right edge peek"
+      },
+      "atlas": "peekRight",
+      "frames": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "durationsMs": [
+        600,
+        160,
+        100,
+        350,
+        220,
+        450
+      ],
+      "displayHeightDp": 36,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": false
+    },
+    "completed": {
+      "label": "Completed rest",
+      "labelLocales": {
+        "zh": "完成后待机",
+        "en": "Completed rest"
+      },
+      "atlas": "core",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        800,
+        110,
+        100,
+        550
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    },
+    "stopped": {
+      "label": "Stopped rest",
+      "labelLocales": {
+        "zh": "停止后待机",
+        "en": "Stopped rest"
+      },
+      "atlas": "core",
+      "frames": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "durationsMs": [
+        800,
+        110,
+        100,
+        550
+      ],
+      "displayHeightDp": 56,
+      "playback": "once_then_hold",
+      "facing": "left",
+      "mirrorSafe": true
+    }
+  },
+  "variants": {
+    "enter": [
+      "enterPeek",
+      "enterWalk",
+      "enterJump"
+    ],
+    "exit": [
+      "exitWalk",
+      "exitHide"
+    ],
+    "tap": [
+      "tap",
+      "tapTilt",
+      "tapWave"
+    ],
+    "pet": [
+      "pet",
+      "petShy"
+    ],
+    "idle": [
+      "idle",
+      "idleTail",
+      "idleStretch",
+      "neckStretch"
+    ]
+  },
+  "rendering": {
+    "bodyDisplayHeightDp": 56,
+    "peekDisplayHeightDp": 36,
+    "minimumTouchTargetDp": 48,
+    "anchor": "bottom_center",
+    "style": "pixel"
+  },
+  "persona": {
+    "temperament": "curious",
+    "description": "机智、机灵、不啰嗦，亲近自然，工作时专注；幽默适量，不夸大进度。",
+    "traits": {
+      "terse": true,
+      "tsundere": false,
+      "gentle": false
+    },
+    "voice": {
+      "working": [
+        "{name}正在处理。",
+        "{name}还在忙。",
+        "{name}正专心处理。",
+        "{name}正在推进这件事。",
+        "{name}还在处理这件事。",
+        "{name}正忙，稍等。"
+      ],
+      "idle": [
+        "{name}在，有事叫我。",
+        "{name}耳朵竖好了。",
+        "{name}在，随时开工。",
+        "{name}等你安排。",
+        "{name}在，今天忙点什么？",
+        "{name}待命，尾巴也就位。"
+      ]
+    }
+  },
+  "effects": {
+    "spitScreen": {
+      "atlas": "screenEffect",
+      "frames": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "durationsMs": [
+        100,
+        100,
+        160,
+        260,
+        200,
+        220
+      ],
+      "delayMs": 640
+    }
+  },
+  "branding": {
+    "logo": "brand-logo.png"
+  }
+}

@@ -34,6 +34,13 @@ final class ProactiveNoticeStore {
         return null;
     }
 
+    synchronized void removeCompanion(String companionId) throws Exception {
+        for (int i = records.length() - 1; i >= 0; i--) {
+            JSONObject record = records.getJSONObject(i);
+            if (record.optString("channel").equals("companion") && record.optString("companionId").equals(companionId)) records.remove(i);
+        }
+    }
+
     synchronized void add(JSONObject record) throws Exception { records.put(record); trim(); }
     synchronized JSONArray snapshot() throws Exception { return new JSONArray(records.toString()); }
     private void trim() { while (records.length() > LIMIT) records.remove(0); }

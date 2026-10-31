@@ -1,0 +1,13 @@
+Multilingual E5 Small
+
+Model: intfloat/multilingual-e5-small
+Model revision: 614241f622f53c4eeff9890bdc4f31cfecc418b3
+The model card declares the MIT license:
+https://huggingface.co/intfloat/multilingual-e5-small/blob/614241f622f53c4eeff9890bdc4f31cfecc418b3/README.md
+
+E5 project and license:
+https://github.com/microsoft/unilm/tree/31c5b904ca1bf2afb4c234a6675c683a4e5fc7cd/e5
+https://github.com/microsoft/unilm/blob/31c5b904ca1bf2afb4c234a6675c683a4e5fc7cd/LICENSE
+
+The model and tokenizer files are distributed unchanged. Exact source paths,
+file sizes and SHA-256 digests are recorded in licenses/embedding/sources.json.

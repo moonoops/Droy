@@ -14,27 +14,31 @@ node --expose-internals runtime/mobile/tests/profile-smoke.mjs
 
 Preparation produces `runtime/generated/assets/dsh-runtime.zip` and its manifest. `upstream-patches.lock.json` pins patch inputs. Full preparation uses the unmodified installed dependencies; `--refresh-mobile` is for local iteration. Versions are bound by [release.json](../release.json).
 
-### DSH 0.2.1-rc.4 integration
+### DSH 0.2.1-rc.5 integration
 
-Droy pins `0.2.1-rc.4`, published on npm's `next` channel on 2026-10-26.
-At upgrade time, npm's `latest` tag still pointed to `0.2.1-rc.2`; this is a
-release candidate, not a stable release. The upgrade includes restored unsent
-drafts when returning through New session, More menus for plugin discovery and
-creation, width-aware conversation tabs, the official DeepSeek API-key model
-catalogue update, and resource-list compatibility for MCP servers without a
-resources capability. Creator prompts append to existing compatible drafts and
-remain unsent until the user submits them.
+Droy pins `0.2.1-rc.5`, the npm `latest` and `next` release checked on
+2026-10-30. It remains a release candidate; the separate `0.2.2-alpha.2`
+experimental channel is not part of this integration.
 
-Android assembly retains its authorization, privacy, language and draft adapters.
-The reviewed frontend asset and MCP patch hashes are pinned; image-preview
-adaptation follows the new frontend symbols. The new menu prompts use paired
-English/Chinese Droy copy. The mobile profile keeps upstream desktop analytics
-inactive. The session persistence implementation is unchanged from rc.2.
+The rc.5 change prepares reasoning for display: a leading
+`<signature>…</signature>` and following LF/CRLF line breaks are hidden.
+Incomplete signatures and signature-only rows stay hidden during streaming.
+Ordinary reasoning and tags appearing later in the text remain unchanged.
+The Web reasoning-body slot now receives original `rawText` alongside
+presentation-ready `text`; the translation wrapper consumes `text`.
+Droy's native conversation projection applies the same display rules to live
+streams, completed messages and replayed history. Stored events and model
+inputs retain their original contents.
 
-Sources: [npm package metadata](https://registry.npmjs.org/@deepseek-ai/dsh/0.2.1-rc.4),
-[rc.3 release notes](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.3).
-The rc.4 additions above were checked against its published packages because
-there was no corresponding GitHub release note at upgrade time.
+The reviewed upstream changes do not alter the engine, session controller or
+JSONL persistence implementation. Android authorization, privacy, language,
+attachment and draft adapters remain in place. Assembly input hashes and all
+DSH package versions are pinned together; unrelated third-party dependencies
+retain their previous lockfile versions. Desktop analytics remain inactive.
+
+Sources: [npm package metadata](https://registry.npmjs.org/@deepseek-ai/dsh/0.2.1-rc.5),
+[rc.5 release notes](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.5),
+[reasoning-body slot migration](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.1-rc.5/docs/upgrade-guide/v0.2.1-rc.4/reasoning-body-props/guide.md).
 
 ## Host contract
 
@@ -59,8 +63,12 @@ The [capability catalogue](assets/droy-capabilities.json) owns phone tool schema
 - User plugins and configuration persist outside the replaceable runtime. Package management uses the bundled pnpm and the profile's own dependency directory.
 - DSH's saved language and theme settings drive both WebView and native presentation.
 - Android Use pause controls phone tools; stopping the entire engine also stops independent DSH work.
-- Shell and third-party extensions retain their own DSH permission checks. Activated personal-data protection routes reviewed operations through [protected execution](../execution/README.md).
+- Shell and third-party extensions retain their own DSH permission checks. Personal memory uses the ordinary App execution model without Root; memory recall does not switch file, Shell, PTC or MCP backends. Model-processing authorization remains separate.
 - Browser pages use a separate WebView process and storage. The compute tool runs in its own restricted Android process.
 - Schedules depend on runtime availability. Third-party native modules must be compatible with Android.
 
 Feature usage: [Android Use](../../android-use/README.md), [voice](../voice/README.md), [media input](../media-input/README.md), [memory](../memory/README.md), [notifications](NOTIFICATIONS.md), [companions](PETS.md).
+
+Native companion chats support a shared static sticker library with per-companion
+pack selection and manual ZIP import. See [sticker packs](companions/STICKERS.md)
+for supported formats, limits and data behavior.

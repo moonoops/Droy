@@ -17,20 +17,26 @@ public final class RuntimeService extends Service {
     static volatile RuntimeService instance;
     static volatile String status = NativeLocale.text("引擎尚未启动", "Engine has not started");
     static volatile String webToken = "";
+    // Public correlation identity for one Host start; never derive this from an authentication token.
+    static volatile String runtimeIdentity = "";
     static volatile int webPort;
+    static volatile int hostPid;
+    static volatile String hostBirth = "";
     static volatile boolean ready;
     private static volatile Process lastProcess;
     private static ExecutorService lastWorker;
     private static volatile String lastDiagnostics = NativeLocale.text("引擎未运行", "Engine is not running");
     private static boolean historyMaintenance;
     private static ProductBridge statusBridge;
-    private static final java.util.concurrent.atomic.AtomicBoolean memoryRestarting = new java.util.concurrent.atomic.AtomicBoolean();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ArrayDeque<String> log = new ArrayDeque<>();
     private volatile Process process;
     private volatile boolean stopping;
     private volatile boolean starting;
     private volatile boolean idleStopping;
+    private volatile boolean idleExitPending;
+    private boolean companionIdleCheckRunning;
+    private volatile boolean companionActivityUnavailable;
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable stopWhenIdle = this::stopIfBackgroundIdle;
     private volatile String terminalStatus;
@@ -48,12 +54,26 @@ public final class RuntimeService extends Service {
     }
     @Override public IBinder onBind(Intent intent) { return null; }
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        try { return handleStartCommand(intent, flags, startId); }
+        finally {
+            if (intent != null && NativeRuntimeHost.START_NATIVE.equals(intent.getAction()))
+                NativeRuntimeHost.startAcknowledged();
+        }
+    }
+
+    private int handleStartCommand(Intent intent, int flags, int startId) {
         NotificationManagement.refreshAccess(this);
         if (intent != null && STOP.equals(intent.getAction())) {
             HardwareRuntime.stopAll(this);
             BackgroundRuntime.stoppedByUser(this); stopGracefully(); return START_NOT_STICKY;
         }
         if (intent != null && CANCEL_TASK.equals(intent.getAction())) {
+            if (!isStartingOrRunning()) {
+                android.widget.Toast.makeText(this,
+                    NativeLocale.text("未能停止任务，请打开对话查看", "Unable to stop the task. Open the conversation to check"), android.widget.Toast.LENGTH_LONG).show();
+                if (!stopping) stopSelf(startId);
+                return START_NOT_STICKY;
+            }
             String task = intent.getStringExtra("taskId");
             new Thread(() -> {
                 try { PetActions.send(task, "cancel", null, null); }
@@ -73,7 +93,13 @@ public final class RuntimeService extends Service {
         }
         if (intent != null && !REFRESH.equals(intent.getAction())) BackgroundRuntime.startedByUser(this);
         synchronized (RuntimeService.class) {
-            if (historyMaintenance) { status = NativeLocale.text("正在删除对话记录，请稍后启动", "Deleting conversation history. Start again shortly"); stopSelf(); return START_NOT_STICKY; }
+            if (historyMaintenance || NativeCompanionDeletion.pending(this) || NativeCompanionMemoryPurge.pending(this)) {
+                // A foreground/boot refresh may arrive while accepted tasks drain.
+                // Keep the existing child alive; only reject a new launch.
+                if (starting || ready || process != null && process.isAlive()) return restartMode();
+                if (NativeCompanionMemoryPurge.pending(this)) NativeCompanionMemoryPurge.resume(this);
+                status = NativeLocale.text("正在清理伙伴数据", "Cleaning up companion data"); stopSelf(); return START_NOT_STICKY;
+            }
         }
         if (stopping) return START_NOT_STICKY;
         if (starting || (process != null && process.isAlive())) { scheduleBackgroundCheck(); return restartMode(); }
@@ -106,14 +132,43 @@ public final class RuntimeService extends Service {
         main.postDelayed(stopWhenIdle, 1000);
     }
 
-    private void stopIfBackgroundIdle() {
-        if (stopping || BackgroundRuntime.visible() || BackgroundRuntime.keepRunning(this)
-                || ChatFileTransfers.hasRuntimeWork()
+    private boolean backgroundRuntimeNeeded() {
+        return stopping || NativeRuntimeHost.companionMaintenanceActive() || BackgroundRuntime.visible() || BackgroundRuntime.keepRunning(this)
+                || NativeRuntimeHost.hasMediaRuntimeWork()
                 || MemoryRuntime.get(this).requiresBackgroundRuntime()
                 || ToolProgress.current(this).optBoolean("active") || AudioTranscription.get(this).hasActiveJobs()
-                || VoiceRuntime.active(this)) return;
-        idleStopping = true;
-        stopGracefully();
+                || VoiceRuntime.active(this);
+    }
+
+    private void stopIfBackgroundIdle() {
+        if (backgroundRuntimeNeeded() || !ready || companionIdleCheckRunning) return;
+        companionIdleCheckRunning = true;
+        final Process expectedProcess = process;
+        final String expectedIdentity = runtimeIdentity, token = webToken;
+        final int port = webPort;
+        // The Host claims idle and closes new work atomically; a snapshot cannot authorize a later forced stop.
+        new Thread(() -> {
+            Boolean accepted = null;
+            try {
+                if (!backgroundRuntimeNeeded()) {
+                    idleExitPending = true;
+                    accepted = CompanionRuntimeActivity.requestIdleShutdown(port, token);
+                }
+                else accepted = false;
+            }
+            catch (IOException | org.json.JSONException unavailable) {
+                if (!companionActivityUnavailable) android.util.Log.w("Droy", "COMPANION_ACTIVITY_UNAVAILABLE");
+            }
+            if (Boolean.FALSE.equals(accepted)) idleExitPending = false;
+            final Boolean observed = accepted;
+            main.post(() -> {
+                companionIdleCheckRunning = false;
+                if (instance != this || stopping || expectedProcess != process || !expectedIdentity.equals(runtimeIdentity)) return;
+                companionActivityUnavailable = observed == null;
+                if (Boolean.TRUE.equals(observed)) idleStopping = true;
+                else scheduleBackgroundCheck();
+            });
+        }, "droy-companion-idle").start();
     }
 
     static String notificationTitle(boolean ready, boolean active, String phase) {
@@ -131,6 +186,11 @@ public final class RuntimeService extends Service {
             case "executing" -> NativeLocale.text("正在执行工具", "Running tools");
             case "verifying" -> NativeLocale.text("正在核实执行结果", "Verifying the result");
             case "waiting" -> NativeLocale.text("等待目标时间或条件", "Waiting for the target time or condition");
+            case "pausing" -> NativeLocale.text("正在暂停任务", "Pausing the task");
+            case "paused" -> NativeLocale.text("任务已暂停，等待继续", "Task paused. Waiting to continue");
+            case "resuming" -> NativeLocale.text("正在核实现场并继续任务", "Checking the current state and continuing the task");
+            case "stopping" -> NativeLocale.text("正在停止任务", "Stopping the task");
+            case "stopped" -> NativeLocale.text("任务已停止", "Task stopped");
             case "completed" -> NativeLocale.text("本轮执行已结束", "This turn has finished");
             case "interrupted" -> NativeLocale.text("任务已中断，请核实当前状态", "Task interrupted. Check the current state");
             case "waiting_input" -> NativeLocale.text("等待你的回应", "Waiting for your response");
@@ -152,7 +212,9 @@ public final class RuntimeService extends Service {
         if (active == null) return;
         new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
             if (instance != active || !ready || active.stopping
-                    || !active.getSharedPreferences("product", MODE_PRIVATE).getBoolean("returnToDroyOnCompletion", false)) return;
+                    || !active.getSharedPreferences("product", MODE_PRIVATE).getBoolean("returnToDroyOnCompletion", true)) return;
+            // Completion returns from other screens; a visible conversation already owns its result.
+            if (NativeRuntimeHost.isConversationVisible(taskId)) return;
             JSONObject progress = ToolProgress.current(active);
             // A new task can begin while the completion notification waits for the UI thread.
             if (taskId.equals(progress.optString("taskId")) && !progress.optBoolean("active")
@@ -181,20 +243,41 @@ public final class RuntimeService extends Service {
         return ready || instance != null || (lastWorker != null && !lastWorker.isTerminated());
     }
 
+    static synchronized boolean isStartingOrRunning() {
+        RuntimeService active = instance;
+        return active != null && !active.stopping
+            && (ready || active.starting || (active.process != null && active.process.isAlive()));
+    }
+
+    static synchronized boolean canStart() {
+        if (historyMaintenance || NativeRuntimeHost.companionMaintenanceActive()) return false;
+        RuntimeService active = instance;
+        // Android can recreate a service before delivering its start command.
+        // Its unused executor must not prevent the UI from starting the engine.
+        if (active != null) return !active.stopping && !active.starting && !ready
+            && (active.process == null || !active.process.isAlive()) && !active.worker.isShutdown();
+        return (lastProcess == null || !lastProcess.isAlive())
+            && (lastWorker == null || lastWorker.isTerminated());
+    }
+
     private void startEngine() {
+        final long startedAt = android.os.SystemClock.elapsedRealtime();
         try {
             MemoryRuntime memoryHost = MemoryRuntime.get(this);
             memoryHost.prepareRuntimeStart();
             RuntimeInstaller.installCertificate(this);
             File terminfo = RuntimeInstaller.installTerminfo(this);
-            File runtime = RuntimeInstaller.install(this, memoryHost.protectionRequired());
+            File runtime = RuntimeInstaller.install(this);
             RuntimeRelease release = RuntimeInstaller.release(this);
             runningRelease = release;
             if (stopping || Thread.currentThread().isInterrupted()) return;
-            appendLog(NativeLocale.text("运行包校验与准备完成", "Runtime verified and prepared"));
+            appendStartupPhase(NativeLocale.text("运行包校验与准备完成", "Runtime verified and prepared"), startedAt);
             File home = new File(getFilesDir(), "dsh-home"), workspace = new File(getFilesDir(), "workspace");
             if ((!home.isDirectory() && !home.mkdirs()) || (!workspace.isDirectory() && !workspace.mkdirs())) throw new IOException(NativeLocale.text("无法创建会话目录", "Unable to create the conversation directory"));
+            home = home.getCanonicalFile(); workspace = workspace.getCanonicalFile();
             webToken = randomToken();
+            runtimeIdentity = UUID.randomUUID().toString();
+            hostPid = 0; hostBirth = "";
             String bridgeToken = randomToken();
             if (bridge != null) bridge.stop();
             synchronized (launchLock) {
@@ -233,7 +316,7 @@ public final class RuntimeService extends Service {
             env.put("TZ", TimeZone.getDefault().getID());
             runBootstrap(executable, runtime, workspace, env);
             if (stopping) return;
-            appendLog(NativeLocale.text("手机运行配置已准备", "Mobile runtime configuration prepared"));
+            appendStartupPhase(NativeLocale.text("手机运行配置已准备", "Mobile runtime configuration prepared"), startedAt);
             ProcessBuilder builder = new ProcessBuilder(executable, "--expose-internals",
                 new File(runtime, "node_modules/@deepseek-ai/dsh/lib/bin.js").getAbsolutePath(),
                 "--profile", "mobile", "--host", "127.0.0.1", "--port", String.valueOf(webPort), "--no-open");
@@ -271,11 +354,14 @@ public final class RuntimeService extends Service {
                     if (code == 200) {
                         try { release.verifyReady(engine); }
                         catch (IOException mismatch) { throw new IllegalStateException(mismatch.getMessage(), mismatch); }
+                        int readyPid = engine.optInt("hostPid");
+                        String readyBirth = readyPid > 0 ? NativeCompanionDeletion.processBirth(readyPid) : null;
                         synchronized (launchLock) {
                             if (!stopping) {
+                                hostPid = readyPid; hostBirth = readyBirth == null ? "" : readyBirth;
                                 ready = true; status = NativeLocale.text("引擎运行中", "Engine running");
                                 applyOperationState();
-                                appendLog(NativeLocale.text("DSH 服务与 Android 工具已就绪", "DSH service and Android tools are ready"));
+                                appendStartupPhase(NativeLocale.text("DSH 服务与 Android 工具已就绪", "DSH service and Android tools are ready"), startedAt);
                                 updateNotification();
                                 scheduleBackgroundCheck();
                                 DroyNotificationService.processCurrentNotifications(this);
@@ -359,8 +445,12 @@ public final class RuntimeService extends Service {
     }
 
     static synchronized boolean canManageHistory() {
+        return !historyMaintenance && !NativeRuntimeHost.companionMaintenanceActive() && historyIdle();
+    }
+
+    private static boolean historyIdle() {
         Process child = lastProcess;
-        return !historyMaintenance && instance == null && (child == null || !child.isAlive())
+        return instance == null && (child == null || !child.isAlive())
             && !MemoryExecutionQualification.hasActiveProcesses()
             && (lastWorker == null || lastWorker.isTerminated());
     }
@@ -371,8 +461,24 @@ public final class RuntimeService extends Service {
         return true;
     }
 
+    static synchronized boolean beginHistoryChange(Context context) {
+        return !NativeCompanionDeletion.pending(context) && !NativeCompanionMemoryPurge.pending(context) && beginHistoryChange();
+    }
+
+    static synchronized boolean beginCompanionHistoryChange() {
+        if (historyMaintenance || !NativeRuntimeHost.companionMaintenanceActive() || !historyIdle()) return false;
+        historyMaintenance = true;
+        return true;
+    }
+
     static synchronized void endHistoryChange() {
         historyMaintenance = false;
+    }
+
+    static synchronized boolean companionMaintenanceHeld() {
+        return historyMaintenance && instance == null && (lastProcess == null || !lastProcess.isAlive())
+            && !MemoryExecutionQualification.hasActiveProcesses()
+            && (lastWorker == null || lastWorker.isTerminated());
     }
 
     private void readOutput(Process source) {
@@ -385,6 +491,10 @@ public final class RuntimeService extends Service {
                 if (code != null) appendLog(NativeLocale.text("运行时提示：", "Runtime notice: ") + code);
             }
         } catch (IOException e) { if (!stopping) appendLog(NativeLocale.text("读取运行日志失败：", "Unable to read runtime logs: ") + e.getClass().getSimpleName()); }
+    }
+
+    private void appendStartupPhase(String label, long startedAt) {
+        appendLog(label + " · " + (android.os.SystemClock.elapsedRealtime() - startedAt) + " ms");
     }
 
     private synchronized void appendLog(String line) {
@@ -438,7 +548,7 @@ public final class RuntimeService extends Service {
         }
     }
     static void memoryPermissionsChanged(Context context) {
-        MemoryRuntime.get(context).rootPermissionChanged();
+        MemoryRuntime.get(context).operationsChanged();
         android.content.SharedPreferences choices = ProductPermissions.preferences(context);
         io.droyagent.androiduse.ProcessMemoryTools.get(context).onPermissionsChanged(
             ProductPermissions.allowed(choices, "allowApps"),
@@ -452,6 +562,7 @@ public final class RuntimeService extends Service {
                 boolean paused = ProductPermissions.stopped(this);
                 if (paused && !bridge.policy.isStopped()) {
                     bridge.policy.stop();
+                    io.droyagent.app.embedding.EmbeddingRuntime.cancelAllIfCreated();
                     HardwareRuntime.stopAll(this);
                     io.droyagent.androiduse.ProcessMemoryTools.get(this).closeAll();
                 }
@@ -461,6 +572,7 @@ public final class RuntimeService extends Service {
     }
     void stopOperations() {
         if (bridge != null) bridge.policy.stop();
+        io.droyagent.app.embedding.EmbeddingRuntime.cancelAllIfCreated();
         HardwareRuntime.releaseTransient(this);
         io.droyagent.androiduse.ProcessMemoryTools.get(this).closeAll();
         ToolProgress.clearScreenOperations();
@@ -470,27 +582,6 @@ public final class RuntimeService extends Service {
     static void requestStop() {
         RuntimeService active = instance;
         if (active != null) requestStop(active);
-    }
-
-    static void restartForMemoryProtection(Context context) {
-        if (!memoryRestarting.compareAndSet(false,true)) return;
-        Context app = context.getApplicationContext();
-        // Reply to the old authenticated request before retiring its token/server.
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            RuntimeService previous = instance;
-            if (previous != null) previous.stopGracefully();
-            new Thread(() -> {
-                try {
-                    long deadline = android.os.SystemClock.elapsedRealtime()+15000;
-                    while (previous != null && (instance == previous || !previous.worker.isTerminated())) {
-                        if (android.os.SystemClock.elapsedRealtime() >= deadline) throw new IllegalStateException("MEMORY_RESTART_STOP_UNCONFIRMED");
-                        Thread.sleep(100);
-                    }
-                    app.startForegroundService(new Intent(app,RuntimeService.class));
-                } catch (Exception failed) { MemoryRuntime.get(app).startupFailed(); }
-                finally { memoryRestarting.set(false); }
-            },"droy-memory-restart").start();
-        },300);
     }
 
     static void requestStop(Context context) {
@@ -527,6 +618,7 @@ public final class RuntimeService extends Service {
         // Android's main thread must remain free while DSH cancels and flushes.
         new Thread(() -> {
             try {
+                NotificationManagement.get(this).restoreBeforeRuntimeStop();
                 if (wasReady && child != null && child.isAlive()) {
                     HttpURLConnection connection = (HttpURLConnection) new URL("http://127.0.0.1:" + webPort + "/droy/shutdown").openConnection();
                     connection.setRequestMethod("POST");
@@ -601,7 +693,9 @@ public final class RuntimeService extends Service {
         PetOverlay.runtimeStopped();
         AutomationScreenOverlay.runtimeStopped();
         super.onDestroy();
-        if (idleStopping && BackgroundRuntime.visible() && !BackgroundRuntime.explicitlyStopped(this))
+        // The Host can exit before its HTTP acknowledgement reaches the main thread.
+        if ((idleStopping || idleExitPending) && !BackgroundRuntime.explicitlyStopped(this)
+                && (BackgroundRuntime.visible() || BackgroundRuntime.keepRunning(this)))
             startForegroundService(new Intent(this, RuntimeService.class).setAction(REFRESH));
     }
 

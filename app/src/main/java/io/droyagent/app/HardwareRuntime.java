@@ -182,6 +182,14 @@ final class HardwareRuntime {
         java.io.Closeable lifetime = lifetimes.remove(owner);
         if (lifetime != null) try { lifetime.close(); } catch (java.io.IOException failure) { throw new IllegalStateException(failure); }
     }
+    java.util.concurrent.CompletableFuture<Void> closeOwnerSettled(String owner) {
+        java.util.concurrent.CompletableFuture<Void> settled = new java.util.concurrent.CompletableFuture<>();
+        closeOwner(owner);
+        // NFC reader teardown posts to the main looper. A barrier follows those owned
+        // callbacks; executing HTTP calls retain their own dispatch leases as well.
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> settled.complete(null));
+        return settled;
+    }
     private void releaseIdleLifetime(String owner) {
         if (bluetooth.hasOwnerSessions(owner) || wifi.hasOwnerSessions(owner)) return;
         java.io.Closeable lifetime = lifetimes.remove(owner);

@@ -256,7 +256,9 @@ window.__ModuleLoader__.load({
             refreshAgain = false;
             const result = await request({ operation: 'list' });
             if (disposed) return;
-            const imports = Array.isArray(result.imports) ? result.imports : [];
+            // Companion imports are consumed by the IM adapter, including their
+            // failures and cleanup. They must never enter a work draft or dialog.
+            const imports = Array.isArray(result.imports) ? result.imports.filter(row => row.consumer === undefined || row.consumer === 'work') : [];
             publish({ imports });
             for (const row of imports) {
               const existing = adopted.get(row.id);

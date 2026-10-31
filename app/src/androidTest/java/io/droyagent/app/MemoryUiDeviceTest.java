@@ -30,7 +30,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
-/** Real settings entry and denied Root flow. No readiness fixture or capture is enabled. */
+/** Legacy Web settings entry and rootless activation. Collection stays off. */
 @RunWith(AndroidJUnit4.class)
 public final class MemoryUiDeviceTest {
     private static final String MAIN_SWITCH = "[data-droy-memory] > .droy-memory-toggle [role=switch]";
@@ -138,11 +138,12 @@ public final class MemoryUiDeviceTest {
             } else preserved.put(current, null);
         }
         assertTrue(new File(context.getFilesDir(), "dsh-home").mkdirs());
-        assertTrue(context.getSharedPreferences("droy_memory", Context.MODE_PRIVATE).edit().clear().commit());
+        assertTrue(context.getSharedPreferences("droy_memory", Context.MODE_PRIVATE).edit().clear()
+            .putBoolean("enabled", false).putBoolean("automaticExtraction", false).commit());
         assertTrue(context.getSharedPreferences("history_capture", Context.MODE_PRIVATE).edit().clear().commit());
         assertTrue(context.getSharedPreferences("product", Context.MODE_PRIVATE).edit()
             .putBoolean("petEnabled", false).putString("petInternalDisplay", "off").putString("petExternalDisplay", "off")
-            .putBoolean("backgroundRuntimeEnabled", false).putBoolean(BackgroundRuntime.STOPPED, false).commit());
+            .putBoolean("backgroundRuntimeEnabled", false).putBoolean("allowRoot", false).putBoolean(BackgroundRuntime.STOPPED, false).commit());
         UiAutomation automation = instrumentation.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
         assertTrue("Could not establish the display orientation", automation.setRotation(UiAutomation.ROTATION_FREEZE_0));
         rotated = true;
@@ -151,10 +152,9 @@ public final class MemoryUiDeviceTest {
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
         ui = new DeviceUi(instrumentation, activity);
         ui.awaitPage();
-        boolean landscape = "true".equals(InstrumentationRegistry.getArguments().getString("layoutLandscape"));
-        assertTrue("Could not orient the ready WebView", automation.setRotation(landscape ? UiAutomation.ROTATION_FREEZE_90 : UiAutomation.ROTATION_FREEZE_0));
-        DeviceUi.await("WebView did not reach the requested orientation", 5000,
-            () -> ui.truth(landscape ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+        assertTrue("Could not orient the ready WebView", automation.setRotation(UiAutomation.ROTATION_FREEZE_0));
+        DeviceUi.await("WebView did not reach the portrait orientation", 5000,
+            () -> ui.truth("innerHeight>innerWidth"));
         applyDisplayCondition();
     }
 
@@ -187,7 +187,7 @@ public final class MemoryUiDeviceTest {
         }
     }
 
-    @Test public void memoryTabIsPeerToGeneralAndRootDenialLeavesAllCaptureOff() throws Exception {
+    @Test public void memoryTabIsPeerToGeneralAndRootlessActivationLeavesAllCaptureOff() throws Exception {
         openSettings();
         assertTrue("Memory is not a peer of general settings", ui.truth("(()=>{const g=document.querySelector('[data-droy-settings-section=general]'),m=document.querySelector('[data-droy-settings-section=droy-memory]');return !!g&&!!m&&g.parentElement===m.parentElement})()"));
         assertEquals(localized("Droy 记忆", "Droy Memory"), ui.evaluate("document.querySelector('[data-droy-settings-section=droy-memory]').textContent.trim()"));
@@ -205,22 +205,21 @@ public final class MemoryUiDeviceTest {
             () -> ui.truth("!!document.querySelector('.droy-memory-settings')"));
         assertFalse("The memory master must start disabled", checked());
         assertEquals(localized("Droy记忆", "Droy memory"), ui.evaluate("document.querySelector('[data-droy-memory] > .droy-memory-toggle > div > span').textContent"));
-        assertTrue("The memory purpose must describe supported recording only", ui.truth("document.querySelector('[data-droy-memory] > .droy-memory-toggle').textContent.includes(" + JSONObject.quote(localized("去过的地方和做过的事", "places you visit and things you do")) + ")"));
+        assertTrue("The memory purpose must describe supported recording only", ui.truth("document.querySelector('[data-droy-memory] > .droy-memory-toggle').textContent.includes(" + JSONObject.quote(localized("单独授权的手机活动和位置", "phone activity and locations you separately authorize")) + ")"));
         assertTextFits("[data-droy-memory] > .droy-memory-toggle");
         capture("main-off");
 
         ui.tap(MAIN_SWITCH);
-        DeviceUi.await("The real host did not reject enabling without Root", 30000,
-            () -> ui.truth("document.querySelector('.droy-memory-error')?.textContent.includes('Root')") && !checked());
-        assertFalse("Root rejection still persisted enabled", context.getSharedPreferences("droy_memory", Context.MODE_PRIVATE).getBoolean("enabled", false));
+        DeviceUi.await("The real host did not enable memory without Root", 30000,
+            () -> checked() && context.getSharedPreferences("droy_memory", Context.MODE_PRIVATE).getBoolean("enabled", false));
         JSONObject status = readStatus();
-        assertFalse("This test requires a real non-Root emulator", status.getJSONObject("gate").getBoolean("rootAuthorized"));
-        assertFalse(status.getBoolean("available"));
+        assertFalse(ProductPermissions.allowed(ProductPermissions.preferences(context), "allowRoot"));
+        assertTrue(status.getBoolean("available"));
         JSONObject capture = status.getJSONObject("capture");
         assertNotEquals("collecting", capture.getString("state"));
         JSONObject config = capture.getJSONObject("configuration");
         for (String key : new String[]{"enabled", "activityEnabled", "pageTextEnabled", "deviceStateEnabled", "locationEnabled"}) assertFalse(key, config.getBoolean(key));
-        capture("root-denied");
+        capture("rootless-enabled");
 
         assertTrue("Only the Settings content should remain visible", ui.truth("!document.querySelector('[data-droy-memory-tab],.droy-memory-search,[data-droy-memory-archive]')&&!!document.querySelector('.droy-memory-settings')"));
         assertFalse("Retention must stay hidden", ui.truth("document.querySelector('.droy-memory-settings').textContent.includes(" + JSONObject.quote(localized("保留与遗忘", "Retention and forgetting")) + ")"));
@@ -245,7 +244,7 @@ public final class MemoryUiDeviceTest {
         ui.tap("[data-droy-settings-section=droy-memory]");
         DeviceUi.await("Memory settings did not load", 10000, () -> ui.truth("!!document.querySelector('.droy-memory-settings')"));
         assertTrue("Memory lists and backup must be hidden", ui.truth("!document.querySelector('[data-droy-memory-tab],.droy-memory-search,[data-droy-memory-archive]')"));
-        assertTrue("Memory description must explain its purpose and Root", ui.truth("document.querySelector('[data-droy-memory] > .droy-memory-toggle').textContent.includes(" + JSONObject.quote(localized("去过的地方和做过的事", "places you visit and things you do")) + ")&&document.querySelector('[data-droy-memory] > .droy-memory-toggle').textContent.includes('Root')"));
+        assertTrue("Memory description must explain its sources without requiring Root", ui.truth("document.querySelector('[data-droy-memory] > .droy-memory-toggle').textContent.includes(" + JSONObject.quote(localized("单独授权的手机活动和位置", "phone activity and locations you separately authorize")) + ")&&!document.querySelector('[data-droy-memory] > .droy-memory-toggle').textContent.includes('Root')"));
         assertTextFits("[data-droy-memory] > .droy-memory-toggle"); capture("simplified-memory");
         int count = ((Number) ui.evaluate("document.querySelectorAll('.droy-memory-settings > section').length")).intValue();
         for (int index = 1; index <= count; index++) {
@@ -438,8 +437,7 @@ public final class MemoryUiDeviceTest {
     private void capture(String stage) throws Exception {
         awaitVisiblePagePaint();
         if (ownsState) {
-            boolean landscape = "true".equals(InstrumentationRegistry.getArguments().getString("layoutLandscape"));
-            assertTrue("The screenshot no longer has the requested orientation", ui.truth(landscape ? "innerWidth>innerHeight" : "innerHeight>innerWidth"));
+            assertTrue("The screenshot no longer has the portrait orientation", ui.truth("innerHeight>innerWidth"));
         }
         boolean secureWindow = (activity.getWindow().getAttributes().flags & android.view.WindowManager.LayoutParams.FLAG_SECURE) != 0;
         // Changing UiAutomation flags reconnects its session and resets frozen

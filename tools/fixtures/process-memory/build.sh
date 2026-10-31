@@ -8,7 +8,7 @@ sdk_dir=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-"$workspace_dir/artifacts/toolchains
 ndk_dir=${DROY_NDK_DIR:-"$sdk_dir/ndk/28.2.13676358"}
 output_dir=${DROY_MEMORY_FIXTURE_OUTPUT_DIR:-"$workspace_dir/artifacts/process-memory-fixture"}
 build_tools="$sdk_dir/build-tools/36.0.0"
-android_jar="$sdk_dir/platforms/android-36/android.jar"
+android_jar="$sdk_dir/platforms/android-37.0/android.jar"
 case "$(uname -s)" in
     Darwin) ndk_host=darwin-x86_64 ;;
     Linux) ndk_host=linux-x86_64 ;;
@@ -16,7 +16,7 @@ case "$(uname -s)" in
 esac
 if [ -n "${JAVA_HOME:-}" ]; then PATH="$JAVA_HOME/bin:$PATH"; export PATH; fi
 for executable in javac jar keytool; do command -v "$executable" >/dev/null; done
-[ -f "$android_jar" ] || { printf 'Android SDK platform 36 is required.\n' >&2; exit 1; }
+[ -f "$android_jar" ] || { printf 'Android SDK platform 37.0 is required.\n' >&2; exit 1; }
 compiler="$ndk_dir/toolchains/llvm/prebuilt/$ndk_host/bin/aarch64-linux-android30-clang"
 [ -x "$compiler" ] || { printf 'Android NDK 28.2.13676358 is required.\n' >&2; exit 1; }
 mkdir -p "$output_dir/classes" "$output_dir/dex" "$output_dir/lib/arm64-v8a"

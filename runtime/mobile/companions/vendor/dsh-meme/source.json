@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/yyh-001/dsh-meme",
+  "commit": "8992a2e8daa169ae85cf762e06d02d0ea96332bb",
+  "files": ["memes.js"],
+  "license": "MIT",
+  "scope": "Keyword ranking, Chinese bigram fallback, random sampling and mood tag groups; no upstream images or plugin prompt injection."
+}

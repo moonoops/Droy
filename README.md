@@ -53,7 +53,8 @@ Real screens from Redmi K90 Ultra. Select an image to view it at full size.
 **Droy is developed on a rooted Redmi K90 Ultra, with implementation paths for both rooted and non-rooted devices. Other devices, system versions and permission combinations need separate compatibility checks.**
 
 - ARM64 Android 11 / API 30 or later, with an up-to-date system WebView.
-- Without Root, accessibility services provide basic phone interaction; authorized Shizuku can enable some additional operations. Root enables enhanced capabilities. Available features depend on the in-app permission and capability checks. Personal memory requires Root and execution-isolation qualification.
+- Droy's interface supports portrait mode only.
+- Without Root, accessibility services provide basic phone interaction; authorized Shizuku can enable some additional operations. Root enables enhanced capabilities. Available features depend on the in-app permission and capability checks. Personal memory works without Root; capture sources and model processing require separate authorization.
 - Both vision and text-only models are supported, including compatible services such as DeepSeek Flash. Text-only models operate through page text and control structure. Screenshot understanding requires image input support from the selected model and API, declared in its configuration. Check the [provider's current capabilities](https://api-docs.deepseek.com/guides/vision/) and your actual configuration.
 
 For compatibility problems, an agent can help investigate, modify the source and verify a fix. Share reproduction steps in an [issue](https://github.com/moonoops/Droy/issues) or submit a [pull request](https://github.com/moonoops/Droy/pulls).
@@ -90,15 +91,27 @@ After setup, try:
 | Conversations | Streaming replies, history, attachments and configurable models. |
 | Phone interaction | Open apps, observe pages, take screenshots, tap, swipe and enter text. |
 | Voice | Hold to talk, local speech recognition, voice conversations and optional readout. |
-| Companion | An animated character with configurable appearance, personality and task updates. |
+| Companion | Built-in pixel-art black cat, marmot and alpaca, with custom artwork and task updates. |
+| Chat companion presets | Choose Kaka, Maimai, Dafeiyu or Lady Claude. A fresh installation starts with one Kaka; add other companions from the preset picker. Each keeps its own persona, conversations and memory, with an independently configurable model. |
+| Companion chat stickers | Companions can search public sticker sources, download individual images, and install marketplace packs, including animated GIFs. ZIP imports and per-companion pack selections share one local library. [Usage](runtime/mobile/companions/STICKERS.md). |
 | Notifications | Content rules, model-assisted analysis and reminders. |
 | Personal memory | Optional local records and retrieval, with separate source and processing controls. |
 | Extensions | Skills, plugins, MCP and automations through DSH. |
 | Languages | Chinese and English. |
 
-### A cat companion on your screen
+Background running uses one silent status notification with current task and stop controls. Companion messages appear separately by conversation, with unread history and a mark-as-read action. During quiet hours, received messages remain silently in the notification shade; proactive contact still follows the companion's quiet-hours setting. Enable message notifications and Android notification permission in settings.
 
-When needed, Droy appears on your screen as a little cat. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
+Tasks shows your own tasks and spaces. Each chat companion keeps its background work in its own space; that work appears only through normal chat replies and does not trigger the pet, change your task selection, or return to the app on completion. **Stop processing** in a companion chat stops that companion's current chat and unfinished background work while other companions and your tasks continue.
+
+Notification organization applies only to apps you select. By default it keeps their existing notification settings, removes advertising, and reminds once after an important notification remains uncleared for 5 or 10 minutes. Optional silent takeover requires explicit confirmation and Root access. If classification fails, Droy keeps the original notification and restores settings it owns; settings show failures and any restoration still required. Android force-stop or loss of Root can prevent immediate restoration.
+
+### A companion on your screen
+
+When needed, Droy appears on your screen as the character you select. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
+
+Choose the built-in black cat, marmot or alpaca in **Settings → Pet**, without configuring an image model. When idle, one tap plays a random animation, favoring signature actions such as kneading, the marmot's scream, or the alpaca's neck stretch and spit. Two or more rapid taps open a small bubble with an idle message and one **Open app** icon. During work, one tap shows current progress with pause, resume and stop icons below. Pausing preserves the task and conversation; the bubble shows **Paused** only after execution has settled. Resuming first checks the current state. If an action's outcome remains uncertain, the bubble explains the issue and does not automatically replay it.
+
+All bubbles use one highly translucent, lightly frosted background across app themes. Questions expand to nearly the screen width, with choices, a manual answer field, and a compact **Skip / Send answer** footer. Ordinary task hints appear at least 30 seconds apart, at most three times per task; errors and questions appear promptly. Background blur follows device support and power-saving state. **Pet studio** lets you preview every action before applying a character.
 
 <details>
 <summary><strong>View companion task updates and handoff</strong></summary>
@@ -108,7 +121,7 @@ When needed, Droy appears on your screen as a little cat. Speech bubbles tell yo
   <a href="assets/screenshots/companion-help.png"><img src="assets/screenshots/companion-help.png" width="36%" alt="Cat companion asking for the next step with view and stop task controls" /></a>
 </p>
 
-Companion examples use existing Android emulator demo captures with Chinese UI.
+These earlier companion examples use Android emulator demo captures with Chinese UI.
 
 </details>
 
@@ -140,8 +153,9 @@ Following DSH's “everything is a plugin” philosophy, mobile adaptation, voic
 
 - Task context, page text, screenshots and attachments may be sent to your selected model. Provider terms and charges apply.
 - Voice recognition runs locally; recognized text goes to the conversation model. Readout uses your selected speech engine.
-- Notification analysis can send notification text to the model; explicit content rules can run locally.
-- Personal memory is off by default. Sources are enabled separately; model processing requires authorization for the endpoint, data category and purpose.
+- Notification organization sends selected notification text and your rules to the default model. Recognized verification-code and redacted notifications stay on the device; viewing or editing rules does not send notification history to the model.
+- Personal memory and automatic organization are on by default. Activity, page, device-state and location sources are enabled separately; model processing requires authorization for the endpoint, data category and purpose.
+- Companion memory is private to each companion and uses local MemOS storage/retrieval with on-device multilingual embeddings. Removing a companion retains its memory on the device; request permanent deletion or restoration explicitly in Tasks. Memory records are not exposed as a browsing interface. Cloud synchronization is not enabled.
 
 You can stop tasks and change capabilities in settings. Background work depends on Android process availability. Before uninstalling, turn off notification management normally so it can restore settings it changed.
 

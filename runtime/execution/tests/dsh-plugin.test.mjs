@@ -14,9 +14,10 @@ const modules = fileURLToPath(new URL('../../dsh/node_modules/', import.meta.url
 const spec = argv => ({ argv, cwd: '/', env: {}, graceMs: 100,
   stdio: { stdin: 'ignore', stdout: { maxBytes: 8192 }, stderr: { maxBytes: 4096 } } });
 
-async function fixture(t, { active = true, rpcAlias = false } = {}) {
+async function fixture(t, { active = true, rpcAlias = false, isolationRequired = true } = {}) {
   const [{ Context }, { default: LocalSubprocessRuntime }, { default: LocalFileSystem }] = await Promise.all([
-    load('@deepseek-ai/cordis'), load('@deepseek-ai/dsh-subprocess-local'), load('@deepseek-ai/dsh-fs-local'),
+    load('@deepseek-ai/cordis'), load('@deepseek-ai/dsh-subprocess-local'),
+    load(isolationRequired ? '@deepseek-ai/dsh-fs-local' : '@deepseek-ai/dsh-fs-sandbox'),
   ]);
   const root = await realpath(await mkdtemp(join(tmpdir(), 'droy-execution-adapter-')));
   const workspace = join(root, 'workspace'); await mkdir(workspace);
@@ -28,7 +29,7 @@ async function fixture(t, { active = true, rpcAlias = false } = {}) {
   let activeFlag = active, ready = true;
   const sessions = new Map([['clean', 'known-clean'], ['private', 'protected'], ['other', 'protected']]);
   const calls = [];
-  const host = { status: async () => ({ ready }), policy: () => ({ workspaceRoot: workspace, readOnlyRoots: [modules], privateRoots: [join(root, 'private')] }),
+  const host = { isolationRequired, status: async () => ({ ready }), policy: () => ({ workspaceRoot: workspace, readOnlyRoots: [modules], privateRoots: [join(root, 'private')] }),
     executor: {
       spawn(input) { calls.push(input); return transport.subprocess.spawn({ ...input, cwd: workspace,
         argv: input.argv.map((arg, index) => index === 0 && arg === '/system/bin/sh' ? '/bin/sh' : arg) }); },
@@ -37,9 +38,12 @@ async function fixture(t, { active = true, rpcAlias = false } = {}) {
     async authorizeExecution(agent) {
       const state = sessions.get(agent?.session?.id);
       if (!state) throw new Error('PRIVACY_SESSION_UNKNOWN');
+      if (state === 'forgotten') throw new Error('PRIVACY_SESSION_FORGOTTEN');
       return { state };
     } };
   ctx.provide('droyPrivacy', privacy);
+  if (!isolationRequired) ctx.provide('sandboxPolicy', { defaultMode: 'workspace-write',
+    resolve: () => ({ mode: 'workspace-write', workspaceRoot: workspace }) });
   let providers;
   const boundary = createExecutionBoundary({ ctx, host, rpcPath: rpcAlias ? join(root, 'legacy-app', 'fs-rpc.mjs') : rpcPath, providersInstalled: () => !!providers
     && ctx.get('subprocess') instanceof providers.DroySubprocess && ctx.get('fs') instanceof providers.DroyFileSystem });
@@ -76,6 +80,32 @@ test('inactive subprocess keeps upstream behavior; active requests use the host 
     await assert.rejects(handle.done, /ISOLATION_UNAVAILABLE/);
   });
   assert.equal(f.calls.length, 1);
+});
+
+test('restricted companion tools bypass legacy Root readiness without relaxing work or subprocess policy', async t => {
+  const f = await fixture(t);
+  f.setReady(false);
+  const agent = { session: { id: 'companion-session' } };
+  f.ctx.provide('droyCompanions', {
+    ownsSession: id => id === agent.session.id,
+    isRestrictedAgent: candidate => candidate === agent,
+  });
+  const exec = { name: 'companion_reply', agent, signal: new AbortController().signal };
+  assert.equal(await f.boundary.around(exec, () => 'scoped reply'), 'scoped reply');
+  // An owned identifier alone, or the same tool name in work, is insufficient.
+  await assert.rejects(f.run(agent.session.id, () => assert.fail('unrestricted agent ran'), exec.name), /PRIVACY_SESSION_UNKNOWN/);
+  await assert.rejects(f.run('clean', () => assert.fail('work tool ran'), exec.name), /EXECUTION_TOOL_NOT_REVIEWED/);
+  await f.boundary.around(exec, async () => {
+    const handle = f.ctx.subprocess.spawn(spec([process.execPath, '-e', 'process.exit(0)']));
+    await assert.rejects(handle.done, /PRIVACY_SESSION_UNKNOWN/);
+  });
+  assert.equal(f.calls.length, 0);
+  await f.run('clean', async () => {
+    const handle = f.ctx.subprocess.spawn(spec([process.execPath, '-e', 'process.exit(0)']));
+    await assert.rejects(handle.done, /EXECUTION_ISOLATION_UNAVAILABLE/);
+  });
+  const abort = new AbortController(); abort.abort(new Error('cancelled companion'));
+  await assert.rejects(f.boundary.around({ ...exec, signal: abort.signal }, () => assert.fail('cancelled tool ran')), /cancelled companion/);
 });
 
 test('namespace file RPC preserves real upstream text/version/edit behavior and binds opaque targets to a session', async t => {
@@ -291,5 +321,101 @@ test('losing a provider dependency cannot leave active tool execution authorized
   assert.equal(f.boundary.installed(), false);
   await assert.rejects(f.run('clean', () => assert.fail('tool body must stay blocked')), /REQUIRED_PROVIDER_MISSING/);
   await assert.rejects(f.boundary.scope(), /REQUIRED_PROVIDER_MISSING/);
+  assert.equal(f.calls.length, 0);
+});
+
+test('App memory uses local files and processes without an isolated executor or Root readiness', async t => {
+  const f = await fixture(t, { isolationRequired: false });
+  f.setReady(false);
+  delete f.host.executor;
+  f.host.status = () => assert.fail('App execution must not ask for isolation readiness');
+  f.host.authorizeTool = () => assert.fail('App execution must not apply the isolated-tool allowlist');
+  const prior = await f.ctx.fs.resolve('app-record.txt');
+  await f.run('private', async () => {
+    await f.ctx.fs.writeText(prior, 'APP_MEMORY_RECORD', { kind: 'createIfAbsent' });
+    assert.equal(await f.ctx.fs.readText(prior), 'APP_MEMORY_RECORD');
+    assert.equal(f.ctx.fs.processPath(prior), join(f.workspace, 'app-record.txt'));
+    assert.equal(f.ctx.fs.processPathFromHostPath(join(f.root, 'private', 'file')), join(f.root, 'private', 'file'));
+    const child = f.ctx.subprocess.spawn({ ...spec([process.execPath, '-e',
+      'process.stdout.write(process.env.APP_TASK_VALUE + ":" + require("fs").readFileSync("app-record.txt", "utf8"))']),
+      cwd: f.workspace, env: { APP_TASK_VALUE: 'ordinary-app' } });
+    assert.equal((await child.done).exitCode, 0);
+    assert.equal(child.collected.stdout.readFrom(0).text, 'ordinary-app:APP_MEMORY_RECORD');
+    assert.equal(await f.ctx.subprocess.resolveExecutable(process.execPath, {}, new AbortController().signal), process.execPath);
+  }, 'custom_app_tool');
+  assert.equal(f.boundary.isActive(), false);
+  assert.equal(f.calls.length, 0);
+  await f.run('other', async () => assert.equal(await f.ctx.fs.readText(prior), 'APP_MEMORY_RECORD'), 'read');
+  await assert.rejects(f.run('unknown', () => assert.fail('unknown session ran')), /PRIVACY_SESSION_UNKNOWN/);
+  f.sessions.set('forgotten', 'forgotten');
+  await assert.rejects(f.run('forgotten', () => assert.fail('forgotten session ran')), /PRIVACY_SESSION_FORGOTTEN/);
+});
+
+test('App memory keeps the upstream read-only file policy', async t => {
+  const f = await fixture(t, { isolationRequired: false });
+  Object.assign(f.ctx.sandboxPolicy, { defaultMode: 'read-only', resolve: () => ({ mode: 'read-only', workspaceRoot: f.workspace }) });
+  await f.run('private', async () => {
+    const target = await f.ctx.fs.resolve('denied-app.txt');
+    await assert.rejects(f.ctx.fs.writeText(target, 'synthetic', { kind: 'createIfAbsent' }), { code: 'FS_SANDBOX_DENIED' });
+  }, 'write');
+  await assert.rejects(readFile(join(f.workspace, 'denied-app.txt')), { code: 'ENOENT' });
+  assert.equal(f.calls.length, 0);
+});
+
+test('App MCP stdio retains configured environment and uses the local runtime', async t => {
+  const f = await fixture(t, { isolationRequired: false });
+  delete f.host.executor;
+  f.setReady(false);
+  const transport = f.boundary.createMcpTransport({ transport: 'stdio', command: process.execPath,
+    env: { APP_MCP_VALUE: 'synthetic-app-value' }, args: ['-e',
+      'process.stdin.setEncoding("utf8");process.stdin.once("data",s=>{const r=JSON.parse(s);process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:r.id,result:process.env.APP_MCP_VALUE})+"\\n")})'] });
+  t.after(() => transport.close());
+  const response = new Promise((resolve, reject) => { transport.onmessage = resolve; transport.onerror = reject; });
+  await f.run('private', async () => {
+    await transport.start();
+    await transport.send({ jsonrpc: '2.0', id: 1, method: 'synthetic' });
+    assert.deepEqual(await response, { jsonrpc: '2.0', id: 1, result: 'synthetic-app-value' });
+  }, 'mcp__app__synthetic');
+  assert.equal(f.calls.length, 0);
+});
+
+test('App PTC can recall memory and finish in its original workspace', async t => {
+  const f = await fixture(t, { isolationRequired: false });
+  const runtime = await load('@deepseek-ai/dsh-ptc-runtime-node');
+  f.ctx.provide('sandbox', { confine: () => { throw new Error('unexpected confinement'); } });
+  Object.assign(f.ctx.sandboxPolicy, { defaultMode: 'danger-full-access', resolve: () => ({ mode: 'danger-full-access', workspaceRoot: f.workspace }) });
+  await f.ctx.plugin(runtime.default);
+  await f.run('clean', async () => {
+    const request = f.ctx.ptcRuntime.resolve({
+      program: `const value = await tools.memory({}); await (await import('node:fs/promises')).writeFile('memory-result.txt', value); return value;`,
+      bindings: [{ global: 'tools', functions: { memory: async () => {
+        f.sessions.set('clean', 'protected');
+        await f.boundary.beforeDisclosure('clean');
+        return 'APP_PRIVATE_MEMORY';
+      } } }], cwd: f.workspace });
+    const result = await f.ctx.ptcRuntime.run(request);
+    assert.equal(result.value, 'APP_PRIVATE_MEMORY');
+  }, 'run_code');
+  assert.equal(await readFile(join(f.workspace, 'memory-result.txt'), 'utf8'), 'APP_PRIVATE_MEMORY');
+  assert.equal(f.calls.length, 0);
+});
+
+test('App memory recall leaves a running task alive and shutdown still stops it', async t => {
+  const f = await fixture(t, { isolationRequired: false });
+  await f.run('clean', async () => {
+    const child = f.ctx.subprocess.spawn({ ...spec([process.execPath, '-e',
+      'process.stdout.write("ready");setInterval(()=>{},100)']),
+      cwd: f.workspace, stdio: { stdin: 'ignore', stdout: 'pipe', stderr: { maxBytes: 1024 } } });
+    await new Promise(resolve => child.stdout.once('data', resolve));
+    let ended = false;
+    child.done.then(() => { ended = true; });
+    f.sessions.set('clean', 'protected');
+    await f.boundary.beforeDisclosure('clean');
+    await f.boundary.quiesceLegacy();
+    assert.equal(ended, false);
+    await f.boundary.close();
+    assert.equal(await child.waitForExit(), true);
+    await child.done;
+  });
   assert.equal(f.calls.length, 0);
 });

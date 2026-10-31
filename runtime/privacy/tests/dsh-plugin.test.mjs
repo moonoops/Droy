@@ -38,10 +38,10 @@ const patched = (async () => {
 })();
 after(async () => { await patched.catch(() => {}); if (patchedRoot) await rm(patchedRoot, { recursive: true, force: true }); });
 
-async function fixture(t, { active = true, ready = true, execution = true, unavailableStore = false, api = 'openai-completions', model = 'synthetic' } = {}) {
+async function fixture(t, { active = true, ready = true, execution = true, unavailableStore = false, api = 'openai-completions', model = 'synthetic', privacyRoot } = {}) {
   const [{ llm, pi }, { Context }] = await Promise.all([patched, load('@deepseek-ai/cordis')]);
   const directory = await mkdtemp(join(tmpdir(), 'droy-privacy-plugin-'));
-  const store = await PrivacyStore.open({ directory: join(directory, 'store'), markerPath: join(directory, 'marker'), initialize: true });
+  const store = await PrivacyStore.open({ directory: join(privacyRoot ?? directory, 'store'), markerPath: join(privacyRoot ?? directory, 'marker'), initialize: true });
   const receipts = [];
   let mode = 'success', activeFlag = active, readyFlag = ready, identity = 'synthetic-direct', locale = 'zh';
   let storeError = unavailableStore ? 'PRIVACY_NOT_INITIALIZED' : undefined;
@@ -71,7 +71,7 @@ async function fixture(t, { active = true, ready = true, execution = true, unava
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${server.address().port}/v1`;
   const ctx = new Context();
-  ctx.provide('settings', { describe: () => [{ ns: 'locale', value: { preference: locale } }] });
+  ctx.provide('settings', { describe: () => [{ ns: 'locale', value: { preference: locale } }], configure() {} });
   await ctx.plugin(llm.default);
   ctx.provide('credentials', { resolve: async () => ({ value: 'synthetic-not-a-secret' }) });
   const host = { status: async () => ({ active: activeFlag, ready: readyFlag }),
@@ -97,6 +97,7 @@ async function fixture(t, { active = true, ready = true, execution = true, unava
   return { ctx, llm, pi, store, service, receipts, route, request, send, url,
     setMode: value => { mode = value; }, setReady: value => { readyFlag = value; }, setIdentity: value => { identity = value; },
     setStoreError: value => { storeError = value; },
+    setNativePrompts: value => { host.nativeAccessPrompts = value; },
     setLocale: value => { locale = value; },
     setActive: value => { activeFlag = value; }, setProviders: value => { providers = value; }, config, raw };
 }
@@ -104,6 +105,19 @@ function failed(chunks, code) {
   const last = chunks.at(-1);
   assert.equal(last.type, 'finish'); assert.equal(last.reason.kind, 'error');
   assert.ok(JSON.stringify(last).includes(code), JSON.stringify(last));
+}
+
+async function mountAgentLifecycle(f, history) {
+  const plugins = await Promise.all(['@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-projection',
+    '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop'].map(load));
+  for (let index = 0; index < plugins.length; index++) await f.ctx.plugin(plugins[index].default,
+    index === plugins.length - 1 ? { agents: [] } : undefined);
+  f.ctx.provide('shell', { sandboxMode: 'workspace-write' });
+  f.ctx.provide('approval', { config: { policy: 'ask' } });
+  await f.ctx.plugin((await load('@deepseek-ai/dsh-permission-presets')).default);
+  if (history) await f.ctx.plugin(await load('@deepseek-ai/dsh-session-persistence-jsonl'),
+    { root: history, compression: 'none' });
+  f.ctx.on('agent/created', payload => f.service.onAgentCreated(payload));
 }
 
 test('patches reject drift and repeated application', async () => {
@@ -120,15 +134,56 @@ test('missing mandatory execution protection never falls back to unguarded model
   assert.equal(f.receipts.length, 0);
 });
 
+test('only live product-restricted companions dispatch when legacy protection is active but unready', async t => {
+  const f = await fixture(t, { active: true, ready: false, unavailableStore: true });
+  const agent = { session: { id: 'companion-session' } };
+  let restricted = true;
+  f.ctx.provide('droyCompanions', {
+    ownsSession: id => id === agent.session.id,
+    isRestrictedAgent: candidate => restricted && candidate === agent,
+    isRestrictedSession: id => restricted && id === agent.session.id,
+  });
+  await f.service.onAgentCreated({ agent, source: 'startup' });
+  const chunks = await f.send(f.request(agent.session.id));
+  assert.equal(chunks.at(-1).reason.kind, 'stop');
+  assert.equal(f.receipts.length, 1);
+  await assert.rejects(f.service.onAgentCreated({ agent: { session: { id: agent.session.id } }, source: 'startup' }), /PRIVACY_NOT_INITIALIZED/);
+  failed(await f.send(f.request('legacy-work')), 'PRIVACY_NOT_INITIALIZED');
+  // Disposal/unrestricted scopes and other model-facing privacy APIs must not
+  // gain access merely because the product still owns the session identifier.
+  await assert.rejects(f.service.authorizeExecution(agent), /PRIVACY_NOT_INITIALIZED/);
+  await assert.rejects(f.service.getSourceSession(agent.session.id), /PRIVACY_EXECUTION_UNVERIFIED/);
+  restricted = false;
+  failed(await f.send(f.request(agent.session.id)), 'PRIVACY_NOT_INITIALIZED');
+  assert.equal(f.receipts.length, 1);
+});
+
+test('companion dispatch leaves existing protected and forgotten work records gated', async t => {
+  const f = await fixture(t);
+  await f.store.registerCleanSession('private-work');
+  await f.store.protectSession('private-work', { categories: ['memory'], sourceRefs: ['fixture-source'] });
+  f.ctx.provide('droyCompanions', {
+    ownsSession: id => id === 'companion-live',
+    isRestrictedSession: id => id === 'companion-live',
+  });
+  f.setReady(false);
+  assert.equal((await f.send(f.request('companion-live'))).at(-1).reason.kind, 'stop');
+  failed(await f.send(f.request('private-work')), 'PRIVACY_EXECUTION_UNVERIFIED');
+  await f.store.forgetSources(['fixture-source']);
+  failed(await f.send(f.request('private-work')), 'PRIVACY_SESSION_FORGOTTEN');
+  assert.equal(f.receipts.length, 1);
+  assert.equal((await f.store.sessionState('private-work')).state, 'forgotten');
+});
+
 test('an activated but unready host exposes its diagnostic status without opening an uninitialized store', async t => {
   const f = await fixture(t, { active: true, ready: false, unavailableStore: true });
   assert.deepEqual(await f.service.status(), { active: true, ready: false, reason: 'PRIVACY_EXECUTION_UNVERIFIED' });
   const chinese = await f.send(f.request());
   failed(chinese, 'PRIVACY_NOT_INITIALIZED');
-  assert.match(chinese.at(-1).reason.failure.message, /正在初始化.*Root/);
+  assert.match(chinese.at(-1).reason.failure.message, /记忆服务正在初始化.*刷新/);
   f.setLocale('en');
   const english = (await f.send(f.request())).at(-1).reason.failure;
-  assert.equal(english.code, 'PRIVACY_NOT_INITIALIZED'); assert.match(english.message, /initializing.*Root permission/);
+  assert.equal(english.code, 'PRIVACY_NOT_INITIALIZED'); assert.match(english.message, /Memory is initializing.*Refresh Memory settings/);
   assert.equal(f.receipts.length, 0);
 });
 
@@ -248,10 +303,10 @@ test('actual DSH error chunks preserve privacy codes and follow live Chinese/Eng
   const route = await f.route();
   await assert.rejects(f.service.beforeDisclosure({ sessionId: 'subject', categories: ['memory'], sourceRefs: ['synthetic-source'], route }),
     error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && error.message === error.code);
-  await expect('subject', 'PRIVACY_ENDPOINT_NOT_AUTHORIZED', /记忆设置.*处理授权/, /Processing permissions in Memory settings/);
+  await expect('subject', 'PRIVACY_ENDPOINT_NOT_AUTHORIZED', /记忆访问请求/, /memory access request/);
   await f.service.grantEndpoint(route, { categories: ['memory'] });
   f.setReady(false);
-  await expect('subject', 'PRIVACY_EXECUTION_UNVERIFIED', /Root.*保护状态/, /Root permission.*protection status/);
+  await expect('subject', 'PRIVACY_EXECUTION_UNVERIFIED', /记忆服务尚未就绪.*刷新/, /Memory is not ready.*Refresh Memory settings/);
   f.setReady(true); await f.service.forgetSources(['synthetic-source']);
   await expect('subject', 'PRIVACY_SESSION_FORGOTTEN', /新建对话/, /forgotten information.*new conversation/);
   f.setLocale(undefined);
@@ -362,7 +417,7 @@ test('real title executor and compaction summarizer enforce separate purpose gra
   const session = Session.create('subject');
   const title = () => executeSessionTitleLlm(f.ctx, { provider: 'synthetic', model: 'synthetic', maxInputBytes: 8192, maxOutputTokens: 256, timeoutMs: 5000 },
     { session, signal: new AbortController().signal }, 'synthetic-title', { system: 'Create a title.', input: 'SYNTHETIC_PRIVATE_RECORD', messageSeqs: [0], selectReasoningEffort: () => undefined });
-  await assert.rejects(title(), error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && /记忆设置.*处理授权/.test(error.message));
+  await assert.rejects(title(), error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && /记忆访问请求/.test(error.message));
   assert.equal(f.receipts.length, 0);
   await f.service.grantEndpoint(await f.route('session-title'), { categories: ['memory'] });
   assert.equal((await title()).finish.kind, 'stop');
@@ -371,7 +426,7 @@ test('real title executor and compaction summarizer enforce separate purpose gra
   const agent = { options: { provider: 'synthetic', model: 'synthetic' }, session };
   const compact = () => BasicCompactionEngine.prototype.summarize.call(owner,
     { messages: f.request().messages }, agent, new AbortController().signal);
-  await assert.rejects(compact(), error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && /记忆设置.*处理授权/.test(error.message));
+  await assert.rejects(compact(), error => error.code === 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' && /记忆访问请求/.test(error.message));
   assert.equal(f.receipts.length, 1);
   await f.service.grantEndpoint(await f.route('compaction'), { categories: ['memory'] });
   assert.equal((await compact()).llmStreamCall, true);
@@ -391,6 +446,176 @@ test('new session proof and fork inheritance are durable while unknown resume st
   const child = Session.create('child', undefined, { ...fresh.header, id: 'child', parentSession: 'fresh' });
   await f.service.onAgentCreated({ agent: { session: child }, source: 'startup' });
   assert.equal((await f.store.sessionState('child')).state, 'protected');
+});
+
+test('a conversation created before first activation keeps running and still requires memory endpoint consent', async t => {
+  const f = await fixture(t, { active: false, ready: false, unavailableStore: true });
+  await mountAgentLifecycle(f);
+  const handle = await f.ctx.agents.create({ sessionId: 'before-memory', agentOptions: { provider: 'synthetic', model: 'synthetic' } });
+  const agent = handle.agent;
+  assert.deepEqual(agent.session.snapshotEvents().map(event => event.type), ['permission/preset', 'sandbox/mode', 'approval/policy']);
+  const sendMessage = async () => {
+    agent.followup(f.llm.createUserMessage({ content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' } }));
+    await agent.whenIdle();
+  };
+  await sendMessage();
+  assert.equal(f.receipts.length, 1);
+  assert.ok(agent.session.snapshotEvents().length > 0);
+  assert.equal((await f.store.sessionState(agent.id)).state, 'unknown');
+  f.setStoreError(undefined); f.setReady(true); f.setActive(true);
+  assert.deepEqual(await f.service.authorizeExecution(agent), { state: 'known-clean' });
+  await sendMessage();
+  assert.equal(f.receipts.length, 2);
+  const route = await f.service.routeForAgent(agent);
+  await assert.rejects(f.service.beforeDisclosure({ sessionId: agent.id, categories: ['memory'],
+    sourceRefs: ['memory-record:first-activation'], route }), { code: 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' });
+  assert.equal(f.receipts.length, 2);
+  await assert.rejects(f.service.authorizeExecution(agent), { code: 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' });
+  await f.service.grantEndpoint(route, { categories: ['memory'] });
+  await f.service.beforeDisclosure({ sessionId: agent.id, categories: ['memory'], sourceRefs: ['memory-record:first-activation'], route });
+  assert.deepEqual(await f.service.authorizeExecution(agent), { state: 'protected' });
+  await sendMessage();
+  assert.equal(f.receipts.length, 3);
+  await f.service.revokeEndpoint(route);
+  failed(await f.send(f.request(agent.id)), 'PRIVACY_ENDPOINT_NOT_AUTHORIZED');
+  assert.equal(f.receipts.length, 3);
+  await handle.dispose();
+});
+
+test('activated tasks register after permission initialization and retain proof across runtime and store restart', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'droy-initial-permission-restart-'));
+  const history = join(root, 'history');
+  const first = await fixture(t, { privacyRoot: root });
+  let resumed;
+  t.after(async () => { await first.store.close(); await resumed?.store.close(); await rm(root, { recursive: true, force: true }); });
+  await mountAgentLifecycle(first, history);
+  const agentOptions = { provider: 'synthetic', model: 'synthetic' };
+  const original = await first.ctx.agents.create({ sessionId: 'permission-initialized-task', agentOptions });
+  assert.deepEqual(original.agent.session.snapshotEvents().map(event => event.type), ['permission/preset', 'sandbox/mode', 'approval/policy']);
+  assert.equal((await first.store.sessionState(original.agent.id)).state, 'known-clean');
+  const chat = async (f, agent) => {
+    agent.followup(f.llm.createUserMessage({ content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' } }));
+    await agent.whenIdle();
+    assert.equal(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end').data.reason.kind, 'completed');
+  };
+  await chat(first, original.agent);
+  await first.ctx.sessionPersistence.flush();
+  await original.dispose(); first.service.dispose(); await first.ctx.fiber.dispose(); await first.store.close();
+
+  resumed = await fixture(t, { privacyRoot: root });
+  await mountAgentLifecycle(resumed, history);
+  const restored = await resumed.ctx.agents.resume({ resumeSessionId: 'permission-initialized-task', agentOptions });
+  assert.equal((await resumed.store.sessionState(restored.agent.id)).state, 'known-clean');
+  await chat(resumed, restored.agent);
+  assert.equal(first.receipts.length, 1);
+  assert.equal(resumed.receipts.length, 1);
+  await restored.dispose();
+});
+
+test('initial permission events cannot clean seeded, resumed or content-bearing sessions', async t => {
+  const { Session } = await load('@deepseek-ai/dsh-session');
+  for (const active of [false, true]) {
+    const f = await fixture(t, { active });
+    const ids = [];
+    for (const kind of ['seeded', 'resumed', 'user-content', 'unknown-event']) {
+      const id = `${active ? 'active' : 'inactive'}-${kind}`;
+      ids.push(id);
+      const session = Session.create(id, kind === 'seeded' ? [] : undefined,
+        { ...Session.create(id).header, isSeeded: kind === 'seeded' }, kind === 'seeded' ? 0 : undefined);
+      session.append('permission/preset', { preset: 'workspace-write' });
+      session.append('sandbox/mode', { mode: 'workspace-write' });
+      session.append('approval/policy', { policy: 'ask' });
+      if (kind === 'user-content') session.append('user/message', { content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' }, role: 'user', id: 'synthetic-user' }, { surfaceOp: 'append' });
+      if (kind === 'unknown-event') session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [] });
+      await f.service.onAgentCreated({ agent: { session }, source: kind === 'resumed' ? 'resume' : 'startup' });
+    }
+    f.setActive(true);
+    await f.service.status();
+    for (const id of ids) {
+      assert.equal((await f.store.sessionState(id)).state, 'unknown', id);
+      failed(await f.send(f.request(id)), 'PRIVACY_SESSION_UNKNOWN');
+    }
+    assert.equal(f.receipts.length, 0);
+  }
+});
+
+test('pre-activation provenance preserves forks and never cleans imported, protected or forgotten history', async t => {
+  const f = await fixture(t, { active: false, ready: false, unavailableStore: true });
+  const { Session } = await load('@deepseek-ai/dsh-session');
+  const created = async (id, meta = {}, source = 'startup') => {
+    const session = Session.create(id, meta.isSeeded ? [] : undefined,
+      { ...Session.create(id).header, ...meta }, meta.isSeeded ? 0 : undefined);
+    await f.service.onAgentCreated({ agent: { session }, source });
+    return session;
+  };
+  await created('fresh-before-memory');
+  await created('child-before-memory', { parentSession: 'fresh-before-memory', isSeeded: true });
+  await created('grandchild-before-memory', { parentSession: 'child-before-memory', isSeeded: true });
+  await created('imported-before-memory', { isSeeded: true });
+  await created('resumed-before-memory', {}, 'resume');
+  await created('unknown-parent-child', { parentSession: 'legacy-unknown', isSeeded: true });
+  await created('previously-protected');
+  await created('previously-forgotten');
+  await f.store.protectSession('previously-protected', { categories: ['memory'], sourceRefs: ['prior-protected'] });
+  await f.store.protectSession('previously-forgotten', { categories: ['memory'], sourceRefs: ['prior-forgotten'] });
+  await f.store.forgetSources(['prior-forgotten']);
+  await created('protected-child', { parentSession: 'previously-protected', isSeeded: true });
+  await created('forgotten-child', { parentSession: 'previously-forgotten', isSeeded: true });
+  f.setStoreError(undefined); f.setReady(true); f.setActive(true);
+  await Promise.all([f.service.status(), f.service.status(), f.service.authorizeExecution({ session: { id: 'grandchild-before-memory' } })]);
+  for (const id of ['fresh-before-memory', 'child-before-memory', 'grandchild-before-memory']) {
+    assert.equal((await f.store.sessionState(id)).state, 'known-clean', id);
+  }
+  for (const id of ['imported-before-memory', 'resumed-before-memory', 'unknown-parent-child', 'legacy-unknown']) {
+    assert.equal((await f.store.sessionState(id)).state, 'unknown', id);
+    failed(await f.send(f.request(id)), 'PRIVACY_SESSION_UNKNOWN');
+  }
+  for (const id of ['previously-protected', 'protected-child']) assert.equal((await f.store.sessionState(id)).state, 'protected', id);
+  for (const id of ['previously-forgotten', 'forgotten-child']) assert.equal((await f.store.sessionState(id)).state, 'forgotten', id);
+  assert.equal(f.receipts.length, 0);
+});
+
+test('first activation preserves a real resumed local conversation while seeded history remains unknown', async t => {
+  const first = await fixture(t, { active: false, ready: false, unavailableStore: true });
+  const resumed = await fixture(t, { active: false, ready: false, unavailableStore: true });
+  const history = await mkdtemp(join(tmpdir(), 'droy-before-memory-resume-'));
+  t.after(() => rm(history, { recursive: true, force: true }));
+  const chat = async (f, agent) => {
+    agent.followup(f.llm.createUserMessage({ content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' } }));
+    await agent.whenIdle();
+  };
+  const agentOptions = { provider: 'synthetic', model: 'synthetic' };
+  await mountAgentLifecycle(first, history);
+  const original = await first.ctx.agents.create({ sessionId: 'ordinary-local-history', agentOptions });
+  await chat(first, original.agent);
+  assert.equal(first.receipts.length, 1);
+  const imported = await first.ctx.agents.create({ sessionId: 'imported-seed-history', agentOptions,
+    seed: [], meta: { isSeeded: true }, inheritedEventCount: 0 });
+  await first.ctx.sessionPersistence.flush();
+  await imported.dispose(); await original.dispose(); first.service.dispose();
+
+  await mountAgentLifecycle(resumed, history);
+  const sources = [];
+  resumed.ctx.on('agent/created', ({ source }) => { sources.push(source); });
+  const restored = await resumed.ctx.agents.resume({ resumeSessionId: 'ordinary-local-history', agentOptions });
+  const restoredImport = await resumed.ctx.agents.resume({ resumeSessionId: 'imported-seed-history', agentOptions });
+  assert.deepEqual(sources, ['resume', 'resume']);
+  assert.equal(restored.agent.session.header.isSeeded, false);
+  assert.ok(restored.agent.session.snapshotEvents().length > 0);
+  resumed.setStoreError(undefined); resumed.setReady(true); resumed.setActive(true);
+  assert.deepEqual(await resumed.service.authorizeExecution(restored.agent), { state: 'known-clean' });
+  await chat(resumed, restored.agent);
+  assert.equal(resumed.receipts.length, 1);
+  failed(await resumed.send(resumed.request(restoredImport.agent.id)), 'PRIVACY_SESSION_UNKNOWN');
+  assert.equal(resumed.receipts.length, 1);
+  const route = await resumed.service.routeForAgent(restored.agent);
+  await assert.rejects(resumed.service.beforeDisclosure({ sessionId: restored.agent.id, categories: ['memory'], route }),
+    { code: 'PRIVACY_ENDPOINT_NOT_AUTHORIZED' });
+  await resumed.service.grantEndpoint(route, { categories: ['memory'] });
+  assert.deepEqual(await resumed.service.authorizeExecution(restored.agent), { state: 'protected' });
+  await chat(resumed, restored.agent);
+  assert.equal(resumed.receipts.length, 2);
+  await restoredImport.dispose(); await restored.dispose();
 });
 
 test('route metadata is immutable, config/provider changes are distinct and proxy identity invalidates old capability', async t => {
@@ -496,4 +721,73 @@ test('real DSH agent creation awaits protection and its conversation reaches the
   assert.equal(f.receipts.length, 1);
   assert.equal(f.receipts[0].private, true);
   await handle.dispose();
+});
+
+async function waitForAccess(service) {
+  for (let i = 0; i < 100; i++) {
+    const pending = service.pendingEndpointAccess();
+    if (pending.length) return pending[0];
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.fail('Missing endpoint authorization request');
+}
+test('native first use waits for explicit endpoint/category consent then resumes without a second model request', async t => {
+  const f = await fixture(t); f.setNativePrompts(true);
+  const route = await f.route('conversation');
+  const pending = f.service.beforeDisclosure({ sessionId: 'first-use', categories: ['memory', 'location'], sourceRefs: ['memory:fixture'], route });
+  const request = await waitForAccess(f.service);
+  assert.equal(request.url, f.url + '/chat/completions');
+  assert.equal(request.purpose, 'conversation');
+  assert.deepEqual([...request.categories].sort(), ['location', 'memory']);
+  assert.equal(request.configVersion.length, 64); assert.equal(f.receipts.length, 0);
+  assert.equal((await f.store.listGrants()).length, 0);
+  f.service.resolveEndpointAccess(request.id, true); await pending;
+  assert.equal(f.service.pendingEndpointAccess().length, 0);
+  assert.equal((await f.store.listGrants()).length, 1);
+  const result = await f.send(f.request('first-use'));
+  assert.equal(result.at(-1).reason.kind, 'stop'); assert.equal(f.receipts.length, 1);
+});
+test('declining, cancelling and changed routing never create a grant or expose private data', async t => {
+  for (const action of ['decline', 'cancel', 'routing']) {
+    const f = await fixture(t); f.setNativePrompts(true);
+    const route = await f.route('conversation'); const controller = new AbortController();
+    const pending = f.service.beforeDisclosure({ sessionId: action, categories: ['memory'], sourceRefs: ['memory:fixture'], route, signal: controller.signal });
+    const outcome = assert.rejects(pending);
+    const request = await waitForAccess(f.service);
+    if (action === 'cancel') controller.abort();
+    else { if (action === 'routing') f.setIdentity('changed'); f.service.resolveEndpointAccess(request.id, action === 'routing'); }
+    await outcome;
+    assert.equal(f.service.pendingEndpointAccess().length, 0);
+    assert.equal((await f.store.listGrants()).length, 0); assert.equal(f.receipts.length, 0);
+    assert.throws(() => f.service.resolveEndpointAccess(request.id, true), /EXPIRED/);
+  }
+});
+
+test('revocation or changing the protected sources while a prompt is open invalidates approval', async t => {
+  for (const action of ['revoke', 'source']) {
+    const f = await fixture(t); f.setNativePrompts(true);
+    const route = await f.route('conversation');
+    const pending = f.service.beforeDisclosure({ sessionId: 'changed', categories: ['memory'], sourceRefs: ['memory:fixture'], route });
+    const outcome = assert.rejects(pending);
+    const request = await waitForAccess(f.service);
+    if (action === 'revoke') await f.service.revokeEndpoint(route);
+    else {
+      await f.store.protectSession('changed', { categories: ['location'], sourceRefs: ['location:new'] });
+      f.service.resolveEndpointAccess(request.id, true);
+    }
+    await outcome;
+    assert.equal((await f.store.listGrants()).length, 0);
+    assert.equal(f.receipts.length, 0);
+  }
+});
+
+test('granting a new category preserves existing consent for the same endpoint and purpose', async t => {
+  const f = await fixture(t); f.setNativePrompts(true);
+  const route = await f.route('conversation');
+  await f.service.grantEndpoint(route, { categories: ['memory'] });
+  const pending = f.service.beforeDisclosure({ sessionId: 'new-category', categories: ['location'], sourceRefs: ['location:fixture'], route });
+  const request = await waitForAccess(f.service);
+  assert.deepEqual(request.categories, ['location']);
+  f.service.resolveEndpointAccess(request.id, true); await pending;
+  assert.deepEqual((await f.store.listGrants())[0].categories, ['location', 'memory']);
 });

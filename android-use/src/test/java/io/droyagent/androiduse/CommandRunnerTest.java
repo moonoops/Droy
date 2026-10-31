@@ -4,10 +4,39 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CompletableFuture;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class CommandRunnerTest {
+    @Test public void observedExitRetiresLeaseEvenWhenPostExitCancellationRejectsTheResult() throws Exception {
+        AtomicReference<CompletableFuture<?>> lease = new AtomicReference<>();
+        Cancellation cancellation = new Cancellation() {
+            public void check() throws InterruptedException {
+                if (lease.get() != null && lease.get().isDone()) throw new InterruptedException("cancelled after exit");
+            }
+            public void track(String kind, String id, CompletableFuture<?> settled) { lease.set(settled); }
+        };
+        assertThrows(InterruptedException.class, () ->
+                CommandRunner.run(List.of("/bin/sh", "-c", "exit 0"), 1024, 1000, cancellation));
+        assertTrue("Confirmed process exit must retire the recovery claim", lease.get().isDone());
+    }
+
+    @Test public void cancelledWaitDoesNotClaimThatThePrivilegedChildExited() throws Exception {
+        AtomicReference<CompletableFuture<?>> lease = new AtomicReference<>();
+        AtomicInteger checks = new AtomicInteger();
+        Cancellation cancellation = new Cancellation() {
+            public void check() throws InterruptedException {
+                if (checks.incrementAndGet() >= 3) throw new InterruptedException("cancelled");
+            }
+            public void track(String kind, String id, CompletableFuture<?> settled) { lease.set(settled); }
+        };
+        assertThrows(InterruptedException.class, () ->
+                CommandRunner.run(List.of("/bin/sh", "-c", "exec sleep 10"), 1024, 10000, cancellation));
+        assertFalse("Destroying the local waiter is not a privileged-child exit receipt", lease.get().isDone());
+    }
+
     @Test public void cancelledTaskNeverStartsAProcess() throws Exception {
         Path marker = Files.createTempDirectory("droy-command-test").resolve("executed");
         try {
