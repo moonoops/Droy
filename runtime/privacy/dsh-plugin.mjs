@@ -5,6 +5,10 @@ export const name = 'droy-privacy';
 export const inject = ['llm', 'droyPrivacyHost'];
 export const PREPARED_ROUTE = Symbol.for('droy.privacy.prepared-route.v1');
 const REQUEST_PURPOSES = new Set(['conversation', 'compaction', 'session-title', 'extraction']);
+// DSH pins permission defaults on session/created, before agent/created.
+// Those configuration records do not turn a fresh task into imported history.
+const INITIAL_PERMISSION_EVENTS = new Set(['permission/preset', 'sandbox/mode', 'approval/policy']);
+const hasOnlyInitialPermissionEvents = session => session.snapshotEvents().every(event => INITIAL_PERMISSION_EVENTS.has(event.type));
 const fail = code => { throw new PrivacyError(code); };
 const purposeOf = value => {
   const purpose = value ?? 'conversation';
@@ -302,7 +306,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
       // Before first activation, DSH's own unseeded local history is ordinary
       // conversation data. Imported seeds still need their original lineage.
       if (header.parentSession) pendingSessions.set(sessionId, sessionIdentity(header.parentSession));
-      else if (!header.isSeeded && (localResume || session.snapshotEvents().length === 0)) pendingSessions.set(sessionId, null);
+      else if (!header.isSeeded && (localResume || hasOnlyInitialPermissionEvents(session))) pendingSessions.set(sessionId, null);
       return;
     }
     const current = await (await getStore()).sessionState(sessionIdentity(agent?.session?.id));
@@ -316,7 +320,7 @@ export function createDshPrivacyService({ ctx, store, host, fetchImpl = globalTh
     }
     // Imported/resumed, compacted or seeded content has no clean-state proof.
     // Keep it inspectable locally; dispatch will refuse unknown provenance.
-    if (source !== 'startup' || header.isSeeded || agent.session.snapshotEvents().length !== 0) return;
+    if (source !== 'startup' || header.isSeeded || !hasOnlyInitialPermissionEvents(agent.session)) return;
     await (await getStore()).registerCleanSession(header.id);
   }
   async function checkDispatch(options, route) {

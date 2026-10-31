@@ -38,10 +38,10 @@ const patched = (async () => {
 })();
 after(async () => { await patched.catch(() => {}); if (patchedRoot) await rm(patchedRoot, { recursive: true, force: true }); });
 
-async function fixture(t, { active = true, ready = true, execution = true, unavailableStore = false, api = 'openai-completions', model = 'synthetic' } = {}) {
+async function fixture(t, { active = true, ready = true, execution = true, unavailableStore = false, api = 'openai-completions', model = 'synthetic', privacyRoot } = {}) {
   const [{ llm, pi }, { Context }] = await Promise.all([patched, load('@deepseek-ai/cordis')]);
   const directory = await mkdtemp(join(tmpdir(), 'droy-privacy-plugin-'));
-  const store = await PrivacyStore.open({ directory: join(directory, 'store'), markerPath: join(directory, 'marker'), initialize: true });
+  const store = await PrivacyStore.open({ directory: join(privacyRoot ?? directory, 'store'), markerPath: join(privacyRoot ?? directory, 'marker'), initialize: true });
   const receipts = [];
   let mode = 'success', activeFlag = active, readyFlag = ready, identity = 'synthetic-direct', locale = 'zh';
   let storeError = unavailableStore ? 'PRIVACY_NOT_INITIALIZED' : undefined;
@@ -71,7 +71,7 @@ async function fixture(t, { active = true, ready = true, execution = true, unava
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${server.address().port}/v1`;
   const ctx = new Context();
-  ctx.provide('settings', { describe: () => [{ ns: 'locale', value: { preference: locale } }] });
+  ctx.provide('settings', { describe: () => [{ ns: 'locale', value: { preference: locale } }], configure() {} });
   await ctx.plugin(llm.default);
   ctx.provide('credentials', { resolve: async () => ({ value: 'synthetic-not-a-secret' }) });
   const host = { status: async () => ({ active: activeFlag, ready: readyFlag }),
@@ -105,6 +105,19 @@ function failed(chunks, code) {
   const last = chunks.at(-1);
   assert.equal(last.type, 'finish'); assert.equal(last.reason.kind, 'error');
   assert.ok(JSON.stringify(last).includes(code), JSON.stringify(last));
+}
+
+async function mountAgentLifecycle(f, history) {
+  const plugins = await Promise.all(['@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-projection',
+    '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop'].map(load));
+  for (let index = 0; index < plugins.length; index++) await f.ctx.plugin(plugins[index].default,
+    index === plugins.length - 1 ? { agents: [] } : undefined);
+  f.ctx.provide('shell', { sandboxMode: 'workspace-write' });
+  f.ctx.provide('approval', { config: { policy: 'ask' } });
+  await f.ctx.plugin((await load('@deepseek-ai/dsh-permission-presets')).default);
+  if (history) await f.ctx.plugin(await load('@deepseek-ai/dsh-session-persistence-jsonl'),
+    { root: history, compression: 'none' });
+  f.ctx.on('agent/created', payload => f.service.onAgentCreated(payload));
 }
 
 test('patches reject drift and repeated application', async () => {
@@ -437,13 +450,10 @@ test('new session proof and fork inheritance are durable while unknown resume st
 
 test('a conversation created before first activation keeps running and still requires memory endpoint consent', async t => {
   const f = await fixture(t, { active: false, ready: false, unavailableStore: true });
-  const plugins = await Promise.all(['@deepseek-ai/dsh-session', '@deepseek-ai/dsh-session-projection',
-    '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop'].map(load));
-  for (let index = 0; index < plugins.length; index++) await f.ctx.plugin(plugins[index].default,
-    index === plugins.length - 1 ? { agents: [] } : undefined);
-  f.ctx.on('agent/created', payload => f.service.onAgentCreated(payload));
+  await mountAgentLifecycle(f);
   const handle = await f.ctx.agents.create({ sessionId: 'before-memory', agentOptions: { provider: 'synthetic', model: 'synthetic' } });
   const agent = handle.agent;
+  assert.deepEqual(agent.session.snapshotEvents().map(event => event.type), ['permission/preset', 'sandbox/mode', 'approval/policy']);
   const sendMessage = async () => {
     agent.followup(f.llm.createUserMessage({ content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' } }));
     await agent.whenIdle();
@@ -470,6 +480,63 @@ test('a conversation created before first activation keeps running and still req
   failed(await f.send(f.request(agent.id)), 'PRIVACY_ENDPOINT_NOT_AUTHORIZED');
   assert.equal(f.receipts.length, 3);
   await handle.dispose();
+});
+
+test('activated tasks register after permission initialization and retain proof across runtime and store restart', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'droy-initial-permission-restart-'));
+  const history = join(root, 'history');
+  const first = await fixture(t, { privacyRoot: root });
+  let resumed;
+  t.after(async () => { await first.store.close(); await resumed?.store.close(); await rm(root, { recursive: true, force: true }); });
+  await mountAgentLifecycle(first, history);
+  const agentOptions = { provider: 'synthetic', model: 'synthetic' };
+  const original = await first.ctx.agents.create({ sessionId: 'permission-initialized-task', agentOptions });
+  assert.deepEqual(original.agent.session.snapshotEvents().map(event => event.type), ['permission/preset', 'sandbox/mode', 'approval/policy']);
+  assert.equal((await first.store.sessionState(original.agent.id)).state, 'known-clean');
+  const chat = async (f, agent) => {
+    agent.followup(f.llm.createUserMessage({ content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' } }));
+    await agent.whenIdle();
+    assert.equal(agent.session.snapshotEvents().findLast(event => event.type === 'turn/end').data.reason.kind, 'completed');
+  };
+  await chat(first, original.agent);
+  await first.ctx.sessionPersistence.flush();
+  await original.dispose(); first.service.dispose(); await first.ctx.fiber.dispose(); await first.store.close();
+
+  resumed = await fixture(t, { privacyRoot: root });
+  await mountAgentLifecycle(resumed, history);
+  const restored = await resumed.ctx.agents.resume({ resumeSessionId: 'permission-initialized-task', agentOptions });
+  assert.equal((await resumed.store.sessionState(restored.agent.id)).state, 'known-clean');
+  await chat(resumed, restored.agent);
+  assert.equal(first.receipts.length, 1);
+  assert.equal(resumed.receipts.length, 1);
+  await restored.dispose();
+});
+
+test('initial permission events cannot clean seeded, resumed or content-bearing sessions', async t => {
+  const { Session } = await load('@deepseek-ai/dsh-session');
+  for (const active of [false, true]) {
+    const f = await fixture(t, { active });
+    const ids = [];
+    for (const kind of ['seeded', 'resumed', 'user-content', 'unknown-event']) {
+      const id = `${active ? 'active' : 'inactive'}-${kind}`;
+      ids.push(id);
+      const session = Session.create(id, kind === 'seeded' ? [] : undefined,
+        { ...Session.create(id).header, isSeeded: kind === 'seeded' }, kind === 'seeded' ? 0 : undefined);
+      session.append('permission/preset', { preset: 'workspace-write' });
+      session.append('sandbox/mode', { mode: 'workspace-write' });
+      session.append('approval/policy', { policy: 'ask' });
+      if (kind === 'user-content') session.append('user/message', { content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' }, role: 'user', id: 'synthetic-user' }, { surfaceOp: 'append' });
+      if (kind === 'unknown-event') session.append('agent/inbox/spliced', { target: 'next-turn', start: 0, inserted: [] });
+      await f.service.onAgentCreated({ agent: { session }, source: kind === 'resumed' ? 'resume' : 'startup' });
+    }
+    f.setActive(true);
+    await f.service.status();
+    for (const id of ids) {
+      assert.equal((await f.store.sessionState(id)).state, 'unknown', id);
+      failed(await f.send(f.request(id)), 'PRIVACY_SESSION_UNKNOWN');
+    }
+    assert.equal(f.receipts.length, 0);
+  }
 });
 
 test('pre-activation provenance preserves forks and never cleans imported, protected or forgotten history', async t => {
@@ -513,21 +580,12 @@ test('first activation preserves a real resumed local conversation while seeded 
   const resumed = await fixture(t, { active: false, ready: false, unavailableStore: true });
   const history = await mkdtemp(join(tmpdir(), 'droy-before-memory-resume-'));
   t.after(() => rm(history, { recursive: true, force: true }));
-  const [Jsonl, ...plugins] = await Promise.all(['@deepseek-ai/dsh-session-persistence-jsonl', '@deepseek-ai/dsh-session',
-    '@deepseek-ai/dsh-session-projection', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-tools',
-    '@deepseek-ai/dsh-agent', '@deepseek-ai/dsh-agent-loop'].map(load));
-  const mount = async f => {
-    for (let index = 0; index < plugins.length; index++) await f.ctx.plugin(plugins[index].default,
-      index === plugins.length - 1 ? { agents: [] } : undefined);
-    await f.ctx.plugin(Jsonl, { root: history, compression: 'none' });
-    f.ctx.on('agent/created', payload => f.service.onAgentCreated(payload));
-  };
   const chat = async (f, agent) => {
     agent.followup(f.llm.createUserMessage({ content: [{ type: 'text', text: 'SYNTHETIC_PRIVATE_RECORD' }], source: { kind: 'user' } }));
     await agent.whenIdle();
   };
   const agentOptions = { provider: 'synthetic', model: 'synthetic' };
-  await mount(first);
+  await mountAgentLifecycle(first, history);
   const original = await first.ctx.agents.create({ sessionId: 'ordinary-local-history', agentOptions });
   await chat(first, original.agent);
   assert.equal(first.receipts.length, 1);
@@ -536,7 +594,7 @@ test('first activation preserves a real resumed local conversation while seeded 
   await first.ctx.sessionPersistence.flush();
   await imported.dispose(); await original.dispose(); first.service.dispose();
 
-  await mount(resumed);
+  await mountAgentLifecycle(resumed, history);
   const sources = [];
   resumed.ctx.on('agent/created', ({ source }) => { sources.push(source); });
   const restored = await resumed.ctx.agents.resume({ resumeSessionId: 'ordinary-local-history', agentOptions });

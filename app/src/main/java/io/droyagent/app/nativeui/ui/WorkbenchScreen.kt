@@ -629,6 +629,11 @@ private fun ErrorContent(code: String, onRetry: () -> Unit, onDismiss: () -> Uni
         "COMPANION_SESSION_MANAGED", "COMPANION_WORKSPACE_MANAGED" -> R.string.native_companion_work
         "runtime_start_failed" -> R.string.native_engine_start_failed
         "service_temporarily_unavailable" -> R.string.native_service_unavailable
+        "PRIVACY_SESSION_UNKNOWN" -> R.string.native_error_privacy_unknown
+        "PRIVACY_SESSION_FORGOTTEN" -> R.string.native_error_privacy_forgotten
+        "PRIVACY_ENDPOINT_NOT_AUTHORIZED" -> R.string.native_error_privacy_consent
+        "PRIVACY_EXECUTION_UNVERIFIED" -> R.string.native_error_privacy_not_ready
+        "PRIVACY_NOT_INITIALIZED" -> R.string.native_error_privacy_initializing
         else -> if (code.startsWith("native_")) nativeInputErrorResource(code) else R.string.native_error_generic
     }
     DroyErrorNotice(stringResource(message), onDismiss, onRetry, Modifier.testTag("native-error"))

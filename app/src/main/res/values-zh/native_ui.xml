@@ -49,6 +49,11 @@
     <string name="native_seconds_value">%1$.1f 秒</string>
     <string name="native_close">关闭</string>
     <string name="native_error_generic">未能完成请求</string>
+    <string name="native_error_privacy_unknown">无法确认此对话的隐私状态，请新建对话继续。</string>
+    <string name="native_error_privacy_forgotten">此对话包含已忘记的内容，请新建对话继续。</string>
+    <string name="native_error_privacy_consent">当前模型未获准读取这些记忆，请在下次发送时确认访问请求。</string>
+    <string name="native_error_privacy_not_ready">隐私保护尚未就绪，请稍后重试。</string>
+    <string name="native_error_privacy_initializing">正在启动隐私保护，请稍后重试。</string>
     <string name="native_error_network">连接中断</string>
     <string name="native_error_response">无法读取返回内容</string>
     <string name="native_error_gap">正在重新同步对话</string>

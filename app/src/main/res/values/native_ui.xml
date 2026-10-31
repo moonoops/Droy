@@ -49,6 +49,11 @@
     <string name="native_seconds_value">%1$.1f s</string>
     <string name="native_close">Close</string>
     <string name="native_error_generic">Could not complete the request</string>
+    <string name="native_error_privacy_unknown">The privacy status of this conversation cannot be verified. Start a new conversation to continue.</string>
+    <string name="native_error_privacy_forgotten">This conversation contains forgotten information. Start a new conversation to continue.</string>
+    <string name="native_error_privacy_consent">This model is not authorized to read this memory. Review the access request when you send another message.</string>
+    <string name="native_error_privacy_not_ready">Privacy protection is not ready. Try again in a moment.</string>
+    <string name="native_error_privacy_initializing">Privacy protection is starting. Try again in a moment.</string>
     <string name="native_error_network">Connection interrupted</string>
     <string name="native_error_response">The response could not be read</string>
     <string name="native_error_gap">Refreshing conversation state</string>
