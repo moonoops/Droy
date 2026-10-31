@@ -95,7 +95,7 @@
     <string name="native_task_type">任务类型</string>
     <string name="native_task_default">默认</string>
     <string name="native_workbench_font">字体大小</string>
-    <string name="native_font_size_value">字号（14–22）</string>
+    <string name="native_font_size_value">字号（6–22）</string>
     <string name="native_font_preview">调整到适合阅读对话的字号。</string>
     <string name="native_font_reset">恢复默认</string>
     <string name="native_font_apply">应用</string>

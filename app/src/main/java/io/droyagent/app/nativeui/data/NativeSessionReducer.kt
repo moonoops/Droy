@@ -326,35 +326,10 @@ class NativeSessionReducer {
             requestId = source?.optionalSourceString("rpcId").takeIf { role == "user" && sourceKind in setOf("user", "user-rpc") })
     }
 
+    // Chat, copy and accessibility share this projection; reasoning stays in the raw journal/stream.
     private fun contentText(blocks: List<JSONObject>): String = blocks.mapNotNull { block ->
-        when (block.optString("type")) {
-            "text" -> block.optString("text")
-            "reasoning" -> reasoningDisplayText(block.optString("text")).takeIf(String::isNotEmpty)
-            else -> null
-        }
+        block.optString("text").takeIf { block.optString("type") == "text" }
     }.joinToString("\n\n")
-
-    // Match DSH's reasoning display projection without changing journal or stream data.
-    private fun reasoningDisplayText(text: String): String {
-        if (!text.startsWith('<')) return text
-        val opening = "<signature>"
-        if (opening.startsWith(text)) return ""
-        if (!text.startsWith(opening)) return text
-        val closing = "</signature>"
-        val end = text.indexOf(closing, opening.length)
-        if (end == -1) return ""
-        var start = end + closing.length
-        while (start < text.length) {
-            if (text[start] == '\n') start++
-            else if (text[start] == '\r' && text.getOrNull(start + 1) == '\n') start += 2
-            else break
-        }
-        val display = text.substring(start)
-        // DSH hides a processed, blank row using JavaScript trim's whitespace set.
-        return display.takeUnless { value -> value.all {
-            it in "\t\n\u000B\u000C\r \u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF"
-        } } ?: ""
-    }
 
     private fun applyCompact(attempt: Attempt, record: JSONObject) {
         when (record.getString("type")) {

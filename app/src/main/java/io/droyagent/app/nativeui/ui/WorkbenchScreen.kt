@@ -508,7 +508,7 @@ private fun WorkbenchHistory(
     }
     LaunchedEffect(pendingVoiceId) { if (pendingVoiceId != null) followingTail = true }
     val currentPendingVoice by rememberUpdatedState(pendingVoiceId)
-    LaunchedEffect(list) {
+    LaunchedEffect(list, MaterialTheme.typography.bodyLarge.fontSize) {
         snapshotFlow {
             val latest = currentState.messages.lastOrNull { workbenchMessageVisible(it) }
             listOf(restored, followingTail, latest?.id, latest?.text, currentPendingVoice,
@@ -651,6 +651,7 @@ fun NativeMessageCard(message: NativeMessage, onCopy: (String) -> Unit, onOpenLi
     if (!workbenchMessageVisible(message)) return
     val user = message.role == "user"
     val process = message.kind == "context" || message.kind == "reasoning" || message.toolName != null || message.kind.startsWith("tool")
+    val text = if (process) "" else message.text
     var actions by remember(message.id) { mutableStateOf(false) }
     var transcript by rememberSaveable(message.id) { mutableStateOf(false) }
     val voice = message.attachments.size == 1 && message.attachments.first().isPlayableAudio()
@@ -659,12 +660,13 @@ fun NativeMessageCard(message: NativeMessage, onCopy: (String) -> Unit, onOpenLi
         Surface(shape = MaterialTheme.shapes.large,
             color = if (user) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
             contentColor = if (user) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.testTag("native-message-bubble:${message.id}").widthIn(max = if (user) 340.dp else 560.dp).combinedClickable(onClick = onClick, onLongClickLabel = stringResource(R.string.native_copy_reply), onLongClick = { actions = true })) {
+            modifier = Modifier.testTag("native-message-bubble:${message.id}").widthIn(max = if (user) 340.dp else 560.dp).combinedClickable(onClick = onClick,
+                onLongClickLabel = stringResource(R.string.native_copy_reply), onLongClick = if (text.isNotBlank()) { { actions = true } } else null)) {
             Column(Modifier.padding(horizontal = if (voice) 0.dp else 16.dp, vertical = if (voice) 0.dp else 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!process && !voice && message.text.isNotEmpty()) {
-                    if (user) SelectionContainer { Text(message.text, style = MaterialTheme.typography.bodyLarge) }
-                    else NativeRichText(message.text, onCopy, onOpenLink)
+                if (!voice && text.isNotEmpty()) {
+                    if (user) SelectionContainer { Text(text, style = MaterialTheme.typography.bodyLarge) }
+                    else NativeRichText(text, onCopy, onOpenLink)
                 }
                 MessageAttachments(message, onOpenAttachment, onLoadAttachment)
             }
@@ -673,17 +675,17 @@ fun NativeMessageCard(message: NativeMessage, onCopy: (String) -> Unit, onOpenLi
         if (message.failed && onRetry != null) TextButton(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) {
             Text(stringResource(R.string.native_retry), color = MaterialTheme.colorScheme.error)
         }
-        if (voice && message.text.isNotBlank()) {
-            if (transcript) Text(message.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(8.dp))
+        if (voice && text.isNotBlank()) {
+            if (transcript) Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(8.dp))
         }
         Box {
             DropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
-                if (voice && message.text.isNotBlank()) DropdownMenuItem(text = { Text(stringResource(R.string.native_work_transcript)) },
+                if (voice && text.isNotBlank()) DropdownMenuItem(text = { Text(stringResource(R.string.native_work_transcript)) },
                     leadingIcon = { DroyIcon(R.drawable.native_ui_description, null) },
                     onClick = { actions = false; transcript = !transcript })
-                if (message.text.isNotBlank()) DropdownMenuItem(text = { Text(stringResource(R.string.native_copy_reply)) },
+                if (text.isNotBlank()) DropdownMenuItem(text = { Text(stringResource(R.string.native_copy_reply)) },
                     leadingIcon = { DroyIcon(R.drawable.native_ui_content_copy, null) },
-                    onClick = { actions = false; onCopy(message.text) })
+                    onClick = { actions = false; onCopy(text) })
             }
         }
     }

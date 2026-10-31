@@ -26,6 +26,8 @@ import io.droyagent.app.nativeui.data.NativeReadingPosition
 import io.droyagent.app.nativeui.ui.DroyIcon
 import io.droyagent.app.nativeui.ui.DroyIconAction
 import io.droyagent.app.nativeui.ui.NativeMessageCard
+import io.droyagent.app.nativeui.ui.WorkbenchReadingTheme
+import io.droyagent.app.nativeui.ui.rememberWorkbenchReadingSize
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -42,6 +44,7 @@ fun NativeTranscriptScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
+    val reading = rememberWorkbenchReadingSize()
     val copied = stringResource(R.string.native_copied)
     val copyFailed = stringResource(R.string.native_copy_failed)
     Scaffold(modifier.fillMaxSize().testTag("native-transcript"), contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -66,14 +69,14 @@ fun NativeTranscriptScreen(
         }) { padding ->
         val address = state.address
         if (address != null) key(address.parentSessionId, address.childSessionId) {
-            TranscriptHistory(state, onLoadOlder = model::loadOlder, onRetry = model::refresh,
+            WorkbenchReadingTheme(reading.value) { TranscriptHistory(state, onLoadOlder = model::loadOlder, onRetry = model::refresh,
                 onReading = { model.setReadingPosition(address, it) },
                 onCopy = { text ->
                     val message = try { clipboard.setText(AnnotatedString(text)); copied } catch (_: SecurityException) { copyFailed }
                     scope.launch { snackbar.showSnackbar(message) }
                 }, onOpenLink = onOpenLink,
                 onOpenAttachment = onOpenAttachment?.let { open -> { message, attachment -> open(address, message, attachment) } },
-                modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding))
+                modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) }
         }
     }
 }
@@ -97,8 +100,11 @@ private fun TranscriptHistory(
     val effects = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     val spatial = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
     fun position(): NativeReadingPosition? {
-        val item = list.layoutInfo.visibleItemsInfo.firstOrNull { (it.key as? String)?.startsWith("message:") == true } ?: return null
-        return NativeReadingPosition(item.key as String, if (item.index == list.firstVisibleItemIndex) list.firstVisibleItemScrollOffset else 0, followingTail)
+        // Layout can retain a preceding row for spacing; the scroll offset belongs to the actual first item.
+        val item = list.layoutInfo.visibleItemsInfo.firstOrNull {
+            it.index == list.firstVisibleItemIndex && (it.key as? String)?.startsWith("message:") == true
+        } ?: return null
+        return NativeReadingPosition(item.key as String, list.firstVisibleItemScrollOffset, followingTail)
     }
     LaunchedEffect(state.baselineReady, state.loadingOlder, state.messages.size, state.pagingError) {
         if (restored || !state.baselineReady) return@LaunchedEffect
@@ -129,7 +135,7 @@ private fun TranscriptHistory(
         }
     }
     val newest = state.messages.lastOrNull()
-    LaunchedEffect(newest?.id, newest?.text, state.messages.size, restored) {
+    LaunchedEffect(newest?.id, newest?.text, state.messages.size, restored, MaterialTheme.typography.bodyLarge.fontSize) {
         if (restored && followingTail && state.messages.isNotEmpty()) {
             positioning = true
             try {

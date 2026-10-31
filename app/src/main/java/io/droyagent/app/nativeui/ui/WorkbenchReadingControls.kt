@@ -61,11 +61,16 @@ internal fun Modifier.dismissKeyboardOnUnconsumedTap(onDismiss: () -> Unit): Mod
 }
 
 internal class WorkbenchReadingSize(private val preferences: SharedPreferences) {
-    var value by mutableIntStateOf(preferences.getInt("workbenchTextSize", 16).coerceIn(14, 22))
+    companion object {
+        const val DEFAULT = 14
+        val RANGE = 6..22
+    }
+
+    var value by mutableIntStateOf(preferences.getInt("workbenchTextSize", DEFAULT).coerceIn(RANGE))
         private set
-    fun reload() { value = preferences.getInt("workbenchTextSize", 16).coerceIn(14, 22) }
+    fun reload() { value = preferences.getInt("workbenchTextSize", DEFAULT).coerceIn(RANGE) }
     fun set(size: Int) {
-        require(size in 14..22)
+        require(size in RANGE)
         value = size
         preferences.edit().putInt("workbenchTextSize", size).apply()
     }
@@ -173,9 +178,9 @@ internal class WorkbenchReadingSize(private val preferences: SharedPreferences) 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable internal fun WorkbenchFontSheet(size: Int, onSave: (Int) -> Unit, onDismiss: () -> Unit) {
     val sizeLabel = stringResource(R.string.native_font_size_value)
-    var selected by remember { mutableIntStateOf(size) }
+    var selected by remember(size) { mutableIntStateOf(size) }
     var editing by remember { mutableStateOf(false) }
-    var input by remember { mutableStateOf(size.toString()) }
+    var input by remember(size) { mutableStateOf(size.toString()) }
     ModalBottomSheet(onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.navigationBarsPadding().imePadding().padding(horizontal = 24.dp, vertical = 12.dp),
@@ -189,26 +194,28 @@ internal class WorkbenchReadingSize(private val preferences: SharedPreferences) 
             Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 104.dp)) {
                 Box(Modifier.padding(20.dp), contentAlignment = Alignment.CenterStart) {
-                    Text(stringResource(R.string.native_font_preview), fontSize = selected.sp, lineHeight = (selected * 1.5f).sp)
+                    Text(stringResource(R.string.native_font_preview), fontSize = selected.sp, lineHeight = (selected * 1.5f).sp,
+                        modifier = Modifier.testTag("native-font-preview"))
                 }
             }
-            val slider = remember { SliderState(selected.toFloat(), steps = 7, trackRange = 14f..22f) }
+            val slider = remember { SliderState(selected.toFloat(), steps = WorkbenchReadingSize.RANGE.last - WorkbenchReadingSize.RANGE.first - 1,
+                trackRange = WorkbenchReadingSize.RANGE.first.toFloat()..WorkbenchReadingSize.RANGE.last.toFloat()) }
             slider.value = selected.toFloat()
-            Slider(state = slider, onValueChange = { selected = kotlin.math.round(it).toInt() },
+            Slider(state = slider, onValueChange = { selected = kotlin.math.round(it).toInt(); input = selected.toString() },
                 modifier = Modifier.fillMaxWidth().testTag("native-font-slider")
                     .semantics { contentDescription = sizeLabel })
             if (editing) OutlinedTextField(input, { value ->
                 if (value.length <= 2 && value.all(Char::isDigit)) {
                     input = value
-                    value.toIntOrNull()?.takeIf { it in 14..22 }?.let { selected = it }
+                    value.toIntOrNull()?.takeIf { it in WorkbenchReadingSize.RANGE }?.let { selected = it }
                 }
-            }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            }, modifier = Modifier.fillMaxWidth().testTag("native-font-input"), singleLine = true,
                 label = { Text(stringResource(R.string.native_font_size_value)) },
-                isError = input.toIntOrNull()?.let { it in 14..22 } != true,
+                isError = input.toIntOrNull()?.let { it in WorkbenchReadingSize.RANGE } != true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { selected = 16; input = "16" }) { Text(stringResource(R.string.native_font_reset)) }
-                Button(onClick = { onSave(selected); onDismiss() }, enabled = !editing || input.toIntOrNull()?.let { it in 14..22 } == true) {
+                TextButton(onClick = { selected = WorkbenchReadingSize.DEFAULT; input = selected.toString() }) { Text(stringResource(R.string.native_font_reset)) }
+                Button(onClick = { onSave(selected); onDismiss() }, enabled = !editing || input.toIntOrNull()?.let { it in WorkbenchReadingSize.RANGE } == true) {
                     Text(stringResource(R.string.native_font_apply))
                 }
             }

@@ -95,7 +95,7 @@
     <string name="native_task_type">Task type</string>
     <string name="native_task_default">Default</string>
     <string name="native_workbench_font">Text size</string>
-    <string name="native_font_size_value">Size (14–22)</string>
+    <string name="native_font_size_value">Size (6–22)</string>
     <string name="native_font_preview">A comfortable size for reading your conversations.</string>
     <string name="native_font_reset">Reset</string>
     <string name="native_font_apply">Apply</string>

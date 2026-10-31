@@ -7,11 +7,14 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.droyagent.app.nativeui.data.NativeApiException
+import io.droyagent.app.nativeui.data.NativeReadingPosition
 import io.droyagent.app.nativeui.navigation.NativeExternalNavigationFailure
 import io.droyagent.app.nativeui.navigation.NativeExternalNavigationPhase
 import io.droyagent.app.nativeui.navigation.NativeExternalNavigationViewModel
 import io.droyagent.app.nativeui.settings.NativeSettingsViewModel
 import io.droyagent.app.nativeui.transcript.NativeTranscriptViewModel
+import io.droyagent.app.nativeui.ui.WorkbenchReadingSize
+import androidx.compose.ui.semantics.SemanticsActions
 import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.runBlocking
@@ -21,12 +24,29 @@ import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
+import androidx.compose.ui.semantics.SemanticsProperties
 
 /** Real cold JSONL history in the shared, explicitly opted-in emulator fixture. */
 @RunWith(AndroidJUnit4::class)
 class NativeTranscriptDeviceTest {
     @get:Rule(order = 0) val compose = createEmptyComposeRule()
-    @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture()
+    @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture(beforeLaunch = { owned ->
+        File(owned.home, "native-transcript-fixture-request.json").writeText(JSONObject()
+            .put("version", 1).put("fixture", "native-transcript-v1").toString())
+    })
+    @get:Rule(order = 2) val failureEvidence = object : TestWatcher() {
+        override fun failed(failure: Throwable, description: Description) {
+            try {
+                val name = "native-transcript-failed-${description.methodName}"
+                File(evidenceDirectory(), "$name-tree.txt").writeText(compose.onRoot(useUnmergedTree = true).printToString())
+                fixture.capture(name)
+                readingEvidence(name)
+            }
+            catch (diagnostic: Throwable) { failure.addSuppressed(diagnostic) }
+        }
+    }
 
     private lateinit var transcript: NativeTranscriptViewModel
     private lateinit var navigation: NativeExternalNavigationViewModel
@@ -43,6 +63,7 @@ class NativeTranscriptDeviceTest {
         openSession(child)
         awaitTranscript()
         assertReadOnly("en")
+        verifyReadingSizes("en")
         assertTrue("The opening snapshot must leave older messages to page", transcript.state.value.hasMore)
         assertEquals(60, transcript.state.value.messages.size)
         assertEquals(receipt.getJSONArray("messages").getJSONObject(89).getString("assistantText"), transcript.state.value.messages.last().text)
@@ -68,22 +89,37 @@ class NativeTranscriptDeviceTest {
         }
         assertTrue(messages.any { it.text == "NATIVE_TRANSCRIPT_INHERITED_USER" })
         val reading = receipt.getJSONArray("messages").getJSONObject(10).getString("userText")
-        compose.onNodeWithTag("native-transcript-history").performScrollToNode(hasText(reading))
+        val readingIndex = messages.indexOfFirst { it.text == reading }
+        compose.onNodeWithTag("native-transcript-history").performScrollToIndex(readingIndex)
         compose.onNodeWithTag("native-transcript-history").performTouchInput {
             swipe(center, center.copy(y = center.y - 48f), durationMillis = 200)
         }
-        compose.waitUntil(10_000) { transcript.state.value.readingPosition?.let { !it.followingTail && it.key.startsWith("message:") } == true }
+        // Reading receipts are debounced; a position from the previous page is not evidence of this scroll.
+        var observed: NativeReadingPosition? = null
+        var stableSince = android.os.SystemClock.elapsedRealtime()
+        compose.waitUntil(10_000) {
+            val position = transcript.state.value.readingPosition
+            if (observed != position) { observed = position; stableSince = android.os.SystemClock.elapsedRealtime() }
+            position?.let { !it.followingTail &&
+                messages.indexOfFirst { message -> "message:${message.id}" == it.key } in readingIndex - 1..readingIndex + 1 &&
+                android.os.SystemClock.elapsedRealtime() - stableSince >= 400
+            } == true
+        }
         val anchor = requireNotNull(transcript.state.value.readingPosition)
-        val anchorText = messages.single { "message:${it.id}" == anchor.key }.text
-        compose.onNodeWithText(anchorText).assertIsDisplayed()
+        // A saved key alone cannot prove restoration: compare the visible row's geometry as well.
+        val readingBounds = compose.onNodeWithText(reading, useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         val initialModel = transcript
+        readingEvidence("native-transcript-geometry-before-recreate")
         fixture.capture("native-transcript-en-reading")
         fixture.recreate()
         bindModels()
         assertSame("Activity recreation must retain the transcript reader", initialModel, transcript)
         awaitTranscript()
-        compose.waitUntil(20_000) { transcript.state.value.readingPosition?.let { it.key == anchor.key && !it.followingTail } == true }
-        compose.onNodeWithText(anchorText).assertIsDisplayed()
+        compose.waitUntil(20_000) { transcript.state.value.readingPosition == anchor }
+        val restoredBounds = compose.onNodeWithText(reading, useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        readingEvidence("native-transcript-geometry-after-recreate")
+        assertEquals("The visible reading row must retain its vertical position", readingBounds.top, restoredBounds.top, 1f)
+        assertEquals("The visible reading row must retain its height", readingBounds.height, restoredBounds.height, 1f)
         assertEquals(messages.map { it.id }, transcript.state.value.messages.map { it.id })
         assertReadOnly("en")
         fixture.capture("native-transcript-en-recreated")
@@ -112,6 +148,7 @@ class NativeTranscriptDeviceTest {
         awaitTranscript()
         compose.waitUntil(10_000) { transcript.state.value.runtime.locale == "zh" }
         assertReadOnly("zh")
+        verifyReadingSizes("zh")
         compose.onNodeWithText(localized("zh", R.string.native_transcript_title)).assertIsDisplayed()
         fixture.capture("native-transcript-zh-opening")
         leaveTranscript()
@@ -141,11 +178,22 @@ class NativeTranscriptDeviceTest {
         evidence("native-transcript-rejected-audit", audit())
     }
 
+    private fun verifyReadingSizes(language: String) {
+        val reply = transcript.state.value.messages.last { it.role == "assistant" }
+        val preferences = fixture.context.getSharedPreferences("droy_native_reading", 0)
+        for (size in listOf(6, 22, WorkbenchReadingSize.DEFAULT)) {
+            fixture.scenario.onActivity { WorkbenchReadingSize(preferences).set(size) }
+            compose.waitForIdle()
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            compose.onNodeWithText(reply.text, useUnmergedTree = true).assertIsDisplayed()
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertEquals(size.toFloat(), layouts.single().layoutInput.style.fontSize.value, 0.01f)
+            fixture.capture("native-transcript-reading-$size-$language")
+        }
+    }
+
     private fun startFixture() {
-        assertTrue("The shared fixture must own the stopped runtime", RuntimeService.canManageHistory())
-        File(fixture.home, "native-transcript-fixture-request.json").writeText(JSONObject()
-            .put("version", 1).put("fixture", "native-transcript-v1").toString())
-        fixture.startRuntime()
+        assertTrue("The isolated fixture must boot the real local runtime", RuntimeService.ready)
         val source = File(fixture.home, "native-transcript-fixture-receipt.json")
         compose.waitUntil(20_000) { source.isFile }
         receipt = JSONObject(source.readText())
@@ -251,6 +299,24 @@ class NativeTranscriptDeviceTest {
         val directory = File(fixture.context.getExternalFilesDir(null), "native-isolated-evidence").apply { assertTrue(isDirectory || mkdirs()) }
         File(directory, "$name.json").writeText(JSONObject().put("receipt", receipt).put("audit", value).toString(2))
     }
+
+    private fun readingEvidence(name: String) {
+        val state = transcript.state.value
+        val history = compose.onNodeWithTag("native-transcript-history").fetchSemanticsNode()
+        val axis = history.config[SemanticsProperties.VerticalScrollAxisRange]
+        val anchorIndex = state.messages.indexOfFirst { "message:${it.id}" == state.readingPosition?.key }
+        val reading = receipt.getJSONArray("messages").getJSONObject(10).getString("userText")
+        val readingBounds = compose.onNodeWithText(reading, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        File(evidenceDirectory(), "$name.json").writeText(JSONObject().put("readingPosition", state.readingPosition?.let {
+            JSONObject().put("key", it.key).put("offset", it.offset).put("followingTail", it.followingTail)
+        }).put("anchorIndex", anchorIndex).put("anchorText", state.messages.getOrNull(anchorIndex)?.text)
+            .put("scrollValue", axis.value()).put("maxScrollValue", axis.maxValue())
+            .put("visibleReadingText", reading).put("readingTop", readingBounds.top).put("readingHeight", readingBounds.height)
+            .put("historyTop", history.boundsInRoot.top).toString(2))
+    }
+
+    private fun evidenceDirectory() = File(fixture.context.getExternalFilesDir(null), "native-isolated-evidence")
+        .apply { assertTrue(isDirectory || mkdirs()) }
 
     private fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }
 }

@@ -306,7 +306,7 @@ class NativePhoneReviewGalleryDeviceTest {
         require(requestedLocale in setOf("en", "zh")) { "phoneStageLocale must be en or zh" }
         require(requestedAppearance in setOf("light", "dark", "system")) { "phoneStageAppearance must be light, dark, or system" }
         require(maximumFont in setOf("true", "false")) { "phoneStageMaxFont must be true or false" }
-        val requestedFont = if (maximumFont == "true") 22 else 16
+        val requestedFont = if (maximumFont == "true") 22 else WorkbenchReadingSize.DEFAULT
         val external = requireNotNull(context.getExternalFilesDir(null))
         val marker = File(external, "native-phone-stage-appearance-restore.json")
         check(!marker.exists()) { "Restore the unfinished phone presentation review before starting another: ${marker.name}" }
@@ -319,7 +319,7 @@ class NativePhoneReviewGalleryDeviceTest {
         val appearancePresent = product.contains("appearanceMode")
         val appearance = product.getString("appearanceMode", null)
         val fontPresent = reading.contains("workbenchTextSize")
-        val font = reading.getInt("workbenchTextSize", 16)
+        val font = reading.getInt("workbenchTextSize", WorkbenchReadingSize.DEFAULT)
         directory = File(external, "native-phone-stage-$requestedLocale-$requestedAppearance-${if (maximumFont == "true") "max" else "normal"}")
             .apply { check(isDirectory || mkdirs()) }
         File(directory, "capture-index.txt").writeText("Stage presentation: locale=$requestedLocale appearance=$requestedAppearance workbenchTextSize=$requestedFont; system font scale unchanged.\n")
@@ -371,7 +371,7 @@ class NativePhoneReviewGalleryDeviceTest {
             compose.onNodeWithTag("native-product-back").performClick()
             waitTag("native-settings-general")
             scenario.onActivity { WorkbenchReadingSize(reading).set(requestedFont) }
-            compose.waitUntil(10_000) { reading.getInt("workbenchTextSize", 16) == requestedFont }
+            compose.waitUntil(10_000) { reading.getInt("workbenchTextSize", WorkbenchReadingSize.DEFAULT) == requestedFont }
             when {
                 arguments.getString("phoneStageExpandedSheetsOnly") == "true" -> captureConditionalPhoneEntrances(expandedSheetsOnly = true)
                 arguments.getString("phoneStageConditionalOnly") == "true" -> captureConditionalPhoneEntrances()
@@ -401,7 +401,7 @@ class NativePhoneReviewGalleryDeviceTest {
                     if (fontPresent) fontRestore.putInt("workbenchTextSize", font) else fontRestore.remove("workbenchTextSize")
                     check(fontRestore.commit()) { "Original reading size was not restored" }
                     check(product.contains("appearanceMode") == appearancePresent && product.getString("appearanceMode", null) == appearance)
-                    check(reading.contains("workbenchTextSize") == fontPresent && reading.getInt("workbenchTextSize", 16) == font)
+                    check(reading.contains("workbenchTextSize") == fontPresent && reading.getInt("workbenchTextSize", WorkbenchReadingSize.DEFAULT) == font)
                     check(product.contains("languagePreference") == nativeLanguagePresent && product.getString("languagePreference", null) == nativeLanguage)
                     compose.waitUntil(20_000) { work.state.value.runtime.locale == originalEffectiveLanguage && NativeLocale.active() == originalEffectiveLanguage }
                     check(savedDshLanguage() == originalDshLanguage) { "Original DSH language preference was not restored" }

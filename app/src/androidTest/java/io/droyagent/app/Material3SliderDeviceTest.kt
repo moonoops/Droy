@@ -173,42 +173,66 @@ class Material3SliderDeviceTest {
         }
         val slider = compose.onNodeWithTag("native-font-slider")
         fun assertSize(size: Int) {
-            slider.assertRangeInfoEquals(ProgressBarRangeInfo(size.toFloat(), 14f..22f, 7))
+            slider.assertRangeInfoEquals(ProgressBarRangeInfo(size.toFloat(), 6f..22f, 15))
             compose.onNodeWithTag("native-font-value").assertTextContains(size.toString())
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            compose.onNodeWithTag("native-font-preview").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertEquals(size.toFloat(), layouts.single().layoutInput.style.fontSize.value, 0.01f)
+            assertEquals(size * 1.5f, layouts.single().layoutInput.style.lineHeight.value, 0.01f)
         }
         fun setSlider(size: Float) {
             slider.performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(size)) }
+        }
+        fun capture(size: Int) {
+            compose.waitForIdle()
+            val directory = File(context.getExternalFilesDir(null), "material3-slider-evidence")
+            assertTrue(directory.isDirectory || directory.mkdirs())
+            val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            try {
+                File(directory, "font-slider-$size-$language.png").outputStream().use {
+                    assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                }
+            } finally { bitmap.recycle() }
         }
         assertSize(18)
         setSlider(20f)
         assertSize(20)
         compose.onNodeWithText(localized.getString(R.string.native_font_reset)).performClick()
-        assertSize(16)
+        assertSize(14)
+        capture(14)
+        setSlider(6f)
+        assertSize(6)
+        capture(6)
         setSlider(21f)
         assertSize(21)
 
         compose.onNodeWithTag("native-font-value").performClick()
-        compose.onNode(hasSetTextAction()).performTextReplacement("19")
+        val input = compose.onNodeWithTag("native-font-input")
+        val apply = compose.onNodeWithText(localized.getString(R.string.native_font_apply))
+        input.performTextReplacement("7")
         compose.runOnIdle { keyboard?.hide() }
-        assertSize(19)
+        assertSize(7)
+        listOf("5", "23", "").forEach { invalid ->
+            input.performTextReplacement(invalid)
+            compose.runOnIdle { keyboard?.hide() }
+            apply.assertIsNotEnabled()
+            assertSize(7)
+        }
+        setSlider(6f)
+        input.assertTextContains("6")
+        apply.assertIsEnabled()
         compose.onNodeWithText(localized.getString(R.string.native_font_reset)).performClick()
-        assertSize(16)
-        compose.onNode(hasSetTextAction()).assertTextContains("16")
+        assertSize(14)
+        input.assertTextContains("14")
         setSlider(22f)
         assertSize(22)
+        input.assertTextContains("22")
+        apply.assertIsEnabled()
         assertEquals(-1, saved.get())
         assertFalse(dismissed.get())
 
-        compose.waitForIdle()
-        val directory = File(context.getExternalFilesDir(null), "material3-slider-evidence")
-        assertTrue(directory.isDirectory || directory.mkdirs())
-        val bitmap = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
-        try {
-            File(directory, "font-slider-$language.png").outputStream().use {
-                assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
-            }
-        } finally { bitmap.recycle() }
-        compose.onNodeWithText(localized.getString(R.string.native_font_apply)).performClick()
+        capture(22)
+        apply.performClick()
         compose.runOnIdle {
             assertEquals(22, saved.get())
             assertTrue(dismissed.get())

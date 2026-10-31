@@ -206,6 +206,41 @@ test('ordinary text stays in one exact bubble and does not automatically quote i
   assert.equal(events[0].status.phase,'typing');assert.equal(events.at(-1).status.phase,'idle');
 });
 
+test('Replyer reasoning never enters chat, notifications or delegated work results',async t=>{
+  const thought='PRIVATE_REPLYER_REASONING_SENTINEL';
+  let body='A fictional visible chat reply.';
+  const f=await fixture(t,{stream:async function*(){
+    yield {type:'block-start',index:0,blockType:'reasoning'};
+    yield {type:'reasoning-delta',index:0,text:thought};
+    yield {type:'block-end',index:0,block:{type:'reasoning',text:thought}};
+    yield {type:'block-start',index:1,blockType:'text'};
+    yield {type:'text-delta',index:1,text:body.slice(0,12)};
+    yield {type:'text-delta',index:1,text:body.slice(12)};
+    yield {type:'block-end',index:1,block:{type:'text',text:body}};
+    yield {type:'finish',reason:{kind:'stop'}};
+  }});
+  await f.runtime.submit('kaka',{clientId:'reasoning-source',text:'A fictional question.'});
+  await f.runtime.flush('kaka');
+  const chat=await f.runtime.agent('kaka'),owner=await f.store.sessionOwner(chat.id);
+  const reply=await f.runtime.reply(owner,{msg_id:'reasoning-source',reply_reference:'Answer the question.'});
+  assert.equal(reply.text,body);
+  assert.deepEqual((await f.store.listMessages('kaka')).messages.filter(message=>message.role==='assistant').map(message=>message.text),[body]);
+  assert.deepEqual(f.calls.notifications.filter(notice=>notice.operation==='companion').map(notice=>notice.text),[body]);
+
+  body='A fictional explicit work result.';
+  const task=await f.runtime.startWork('kaka',{title:'Fictional delegated task',goal:'Return a fictional result.'});
+  const workOwner=await f.store.sessionOwner(task.sessionId);
+  assert.deepEqual(await f.runtime.reply(workOwner,{reply_reference:'Report the result.'}),{delivered:false,result:body});
+  await f.runtime.finishTurn(workOwner,{data:{reason:{kind:'completed'}}});
+  const saved=await f.store.getMessage('kaka',task.taskId);
+  assert.equal(saved.task.state,'completed');assert.equal(saved.task.summary,body);
+  await f.runtime.flush('kaka');
+  const batch=JSON.parse(chat.deliveries.at(-1).message.content[0].text);
+  assert.equal(batch.internalTaskResults.find(result=>result.taskId===task.taskId).summary,body);
+  assert.equal(f.calls.notifications.filter(notice=>notice.operation==='companion').length,1,'Internal work is not itself a chat notification');
+  assert.equal(JSON.stringify({reply,messages:(await f.store.listMessages('kaka')).messages,notices:f.calls.notifications,batch}).includes(thought),false);
+});
+
 test('a slow notification bridge cannot keep a committed text reply in the typing state',async t=>{
   const f=await fixture(t),started=Promise.withResolvers(),release=Promise.withResolvers();
   await f.runtime.submit('kaka',{clientId:'notice-typing-source',text:'A fictional question.'});
