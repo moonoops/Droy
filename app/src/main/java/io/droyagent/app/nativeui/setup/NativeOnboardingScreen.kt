@@ -7,7 +7,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import io.droyagent.app.nativeui.companion.ui.CompanionFilledField
@@ -37,6 +36,7 @@ import io.droyagent.app.nativeui.companion.ui.CompanionAvatarPicker
 import io.droyagent.app.nativeui.permissions.NativePermissionAction
 import io.droyagent.app.nativeui.permissions.NativePermissionsScreen
 import io.droyagent.app.nativeui.permissions.NativePermissionsState
+import io.droyagent.app.nativeui.presentation.LocalNativeProductPresentation
 import io.droyagent.app.nativeui.settings.NativeModelSettingsScreen
 import io.droyagent.app.nativeui.settings.NativeSettingsState
 import io.droyagent.app.nativeui.settings.NativeSettingsViewModel
@@ -211,12 +211,14 @@ fun NativeOnboardingScreen(
 
 @Composable
 private fun SetupWelcome(modifier: Modifier) {
+    val logo = LocalNativeProductPresentation.current.logo
     Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 32.dp, vertical = 64.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(24.dp)) {
         Surface(shape = RoundedCornerShape(topStart = 64.dp, topEnd = 64.dp, bottomStart = 32.dp, bottomEnd = 32.dp),
             color = MaterialTheme.colorScheme.primaryContainer) {
-            Image(painterResource(R.drawable.droy_companion), contentDescription = null,
-                modifier = Modifier.size(184.dp).padding(24.dp))
+            Box(Modifier.size(184.dp)) {
+                logo?.let { Image(it, contentDescription = null, modifier = Modifier.fillMaxSize()) }
+            }
         }
         Text(stringResource(R.string.native_setup_brand), style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold)
     }
