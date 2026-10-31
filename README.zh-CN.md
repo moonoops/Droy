@@ -2,11 +2,17 @@
 
 [English](README.md) · **简体中文**
 
+<p>
+<a href="https://github.com/moonoops/Droy/releases/latest"><img src="https://img.shields.io/github/v/release/moonoops/Droy?style=flat-square&amp;label=Release&amp;color=6554c0" alt="最新版本" /></a>
+<a href="#get-started"><img src="https://img.shields.io/badge/Android-11%2B-333333?style=flat-square" alt="Android 11 及以上" /></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0--only-333333?style=flat-square" alt="AGPL-3.0-only 许可" /></a>
+</p>
+
 Droy 是一款开源 Android AI 助手，可以和你聊天、查资料，也能按你的要求操作手机。
 
 [**下载 APK**](https://github.com/moonoops/Droy/releases/latest) · [安装指南](INSTALLATION.md) · [v0.0.3 更新记录](https://github.com/moonoops/Droy/releases/tag/v0.0.3) · [反馈问题](https://github.com/moonoops/Droy/issues)
 
-**Android 11+** · ARM64 · 中文 / English · [AGPL-3.0-only](LICENSE)
+**ARM64** · 中文 / English
 
 [![Droy 的任务页、伙伴预设和屏幕宠物](assets/readme/hero-studio.zh-CN.png)](assets/readme/hero-studio.zh-CN.png)
 
@@ -193,3 +199,19 @@ Droy 会从对话中整理有用的信息，在后续聊天时查找相关记录
 Droy 自有代码使用 [AGPL-3.0-only](LICENSE) 许可。第三方代码、模型和素材适用各自的许可，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 维护者：[@moonoops](https://github.com/moonoops)
+
+<a id="star-history"></a>
+
+## Star 趋势
+
+<div align="center">
+
+<a href="https://www.star-history.com/?repos=moonoops%2FDroy&amp;type=date&amp;legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;theme=dark&amp;legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;legend=top-left" />
+    <img width="100%" alt="moonoops/Droy 的 GitHub Star 数量趋势" src="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;legend=top-left" />
+  </picture>
+</a>
+
+</div>

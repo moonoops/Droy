@@ -2,11 +2,17 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
+<p>
+<a href="https://github.com/moonoops/Droy/releases/latest"><img src="https://img.shields.io/github/v/release/moonoops/Droy?style=flat-square&amp;label=Release&amp;color=6554c0" alt="Latest release" /></a>
+<a href="#get-started"><img src="https://img.shields.io/badge/Android-11%2B-333333?style=flat-square" alt="Android 11 or later" /></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0--only-333333?style=flat-square" alt="AGPL-3.0-only license" /></a>
+</p>
+
 Droy is an open-source Android AI assistant for conversation, research and phone tasks.
 
 [**Download APK**](https://github.com/moonoops/Droy/releases/latest) · [Installation guide](INSTALLATION.md) · [v0.0.3 release notes](https://github.com/moonoops/Droy/releases/tag/v0.0.3) · [Report an issue](https://github.com/moonoops/Droy/issues)
 
-**Android 11+** · ARM64 · Chinese / English · [AGPL-3.0-only](LICENSE)
+**ARM64** · Chinese / English
 
 [![Droy Tasks, companion presets and on-screen pets](assets/readme/hero-studio.en.png)](assets/readme/hero-studio.en.png)
 
@@ -197,3 +203,19 @@ Thank you to the authors and contributors who made these projects open source, t
 Droy's own code is licensed under [AGPL-3.0-only](LICENSE). Third-party code, models and assets retain their respective licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Maintained by [@moonoops](https://github.com/moonoops).
+
+<a id="star-history"></a>
+
+## Star history
+
+<div align="center">
+
+<a href="https://www.star-history.com/?repos=moonoops%2FDroy&amp;type=date&amp;legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;theme=dark&amp;legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;legend=top-left" />
+    <img width="100%" alt="GitHub star history for moonoops/Droy" src="https://api.star-history.com/chart?repos=moonoops/Droy&amp;type=date&amp;legend=top-left" />
+  </picture>
+</a>
+
+</div>
