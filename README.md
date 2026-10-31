@@ -1,151 +1,199 @@
-<p align="center">
-  <a href="assets/readme/hero.en.png"><img src="assets/readme/hero.en.png" width="100%" alt="Droy: your AI companion and your phone agent. Companion chat and Tasks previews." /></a>
-</p>
+# Droy
 
-<div align="center">
+**English** · [简体中文](README.zh-CN.md)
 
-**A companion to talk to. An agent to act for you. Right on your Android phone.**
+Droy is an open-source Android AI assistant for conversation, research and phone tasks.
 
-<strong>English</strong> · [简体中文](README.zh-CN.md)
+[**Download APK**](https://github.com/moonoops/Droy/releases/latest) · [Installation guide](INSTALLATION.md) · [v0.0.3 release notes](https://github.com/moonoops/Droy/releases/tag/v0.0.3) · [Report an issue](https://github.com/moonoops/Droy/issues)
 
-<p>
-<a href="https://github.com/moonoops/Droy/releases/latest"><img src="https://img.shields.io/github/v/release/moonoops/Droy?style=flat-square&amp;label=Release&amp;color=6554c0" alt="Latest release" /></a>
-<a href="#get-started"><img src="https://img.shields.io/badge/Android-11%2B-333333?style=flat-square" alt="Android 11 or later" /></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0--only-333333?style=flat-square" alt="AGPL-3.0-only license" /></a>
-</p>
+**Android 11+** · ARM64 · Chinese / English · [AGPL-3.0-only](LICENSE)
 
-**[Download APK](https://github.com/moonoops/Droy/releases/latest)** &nbsp; · &nbsp; [Installation](INSTALLATION.md) &nbsp; · &nbsp; [What's new in v0.0.3](https://github.com/moonoops/Droy/releases/tag/v0.0.3)
+[![Droy Tasks, companion presets and on-screen pets](assets/readme/hero-studio.en.png)](assets/readme/hero-studio.en.png)
 
-[Companions & memory](#companions) &nbsp; / &nbsp; [Phone agent](#agent) &nbsp; / &nbsp; [Get started](#get-started) &nbsp; / &nbsp; [Permissions & data](#permissions) &nbsp; / &nbsp; [Thanks](#acknowledgements)
+Talk to a companion in Messages, or ask an agent to operate your phone in Tasks. The runtime runs on your phone, so you can disconnect your computer after setup. You choose the model service; cloud models need an internet connection.
 
-</div>
+[Features](#features) · [Install and get started](#get-started) · [Permissions and data](#permissions) · [FAQ](#faq) · [Development](#development)
 
-## One phone. Company and capability.
+<a id="features"></a>
 
-Droy brings **AI companions** and **a task-executing agent** to your Android phone.
-
-In **Messages**, talk about your day, look things up, or pick up yesterday's conversation with a companion who has a personality of their own. Each keeps separate chats, models and memory. In **Tasks**, describe what you want done and let the agent observe the screen, plan the steps and operate your phone through the capabilities you authorize.
-
-The agent runtime lives on your phone. Disconnect your computer after setup and use Droy on its own. You choose the model service; Droy connects conversation, memory and action. Cloud models still require network access and your own API configuration.
-
-**v0.0.3** introduces a native Kotlin / Compose interface with Material 3 Expressive components, four companion presets, local MemOS memory, chat backgrounds, online stickers and GIFs, and reorganized Tasks and settings.
+## Features
 
 <a id="companions"></a>
 
-## A personality of their own. A memory of you.
+### Companion chat
 
-Start with Kaka, or get to know Maimai, Dafeiyu and Lady Claude. Customize names, avatars, personalities, expression styles and models to shape how you spend time together. A fresh installation creates one Kaka; add the others when you want.
+Choose from Kaka, Maimai, Dafeiyu and Lady Claude. A fresh installation creates Kaka, and you can add other companions whenever you want. Each has separate chat history and memory, and can use its own model.
 
-- **Pick up where you left off.** Companions learn preferences, shared topics, events and agreements from conversation, retrieving local memories to inform later replies.
-- **Keep each relationship separate.** Chats, memory and background work are isolated by companion. Each can use a different model.
-- **A little initiative. Room for quiet.** Companions can reach out based on real conversations and unfinished topics. Turn proactive contact off or set quiet hours; the default is 22:00–09:00.
-- **Say it with a sticker.** Use sticker packs and animated GIFs, search and download from public sticker sources, or import your own packs. [Sticker guide](runtime/mobile/companions/STICKERS.md).
+- Change names, avatars, personalities and speaking styles.
+- Choose from eight chat backgrounds or upload an image.
+- Use stickers and GIFs, search online, or import sticker packs.
+- Enable proactive messages and set quiet hours. The default quiet period is 22:00–09:00.
 
-Companions can search the web, gather information and bring their background work back into chat. Phone UI operations start in **Tasks**, described below.
+Companions can search the web, organize information and work in the background, then send the results back to the chat. Use Tasks when you want to open an app, tap or enter text on your phone.
+
+[![Companion chat and preset companions](assets/readme/companions-studio.en.png)](assets/readme/companions-studio.en.png)
 
 <a id="agent"></a>
 
-## Give your phone a task
+### Phone tasks
 
-Open **Tasks** and describe the goal. Built on [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness), Droy plans the work and uses Android Use to observe, operate and check the result.
+Describe what you want to do in Tasks. The agent plans the steps, uses Android Use to inspect pages, tap, swipe and enter text, then checks the result. You can add attachments, use voice input, and organize work into spaces and conversations.
 
-| What you want to do | Capabilities Droy can use |
+The agent hands sign-in, verification codes and other steps that need your input back to you. You can stop a task at any time.
+
+[![Tasks and permission settings](assets/readme/tasks-studio.en.png)](assets/readme/tasks-studio.en.png)
+
+<a id="pets"></a>
+
+### On-screen pets
+
+Choose a black cat, marmot or alpaca in Pet Studio and preview their animations. During a task, pet bubbles let you check progress, answer questions, pause, resume or stop the task.
+
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="assets/readme/pets.en.png">
+  <img src="assets/readme/pets.en.gif" width="100%" alt="Black cat, marmot and alpaca animations">
+</picture>
+
+<a id="memory"></a>
+
+### Memory
+
+Droy extracts useful information from conversations and retrieves relevant records in later chats. Each companion's memory is kept separate, and you can turn it off in that companion's settings.
+
+Companion memory uses MemOS modules for local storage and retrieval. Deleting a companion leaves its memory on your phone. To restore or permanently delete it, make a request in Tasks.
+
+[![Conversation content, companion memory and later chats](assets/readme/memory.bilingual.png)](assets/readme/memory.bilingual.png)
+
+<a id="more"></a>
+
+### Other features
+
+| Feature | Details |
 | --- | --- |
-| “Open Calculator and calculate 128 × 24.” | Launch apps, identify controls, tap and type. |
-| “Summarize the current page in three key points.” | Read page text and control structure; models with vision support can also interpret screenshots. |
-| Hand off a recurring workflow | Use DSH automations with authorized phone capabilities. |
-| Give the agent more tools | Connect Skills, plugins and MCP according to the tools and permissions available. |
-
-Execution depends on the model, app state and device permissions. You handle login, verification and other steps that need your input. Tasks can be stopped; the on-screen pet also provides progress and pause, resume and stop controls.
-
-<a id="preview"></a>
-
-## Make Droy yours
-
-<p align="center">
-  <a href="assets/readme/everyday.en.png"><img src="assets/readme/everyday.en.png" width="100%" alt="Droy companion presets, personalized chat backgrounds and on-screen pet settings." /></a>
-</p>
-
-<sub>Actual v0.0.3 Android emulator screens with fictional demo data, presented in rendered phone frames. The cover cat is promotional artwork.</sub>
-
-| Everyday experience | What you can do |
-| --- | --- |
-| **Native interface** | Chinese and English, light and dark themes, and portrait layouts organized around Messages, Tasks and Settings. |
-| **Chat backgrounds** | Choose from eight presets or upload an image, with a different atmosphere for each companion. |
-| **Talk out loud** | Hold to talk, use local speech recognition, have voice conversations and optionally hear replies read aloud. |
-| **A little company on screen** | Choose a pixel-art black cat, marmot or alpaca. Interact while idle; see progress and answer questions during tasks. |
-| **Messages beyond the app** | Receive notifications by companion conversation, keep unread history and mark messages as read. Quiet hours keep delivery silent. |
-| **Less notification noise** | Organize notifications for selected apps, clear advertising and get one reminder for important notifications left uncleared. |
-| **Personal memory** | Use local records and retrieval without Root. Authorize activity, page, location and other sources separately. |
-
-Background messages and automations depend on Android allowing the app to run. Notification organization preserves existing alerts by default. Optional silent takeover requires explicit confirmation and Root; classification failures keep the original notification and restore settings Droy took over.
+| Voice | Hold to speak, voice conversations and reply read-aloud. |
+| Notifications | Set rules for selected apps, filter ads and get reminders about important messages. |
+| Native interface | Kotlin / Compose, Chinese and English, light and dark themes. Portrait only. |
+| Extensions | Skills, plugins, MCP and automation in Tasks through DSH. |
 
 <a id="get-started"></a>
 
-## Get started
+## Install and get started
 
-You need an **ARM64 phone running Android 11 or later**, a recent system WebView, and a compatible model service with your own API key. Choose the capabilities you need during setup.
+You need an ARM64 phone running Android 11 or later, with an up-to-date system WebView.
 
-1. Download the official APK from [Releases](https://github.com/moonoops/Droy/releases/latest), verify it against the attached checksums and install it.
-2. Complete setup on your phone: introduce yourself, connect a model, and choose features and permissions. Enter your API key directly on the phone.
-3. Say hello to Kaka in **Messages**, or try the Calculator example in **Tasks**.
+### Install the APK directly (recommended)
 
-Without Root, accessibility provides basic phone operations. Shizuku and Root enable some additional capabilities, subject to the in-app checks. Development primarily uses a Redmi K90 Ultra; other devices and system versions need their own compatibility checks. The interface supports portrait mode only.
+1. Download the APK from [Releases](https://github.com/moonoops/Droy/releases/latest), then open and install it on your phone.
+2. Follow setup to choose a model service and enter your API key on the phone.
+3. Set up the permissions you need, then start a chat in Messages or enter an instruction in Tasks.
+
+The APK includes the runtime. When upgrading, install an APK with the same signature over the existing app.
 
 <details>
-<summary><strong>Or ask a desktop agent to install over USB (recommended)</strong></summary>
+  <summary>Or let a computer agent install it over USB</summary>
 
-Connect your phone by USB, enable USB debugging and authorize the computer. Give this prompt to a desktop agent that can run local commands, such as Codex, Claude Code or DSH:
+Connect your phone by USB, enable USB debugging in Developer options, and authorize the computer on your phone. Then give an agent that can run local commands this prompt:
 
 ```text
-Install Droy on my USB-connected Android phone by following INSTALLATION.md
-in https://github.com/moonoops/Droy. Check the device and required tools,
-prefer the official signed APK and verify its checksum. Confirm my feature
-and permission choices, install through ADB, and run the setup checks.
-Prompt me for phone-side confirmations. I will enter my model API key on the phone.
+Follow INSTALLATION.md at https://github.com/moonoops/Droy
+to install Droy on my USB-connected Android phone.
+Check the connection and tools, use the official release APK
+and verify its checksum. Keep existing data and configure
+features and permissions according to my choices.
+Finish installation and basic checks. Tell me when phone
+confirmation is needed. I will enter the API key on the phone.
 ```
 
-Installation supports macOS, Linux and Windows with Python 3.8+ and ADB. Disconnect USB after setup. See the [installation guide](INSTALLATION.md).
+The computer-side tools support macOS, Linux and Windows, and need Python 3.8+ and ADB. See the [installation guide](INSTALLATION.md) for details.
 
 </details>
 
-**Upgrading:** Official signed APKs support in-place updates. Older conversations without trusted privacy records remain readable; if continuing one shows an unknown privacy-state warning, start a new conversation. See the [v0.0.3 release notes](https://github.com/moonoops/Droy/releases/tag/v0.0.3).
+<a id="troubleshooting"></a>
+
+### Troubleshoot with an agent over USB
+
+Connect the phone, enable USB debugging and authorize your computer. Give the computer agent a description of the problem and this prompt:
+
+```text
+Use https://github.com/moonoops/Droy to troubleshoot Droy
+on my USB-connected Android phone.
+Check the connection, app version, permissions and relevant logs,
+then identify and fix the cause.
+Keep my chats, memories and configuration.
+Tell me when phone confirmation is needed.
+I will enter the API key on the phone.
+```
 
 <a id="permissions"></a>
 
-## You choose what it can do
+## Permissions and data
 
-- **Enable phone capabilities as needed.** System permissions, product authorization and data policies determine what can execute. Change them in settings or stop a task at any time.
-- **Local storage has a defined scope.** Companion memory uses local MemOS storage and retrieval with on-device multilingual embeddings. Cloud sync is not enabled. Replies and memory extraction may still use your configured model; local storage does not mean all processing is offline.
-- **Know what reaches the model.** Task context, relevant memories, page text, screenshots and attachments may be sent to your chosen provider. Speech recognition runs locally; recognized text goes to the conversation model. Provider terms and charges apply.
-- **Choose sources and processing separately.** Personal memory and automatic memory extraction are on by default. Activity, page, device-state and location sources are enabled separately; model processing is authorized by endpoint, data category and purpose.
-- **Removing a companion keeps its memory.** Request restoration or permanent deletion explicitly in **Tasks**. Internal memories do not have a separate browsing interface.
-- **Notifications also involve data.** Organization sends selected notification text and rules to the default model. Recognized verification-code and redacted notifications stay on the device. Turn notification management off normally before uninstalling so it can restore settings; force-stop or loss of Root may delay restoration.
+### Setting up permissions
 
-> [!WARNING]
-> Droy is experimental. Model errors, software defects or system differences may cause unintended actions, data loss or disclosure. Back up important data, grant only necessary permissions and use sensitive accounts with care. The project is provided as is; see [LICENSE](LICENSE) for the full terms.
+Companion chat, on-screen pets and personal memory work without Root. Basic phone operations use Accessibility; Shizuku and Root provide some additional capabilities. The permissions page shows what is available on your phone.
+
+You can start permission setup in one place and work through the Android confirmations, or choose to be asked when a feature is first used. Accessibility, Root and Shizuku are authorized separately.
+
+Personal memory and automatic organization are enabled by default. You choose whether to enable additional sources such as phone usage, page content, device state and location. Adjust sources and model-processing authorization in settings.
+
+### What the model receives
+
+Replies, task planning and memory extraction use your configured model. Depending on the task and your authorization, relevant messages, memories, page text, screenshots and attachments are sent to the selected model service.
+
+- Speech recognition runs on the phone, and the recognized text is used in conversation. Read-aloud uses your chosen speech engine.
+- Notification organization sends the notification text and rules that need model analysis to the model.
+
+Memory is stored on your phone, with no cloud sync at present. Model providers set their own fees and data terms.
+
+<a id="faq"></a>
+
+## FAQ
+
+<details>
+  <summary>Do I have to use a DeepSeek model?</summary>
+
+No. You can add a supported model service in settings. To understand screenshots, choose a model and endpoint that accept images. Text-only models can use page text and control structure.
+
+</details>
+
+<details>
+  <summary>What if messages stop arriving in the background?</summary>
+
+Enable Android notifications, turn on Droy's background-running setting, and set battery and auto-start permissions as required by your phone. Reopen Droy after a system force-stop or restart.
+
+</details>
+
+<details>
+  <summary>Does notification organization change the original app's alerts?</summary>
+
+Original app alerts are preserved by default. Silent takeover needs separate confirmation and Root. Before uninstalling, turn notification organization off and check that the affected settings have been restored. After a force-stop or loss of Root, reopen Droy, grant the required access and check the restoration result.
+
+</details>
 
 <a id="development"></a>
 
-## Build, report, contribute
+## Development and contributions
 
-Kotlin / Compose provides the native interface. DSH supplies planning, models and sessions. Droy's product services manage authorization, memory, tasks and stop controls; Android Use connects them to native executors.
+The native interface uses Kotlin / Compose. DSH provides agent planning, model calls and sessions; Droy manages authorization, task state and data; Android Use connects the phone's native executors.
 
-- [Build guide](BUILDING.md) · [Testing guide](TESTING.md) · [Pinned versions](runtime/release.json)
-- [Report an issue](https://github.com/moonoops/Droy/issues) with the Droy version, device, Android version, Root status and reproduction steps. Remove credentials and personal data from logs.
-- [Pull requests](https://github.com/moonoops/Droy/pulls) with verified fixes are welcome. Development and production apps use separate package names and keep separate data.
+[Build guide](BUILDING.md) · [Testing](TESTING.md) · [Dependency versions](runtime/release.json)
 
-Droy's own code is licensed under [AGPL-3.0-only](LICENSE). Third-party code, models and resources retain their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+When reporting an issue, include the Droy version, phone model, Android version, Root status and steps to reproduce it. Remove keys and personal information from shared logs and screenshots. Submit fixes and improvements through [pull requests](https://github.com/moonoops/Droy/pulls).
 
 <a id="acknowledgements"></a>
 
 ## Acknowledgements
 
-Droy builds on the work of open-source communities. Special thanks to:
+- **[DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)** provides the agent engine, model calls, sessions and extensions.
+- **[MaiBot](https://github.com/Mai-with-u/MaiBot)** contributes the dialogue-planning and reply templates, Maimai's personality, and expression-learning implementations adapted for Droy's one-to-one chats. [Adaptation notes](runtime/mobile/companions/maibot/README.md).
+- **[MemOS](https://github.com/MemTensor/MemOS)** provides local storage and retrieval modules for companion memory, with Android adaptation and per-companion isolation added by Droy. [Integration notes](runtime/memory/memos/README.md).
 
-- **[DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)** — The planning, model, session and extension engine behind Droy's phone agent.
-- **[MemOS](https://github.com/MemTensor/MemOS)** — The local storage and retrieval modules that power companion memory, adapted for Android and isolated by companion. [Integration scope, provenance and licenses](runtime/memory/memos/README.md).
-- **[MaiBot](https://github.com/Mai-with-u/MaiBot)** — Open-source conversation planning, replies, Maimai's persona and expression learning, adapted for one-to-one companion chat. [Adaptation notes and license](runtime/mobile/companions/maibot/README.md).
-- **[LINUX DO](https://linux.do)** and everyone who contributes feedback, testing and improvements.
+Thank you to the authors and contributors who made these projects open source, to the [LINUX DO community](https://linux.do), and to everyone helping test and improve Droy.
 
-[Maintained by @moonoops](https://github.com/moonoops) · If Droy is useful to you, a Star helps others find it.
+<a id="license"></a>
+
+## License
+
+Droy's own code is licensed under [AGPL-3.0-only](LICENSE). Third-party code, models and assets retain their respective licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Maintained by [@moonoops](https://github.com/moonoops).

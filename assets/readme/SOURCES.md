@@ -1,9 +1,21 @@
 # README artwork / README 展示素材
 
-These assets accompany Droy v0.0.3. Screens are actual app captures rather
-than generated UI.
+## Current README assets / 当前 README 素材
 
-这些素材用于 v0.0.3 的 README。屏幕内容来自实际应用截图，未由图像模型重绘。
+| Files / 文件 | Content / 内容 |
+| --- | --- |
+| `hero-studio.en.png`, `hero-studio.zh-CN.png` | Droy cover / Droy 封面 |
+| `companions-studio.en.png`, `companions-studio.zh-CN.png` | Companion chat and presets / 伙伴聊天与预设 |
+| `tasks-studio.en.png`, `tasks-studio.zh-CN.png` | Tasks and permissions / 任务与权限 |
+| `pets.en.gif`, `pets.zh-CN.gif` | Black cat, marmot and alpaca animations / 黑猫、土拨鼠与羊驼动画 |
+| `pets.en.png`, `pets.zh-CN.png` | Static pet artwork / 宠物静态图 |
+| `memory.bilingual.png` | Memory diagram / 记忆示意图 |
+
+The studio posters and memory diagram were created with the built-in image generation tool. Phone displays reference Droy v0.0.3 screens; chat uses demonstration dialogue. Pet animations use the built-in artwork in [`app/src/main/assets/pet`](../../app/src/main/assets/pet).
+
+影棚海报和记忆示意图由内置图像生成工具制作。手机屏幕参考 Droy v0.0.3 界面，聊天使用演示对话。宠物动图使用项目[内置的宠物素材](../../app/src/main/assets/pet)。
+
+## Earlier assets / 早期素材
 
 ## Screens / 界面
 
