@@ -317,7 +317,12 @@ export function createNativeApi(ctx, { decisions } = {}) {
           if (command === 'cancel' && runtime.ownsSession(input.sessionId))
             throw new NativeApiError('COMPANION_SESSION_MANAGED', 409, 'managed');
           const method = methods.get(command);
-          const result = method.cancellation ? await controller[command](input, cancellation.signal) : await controller[command](input);
+          const taskControl = ctx.get?.('droyTaskControl') ?? ctx.droyTaskControl;
+          const controllerId = command === 'cancel' && typeof taskControl?.get === 'function'
+            ? taskControl.get(input.sessionId)?.taskId ?? input.sessionId : input.sessionId;
+          const result = command === 'cancel' && typeof taskControl?.command === 'function'
+            ? taskControl.command({ taskId: controllerId, action: 'stop', expectedRevision: taskControl.revision(controllerId) })
+            : method.cancellation ? await controller[command](input, cancellation.signal) : await controller[command](input);
           const value = command === 'list'
             ? { ...result, managedSessionIds: result.items.filter(item => runtime.ownsSession(item.sessionId)).map(item => item.sessionId) }
             : result;

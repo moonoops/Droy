@@ -107,7 +107,9 @@ Notification organization applies only to apps you select. By default it keeps t
 
 When needed, Droy appears on your screen as the character you select. Speech bubbles tell you what it is doing or ask you to choose the next step and help. You can view the task, answer a question or stop an operation directly.
 
-Choose the built-in black cat, marmot or alpaca in **Settings → Pet**, without configuring an image model. Tap the on-screen companion to play an animation; double-tap to open its compact frosted-glass panel and choose **Play actions** for kneading, the marmot's scream, or the alpaca's neck stretch and spit animations. A pending question can still be opened with one tap. Ordinary task hints appear at least 30 seconds apart, at most three times per task; errors and questions appear promptly. Background blur follows device support and power-saving state. **Pet studio** lets you preview every action before applying a character.
+Choose the built-in black cat, marmot or alpaca in **Settings → Pet**, without configuring an image model. When idle, one tap plays a random animation, favoring signature actions such as kneading, the marmot's scream, or the alpaca's neck stretch and spit. Two or more rapid taps open a small bubble with an idle message and one **Open app** icon. During work, one tap shows current progress with pause, resume and stop icons below. Pausing preserves the task and conversation; the bubble shows **Paused** only after execution has settled. Resuming first checks the current state. If an action's outcome remains uncertain, the bubble explains the issue and does not automatically replay it.
+
+All bubbles use one highly translucent, lightly frosted background across app themes. Questions expand to nearly the screen width, with choices, a manual answer field, and a compact **Skip / Send answer** footer. Ordinary task hints appear at least 30 seconds apart, at most three times per task; errors and questions appear promptly. Background blur follows device support and power-saving state. **Pet studio** lets you preview every action before applying a character.
 
 <details>
 <summary><strong>View companion task updates and handoff</strong></summary>
@@ -117,7 +119,7 @@ Choose the built-in black cat, marmot or alpaca in **Settings → Pet**, without
   <a href="assets/screenshots/companion-help.png"><img src="assets/screenshots/companion-help.png" width="36%" alt="Cat companion asking for the next step with view and stop task controls" /></a>
 </p>
 
-Companion examples use existing Android emulator demo captures with Chinese UI.
+These earlier companion examples use Android emulator demo captures with Chinese UI.
 
 </details>
 

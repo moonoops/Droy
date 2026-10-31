@@ -38,6 +38,12 @@ final class PetQuestionDraft {
         for (int i = 0; i < questions.length(); i++) answers.add(new Answer(questions.optJSONObject(i)));
     }
     boolean complete() { return answers.stream().allMatch(Answer::complete); }
+    JSONArray encodeSkipped() throws JSONException {
+        JSONArray result = new JSONArray();
+        for (Answer answer : answers) result.put(new JSONObject().put("id", answer.question.getString("id"))
+            .put("selected", new JSONArray()));
+        return result;
+    }
     JSONArray encode() throws JSONException {
         JSONArray result = new JSONArray();
         for (Answer answer : answers) {

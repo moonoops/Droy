@@ -56,6 +56,7 @@ public final class PetAvoidanceDeviceTest {
     private static final String[] PREF_KEYS = {"petEnabled", "petExternalDisplay", "petInternalDisplay", "petId", "petName", "petLeft", "petX", "petY", "themeColorScheme"};
     private final Map<String, Object> originalPreferences = new HashMap<>();
     private final Map<Field, Object> originalProgress = new HashMap<>();
+    private final Map<String, Long> originalControlRevisions = new HashMap<>();
     private final AtomicInteger clicks = new AtomicInteger();
     private Instrumentation instrumentation;
     private UiAutomation automation;
@@ -82,10 +83,13 @@ public final class PetAvoidanceDeviceTest {
         for (String key : PREF_KEYS) if (values.containsKey(key)) originalPreferences.put(key, values.get(key));
         savedPreferences = true;
         synchronized (ToolProgress.class) {
-            for (String name : new String[]{"currentTask", "currentPhase", "summary", "summaryKind", "pending", "active", "startedAt", "activeTasks"}) {
+            for (String name : new String[]{"currentTask", "currentControlTask", "currentPhase", "summary", "summaryKind", "activityKind", "pending", "active", "startedAt", "activeTasks", "controlRevision"}) {
                 Field field = ToolProgress.class.getDeclaredField(name); field.setAccessible(true);
                 originalProgress.put(field, field.get(null));
             }
+            Field revisions = ToolProgress.class.getDeclaredField("controlRevisions"); revisions.setAccessible(true);
+            @SuppressWarnings("unchecked") Map<String, Long> current = (Map<String, Long>)revisions.get(null);
+            originalControlRevisions.putAll(current);
             ToolProgress.update("pet-avoidance-idle", "thinking", true);
             ToolProgress.updateFromEngine(new JSONObject().put("taskId", "pet-avoidance-idle")
                 .put("phase", "completed").put("active", false).put("summary", "").put("pending", JSONObject.NULL));
@@ -160,13 +164,18 @@ public final class PetAvoidanceDeviceTest {
             }
             synchronized (ToolProgress.class) {
                 for (Map.Entry<Field, Object> entry : originalProgress.entrySet()) entry.getKey().set(null, entry.getValue());
+                Field revisions = ToolProgress.class.getDeclaredField("controlRevisions"); revisions.setAccessible(true);
+                @SuppressWarnings("unchecked") Map<String, Long> current = (Map<String, Long>)revisions.get(null);
+                current.clear(); current.putAll(originalControlRevisions);
             }
         }
     }
 
     @Test public void nativeActionsIgnorePetEventsClearTheTargetAndCaptureWithoutPetPixels() throws Exception {
         JSONObject coordinates = observeTarget();
-        assertFalse("The pet leaked into the business observation", coordinates.toString().contains("宠物，点击查看任务"));
+        AtomicReference<String> petDescription = new AtomicReference<>();
+        instrumentation.runOnMainSync(() -> petDescription.set(overlayView("pet").getContentDescription().toString()));
+        assertFalse("The pet leaked into the business observation", coordinates.toString().contains(petDescription.get()));
         // Open the real overlay after observing. Its window events must not revoke this coordinate snapshot.
         tapPet();
         DeviceUi.await("Touching the pet did not open its real message window", 3000, () -> visible("bubbleWindow"));
@@ -202,8 +211,13 @@ public final class PetAvoidanceDeviceTest {
 
         JSONObject nodes = observeTarget();
         // Removing the bubble is another pet-only window change, including its queued removal event.
-        tapPet();
-        DeviceUi.await("Touching the pet did not close its message window", 3000, () -> !visible("bubbleWindow"));
+        instrumentation.runOnMainSync(() -> {
+            try {
+                var collapse = PetOverlay.class.getDeclaredMethod("collapse"); collapse.setAccessible(true);
+                collapse.invoke(PetOverlay.get(context));
+            } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        });
+        DeviceUi.await("Collapsing the pet bubble did not remove its real window", 3000, () -> !visible("bubbleWindow"));
         automation.waitForIdle(250, 3000);
         executor.execute("tap", new JSONObject().put("snapshotId", nodes.getString("snapshotId"))
             .put("nodeId", targetNode(nodes).getString("nodeId")).put("afterObserve", false), false, dispatchCheck);
@@ -380,10 +394,15 @@ public final class PetAvoidanceDeviceTest {
         return new Rect(position[0], position[1], position[0] + view.getWidth(), position[1] + view.getHeight());
     }
     private void tapPet() {
-        Rect bounds = petBounds(); long down = SystemClock.uptimeMillis();
-        inject(down, MotionEvent.ACTION_DOWN, bounds.centerX(), bounds.centerY());
-        try { SystemClock.sleep(48); }
-        finally { inject(down, MotionEvent.ACTION_UP, bounds.centerX(), bounds.centerY()); }
+        SystemClock.sleep(android.view.ViewConfiguration.getDoubleTapTimeout() + 32L);
+        Rect bounds = petBounds();
+        for (int tap = 0; tap < 2; tap++) {
+            if (tap != 0) SystemClock.sleep(90);
+            long down = SystemClock.uptimeMillis();
+            inject(down, MotionEvent.ACTION_DOWN, bounds.centerX(), bounds.centerY());
+            try { SystemClock.sleep(48); }
+            finally { inject(down, MotionEvent.ACTION_UP, bounds.centerX(), bounds.centerY()); }
+        }
     }
     private void inject(long down, int action, float x, float y) {
         MotionEvent event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x, y, 1, 1, 0, 1, 1, touchDeviceId, 0);

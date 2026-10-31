@@ -4,6 +4,46 @@ import { createExecutionProgress } from '../execution-progress.mjs';
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test('durable controls retain their revision over SDK idle/cancel, with child question identity separate from control owner', async () => {
+  const sent = [], progress = createExecutionProgress(async row => sent.push(row), () => assert.fail());
+  const child = { id: 'child-task' };
+  progress.control(child.id, { taskId: 'parent-task', phase: 'pausing', active: true, summary: 'Pausing.', controlRevision: 1 });
+  progress.sessionEvent(child, { type: 'turn/end', data: { reason: { kind: 'aborted' } } });
+  progress.status(child, 'idle'); await settle();
+  assert.equal(sent.at(-1).phase, 'pausing'); assert.equal(sent.at(-1).active, true);
+  assert.equal(sent.at(-1).taskId, child.id); assert.equal(sent.at(-1).controlTaskId, 'parent-task');
+  progress.control(child.id, { taskId: 'parent-task', phase: 'paused', active: true, summary: 'Paused.', controlRevision: 2 });
+  progress.sessionEvent(child, { type: 'step/start', data: {} }); await settle();
+  assert.equal(sent.at(-1).phase, 'paused'); assert.equal(sent.at(-1).controlRevision, 2);
+  progress.control(child.id, { taskId: 'parent-task', phase: 'pausing', active: true, summary: 'Old.', controlRevision: 1 }); await settle();
+  assert.equal(sent.at(-1).phase, 'paused');
+  progress.control(child.id, { taskId: 'parent-task', phase: 'resuming', active: true, summary: 'Checking.', controlRevision: 3 });
+  progress.waiting(child.id, { kind: 'approval', requestId: 'resume-approval', message: 'Confirm read.', options: [], inline: false }); await settle();
+  assert.equal(sent.at(-1).phase, 'resuming');
+  assert.equal(sent.at(-1).pending.kind, 'approval'); assert.equal(sent.at(-1).pending.requestId, 'resume-approval');
+  progress.control(child.id, { taskId: 'parent-task', phase: 'running', active: true, controlRevision: 4 });
+  progress.waiting(child.id, null); await settle();
+  assert.equal(sent.at(-1).phase, 'thinking'); assert.equal(sent.at(-1).controlRevision, 4);
+  assert.equal(sent.at(-1).controlTaskId, 'parent-task');
+  progress.control(child.id, { taskId: 'parent-task', phase: 'stopped', active: false, summary: 'Stopped.', controlRevision: 5 });
+  progress.sessionEvent(child, { type: 'tool/result', data: {} }); await settle();
+  assert.equal(sent.at(-1).phase, 'stopped'); assert.equal(sent.at(-1).active, false);
+  progress.dispose();
+});
+
+test('child history cannot discard a held parent revision and a completed tombstone remains inactive until a new run', async () => {
+  const sent = [], progress = createExecutionProgress(async row => sent.push(row), () => assert.fail());
+  progress.control('child', { taskId: 'child', phase: 'running', active: true, controlRevision: 8 }); await settle();
+  progress.control('child', { taskId: 'parent', phase: 'paused', active: true, summary: 'Paused.', controlRevision: 1 }); await settle();
+  assert.equal(sent.at(-1).phase, 'paused'); assert.equal(sent.at(-1).controlRevision, 1); assert.equal(sent.at(-1).controlTaskId, 'parent');
+  progress.control('child', { taskId: 'parent', phase: 'completed', active: false, summary: 'Ended.', controlRevision: 2 });
+  progress.status({ id: 'child' }, 'idle'); await settle();
+  assert.equal(sent.at(-1).active, false); assert.equal(sent.at(-1).phase, 'completed');
+  progress.control('child', { taskId: 'parent', phase: 'running', active: true, controlRevision: 3 }); await settle();
+  assert.equal(sent.at(-1).phase, 'thinking'); assert.equal(sent.at(-1).controlRevision, 3);
+  progress.dispose();
+});
+
 test('companion activity reflects actual task events without leaking tool arguments', async () => {
   const sent = [], session = { id: 'companion-stage' };
   const progress = createExecutionProgress(async row => sent.push(row), () => assert.fail());
@@ -125,7 +165,7 @@ test('existing session events report execution stages and retain cancellation as
   progress.removed(session);
   await settle();
   assert.deepEqual(sent.map(row => row.phase), ['thinking', 'executing', 'verifying', 'thinking', 'interrupted']);
-  assert.deepEqual(sent.at(-1), { taskId: session.id, phase: 'interrupted', active: false, summary: '本轮执行已停止，点我查看任务', pending: null });
+  assert.deepEqual(sent.at(-1), { taskId: session.id, phase: 'interrupted', active: false, summary: '本轮执行已停止，点我查看任务', pending: null, controlTaskId: session.id, controlRevision: 0 });
   assert.equal(JSON.stringify(sent).includes('private'), false);
 });
 

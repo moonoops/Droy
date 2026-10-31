@@ -1,14 +1,7 @@
 package io.droyagent.app
 
 import android.content.Context
-import android.content.res.Configuration
-import android.os.Build
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.ui.graphics.toArgb
-import io.droyagent.app.nativeui.ui.droyPresetColorScheme
-
-/** The overlay uses the same saved appearance and color roles as the native app. */
+/** Neutral fog remains the same over other apps, independent of Droy's saved theme. */
 class PetBubbleColors private constructor(
     @JvmField val surface: Int,
     @JvmField val onSurface: Int,
@@ -22,21 +15,12 @@ class PetBubbleColors private constructor(
     @JvmField val errorContainer: Int,
     @JvmField val onErrorContainer: Int,
 ) {
+    @JvmField val controlSurface: Int = 0xB0FFFFFF.toInt()
+
     companion object {
-        @JvmStatic fun from(context: Context): PetBubbleColors {
-            val preferences = context.getSharedPreferences("product", Context.MODE_PRIVATE)
-            val dark = when (preferences.getString("appearanceMode", "system")) {
-                "light" -> false
-                "dark" -> true
-                else -> context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-            }
-            val colors = if (preferences.getString("colorSource", "preset") == "dynamic" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            } else droyPresetColorScheme(preferences.getString("themePalette", "purple") ?: "purple", dark)
-            return PetBubbleColors(colors.surfaceContainerHigh.toArgb(), colors.onSurface.toArgb(),
-                colors.onSurfaceVariant.toArgb(), colors.outlineVariant.toArgb(), colors.primary.toArgb(),
-                colors.onPrimary.toArgb(), colors.secondaryContainer.toArgb(), colors.onSecondaryContainer.toArgb(),
-                colors.error.toArgb(), colors.errorContainer.toArgb(), colors.onErrorContainer.toArgb())
-        }
+        @JvmStatic @Suppress("UNUSED_PARAMETER") fun from(context: Context) = PetBubbleColors(
+            0xFFFFFFFF.toInt(), 0xFF27323F.toInt(), 0xFF667381.toInt(), 0xFFFDFEFF.toInt(),
+            0xFF465363.toInt(), 0xFFFFFFFF.toInt(), 0x40FFFFFF, 0xFF27323F.toInt(),
+            0xFFED655E.toInt(), 0x26ED655E, 0xFFB7413B.toInt())
     }
 }

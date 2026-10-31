@@ -11,6 +11,10 @@ final class NotificationCopy {
             case "waiting_input" -> NativeLocale.text("需要你的确认", "Your confirmation is needed");
             case "waiting" -> NativeLocale.text("等待条件满足", "Waiting to continue");
             case "blocked" -> NativeLocale.text("任务需要处理", "Task needs attention");
+            case "pausing" -> NativeLocale.text("正在暂停任务", "Pausing your task");
+            case "paused" -> NativeLocale.text("任务已暂停", "Task paused");
+            case "resuming" -> NativeLocale.text("正在继续任务", "Resuming your task");
+            case "stopping" -> NativeLocale.text("正在停止任务", "Stopping your task");
             default -> NativeLocale.text("正在处理任务", "Working on your task");
         };
     }

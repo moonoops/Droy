@@ -6,6 +6,22 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public final class NotificationCopyTest {
+    @Test public void pausedAndTransitionalTitlesAreDistinctInBothLanguages() {
+        try {
+            for (String language : new String[]{"zh", "en"}) {
+                NativeLocale.mirrorProcessLanguage(language);
+                Set<String> titles = new HashSet<>();
+                for (String phase : new String[]{"executing", "pausing", "paused", "resuming", "stopping"}) {
+                    String title = NotificationCopy.title(true, true, phase, 0);
+                    assertFalse(title.isBlank());
+                    if (language.equals("en")) assertFalse(title.matches(".*[\\p{IsHan}].*"));
+                    titles.add(title);
+                }
+                assertEquals(5, titles.size());
+            }
+        } finally { NativeLocale.mirrorProcessLanguage("zh"); }
+    }
+
     @Test public void allIdleVariantsRemainIdleAfterACompletedOrInterruptedTask() {
         for (int seed : new int[]{0, 1, 2, -1, Integer.MIN_VALUE}) {
             assertEquals(NotificationCopy.title(true, false, "completed", seed),

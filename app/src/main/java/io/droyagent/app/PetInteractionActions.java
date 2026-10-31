@@ -2,12 +2,38 @@ package io.droyagent.app;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.IntUnaryOperator;
 import java.util.function.Predicate;
 
 /** Deliberate play actions are separate from task progress and random idle variants. */
 final class PetInteractionActions {
     private static final String[] IDS = {"tapTilt", "tapWave", "pet", "petShy", "idleTail", "idleStretch",
         "knead", "tailCurl", "sleep", "waveHands", "scream", "startle", "neckStretch", "spitForward", "spitScreen"};
+    private static final Set<String> SIGNATURE_IDS = Set.of("knead", "tailCurl", "sleep", "waveHands", "scream",
+        "startle", "neckStretch", "spitForward", "spitScreen");
+
+    static final class IdleSelector {
+        private final IntUnaryOperator random;
+        private String previous;
+
+        IdleSelector() { this(bound -> ThreadLocalRandom.current().nextInt(bound)); }
+        IdleSelector(IntUnaryOperator random) { this.random = random; }
+
+        String next(Predicate<String> exists) {
+            List<String> choices = available(exists);
+            if (choices.isEmpty()) return null;
+            if (choices.size() > 1) choices.remove(previous);
+            List<String> signature = new ArrayList<>(), other = new ArrayList<>();
+            for (String id : choices) (SIGNATURE_IDS.contains(id) ? signature : other).add(id);
+            List<String> pool = random.applyAsInt(100) < 70 ? signature : other;
+            // A missing pool, including its only action being the previous one, must not force a repeat.
+            if (pool.isEmpty()) pool = signature.isEmpty() ? other : signature;
+            previous = pool.get(random.applyAsInt(pool.size()));
+            return previous;
+        }
+    }
 
     static List<String> available(Predicate<String> exists) {
         List<String> result = new ArrayList<>();
@@ -39,11 +65,11 @@ final class PetInteractionActions {
     static String restingState(String phase, boolean pending, Predicate<String> exists) {
         if (pending) return "waiting";
         return switch (phase) {
-            case "waiting" -> "waiting";
+            case "waiting", "pausing", "paused", "stopping" -> "waiting";
             case "completed" -> exists.test("completed") ? "completed" : "idle";
             case "blocked" -> exists.test("blocked") ? "blocked" : "waiting";
             case "interrupted" -> exists.test("stopped") ? "stopped" : "idle";
-            case "executing", "verifying", "thinking" -> "working";
+            case "executing", "verifying", "thinking", "resuming" -> "working";
             default -> "idle";
         };
     }
@@ -53,6 +79,7 @@ final class PetInteractionActions {
     }
 
     static boolean interrupted(boolean activeAtStart, String taskAtStart, String currentTask, String phase, boolean pending) {
-        return pending || activeAtStart && (!taskAtStart.equals(currentTask) || "interrupted".equals(phase) || "blocked".equals(phase));
+        return pending || activeAtStart && (!taskAtStart.equals(currentTask) || "interrupted".equals(phase) || "blocked".equals(phase)
+            || "pausing".equals(phase) || "paused".equals(phase) || "resuming".equals(phase) || "stopping".equals(phase));
     }
 }

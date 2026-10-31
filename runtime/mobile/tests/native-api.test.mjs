@@ -159,6 +159,25 @@ test('native commands preserve the DSH request and receipt, including stable pro
   assert.equal(f.calls.find(call => call.method === 'create').signal, undefined);
 });
 
+test('legacy native cancel stops the real root controller for owned children without changing question identity', async t => {
+  const f = await fixture(t), controls = [];
+  f.ctx.droyTaskControl = {
+    get: id => ({ taskId: id === 'child-session' ? 'root-session' : id, controlRevision: 6 }),
+    revision: id => { assert.ok(['root-session', 'fixture-session'].includes(id)); return 6; },
+    command: input => { controls.push(input); return { accepted: true, control: { taskId: input.taskId, phase: 'stopping', controlRevision: 7 } }; },
+  };
+  for (const sessionId of ['child-session', 'fixture-session']) {
+    const response = await f.post('cancel', { sessionId });
+    assert.equal(response.status, 200); assert.equal((await response.json()).result.accepted, true);
+  }
+  assert.deepEqual(controls, [
+    { taskId: 'root-session', action: 'stop', expectedRevision: 6 }, { taskId: 'fixture-session', action: 'stop', expectedRevision: 6 },
+  ]);
+  assert.ok(!f.calls.some(call => call.method === 'cancel'));
+  const owned = await f.post('cancel', { sessionId: 'managed-companion-session' });
+  assert.equal(owned.status, 409); assert.equal(controls.length, 2);
+});
+
 test('all native operations require the existing loopback cookie and origin checks before service access', async t => {
   const f = await fixture(t);
   for (const path of ['models', 'workspaces', 'session/control', 'session/fixture-session/follow']) {

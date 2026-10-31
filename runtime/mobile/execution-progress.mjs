@@ -16,6 +16,7 @@ const waitingTools = new Set(['bash', 'job_output', 'android_wait_for', 'droy_br
 /** Project engine facts and intentional public copy, never raw model reasoning. */
 export function createExecutionProgress(send, reportError, timers = { setTimeout, clearTimeout }, getLocale = () => 'zh') {
   const tasks = new Map();
+  const controls = new Map();
   let disposed = false;
   const copy = text => translateBackendText(text, getLocale());
   function taskFor(taskId) {
@@ -32,7 +33,9 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
   }
   function startRequest(taskId) {
     const task = taskFor(taskId);
+    const control = controls.get(taskId);
     clearRequest(task);
+    if (control && control.phase !== 'running') return;
     const generation = task.requestGeneration;
     task.requestTimer = timers.setTimeout(() => {
       if (disposed || generation !== task.requestGeneration || !task.active || task.waiting || task.recovery) return;
@@ -47,6 +50,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
     if (disposed || !taskId) return;
     taskId = String(taskId);
     const task = taskFor(taskId);
+    const control = controls.get(taskId);
     let summary, summaryKind;
     if (active && task.waiting) {
       phase = 'waiting_input';
@@ -65,10 +69,16 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
       : summaryKind === 'working' ? task.recovery ? 'working' : task.activityKind ?? 'working' : undefined;
     // Public/model-authored progress stays verbatim; only fixed product copy is translated.
     if (!active || task.slow || !task.waiting && !task.publicSummary) summary = copy(summary);
-    const payload = { taskId, phase, active, summary, ...(activityKind ? { activityKind } : {}), ...(summaryKind ? { summaryKind } : {}), pending: task.waiting ?? null };
+    const controlled = control && control.phase !== 'running';
+    const payload = controlled
+      ? { taskId, phase: control.phase, active: control.active, summary: control.summary,
+        ...(control.summaryKind ? { summaryKind: control.summaryKind } : {}), pending: task.waiting ?? null,
+        controlTaskId: control.taskId, controlRevision: control.controlRevision }
+      : { taskId, phase, active, summary, ...(activityKind ? { activityKind } : {}), ...(summaryKind ? { summaryKind } : {}),
+        pending: task.waiting ?? null, controlTaskId: control?.taskId ?? taskId, controlRevision: control?.controlRevision ?? 0 };
     const key = JSON.stringify(payload);
     if (task.key === key) return;
-    Object.assign(task, { phase, active, key, queued: payload });
+    Object.assign(task, { phase: payload.phase, active: payload.active, key, queued: payload });
     if (task.sending) return;
     task.sending = true;
     void (async () => {
@@ -83,6 +93,22 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
     })();
   }
   return {
+    bind(taskId, state) {
+      if (disposed || !Number.isSafeInteger(state.controlRevision) || state.controlRevision < 0) return;
+      const previous = controls.get(String(taskId));
+      if (previous?.taskId === state.taskId && previous.controlRevision > state.controlRevision) return;
+      controls.set(String(taskId), state);
+    },
+    control(taskId, state) {
+      if (disposed) return;
+      taskId = String(taskId);
+      const previous = controls.get(taskId);
+      if (!Number.isSafeInteger(state.controlRevision) || state.controlRevision < 0
+        || previous && previous.taskId === state.taskId && previous.controlRevision > state.controlRevision) return;
+      controls.set(taskId, state);
+      clearRequest(taskFor(taskId));
+      report(taskId, state.phase === 'running' ? 'thinking' : state.phase, state.active);
+    },
     publicSummary(taskId, summary, phase) {
       const text = petText(summary, 120);
       if (!text || !['thinking', 'executing', 'verifying', 'waiting', 'blocked'].includes(phase))
@@ -174,6 +200,6 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
     removed(agent) {
       if (tasks.get(String(agent.id))?.active) report(agent.id, 'interrupted', false);
     },
-    dispose() { disposed = true; for (const task of tasks.values()) clearRequest(task); tasks.clear(); },
+    dispose() { disposed = true; for (const task of tasks.values()) clearRequest(task); tasks.clear(); controls.clear(); },
   };
 }

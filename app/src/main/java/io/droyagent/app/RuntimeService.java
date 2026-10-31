@@ -154,6 +154,11 @@ public final class RuntimeService extends Service {
             case "executing" -> NativeLocale.text("正在执行工具", "Running tools");
             case "verifying" -> NativeLocale.text("正在核实执行结果", "Verifying the result");
             case "waiting" -> NativeLocale.text("等待目标时间或条件", "Waiting for the target time or condition");
+            case "pausing" -> NativeLocale.text("正在暂停任务", "Pausing the task");
+            case "paused" -> NativeLocale.text("任务已暂停，等待继续", "Task paused. Waiting to continue");
+            case "resuming" -> NativeLocale.text("正在核实现场并继续任务", "Checking the current state and continuing the task");
+            case "stopping" -> NativeLocale.text("正在停止任务", "Stopping the task");
+            case "stopped" -> NativeLocale.text("任务已停止", "Task stopped");
             case "completed" -> NativeLocale.text("本轮执行已结束", "This turn has finished");
             case "interrupted" -> NativeLocale.text("任务已中断，请核实当前状态", "Task interrupted. Check the current state");
             case "waiting_input" -> NativeLocale.text("等待你的回应", "Waiting for your response");

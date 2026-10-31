@@ -16,4 +16,7 @@ public interface Cancellation {
     default void dispatched() throws InterruptedException {
         check();
     }
+
+    /** Actual native work may outlive the caller's cancelled wait. */
+    default void track(String kind, String id, java.util.concurrent.CompletableFuture<?> settled) {}
 }

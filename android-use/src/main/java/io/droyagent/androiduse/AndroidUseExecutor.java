@@ -222,6 +222,7 @@ public final class AndroidUseExecutor {
         @Override public void usingRoot(boolean root) throws InterruptedException { parent.usingRoot(root); }
         @Override public long remainingMillis(long maximum) throws Exception { return parent.remainingMillis(maximum); }
         @Override public void dispatched() throws InterruptedException { parent.dispatched(); dispatched = true; }
+        @Override public void track(String kind, String id, CompletableFuture<?> settled) { parent.track(kind, id, settled); }
     }
 
     private JSONObject executeChannel(String action, JSONObject args, boolean rootEnabled, String channel, GesturePlan plan,
@@ -1336,6 +1337,9 @@ public final class AndroidUseExecutor {
                     CompletableFuture<Boolean> completion = new CompletableFuture<>();
                     if (!service.dispatchGesture(builder.build(), gestureCallback(completion), main))
                         throw new ActionException("action_rejected", "Android rejected the gesture; observe before retrying");
+                    cancellation.track("gesture", UUID.randomUUID().toString(), completion);
+                    if (index == 0 && more) cancellation.track("held_pointers", UUID.randomUUID().toString(), run.lifted);
+                    if (!more) completion.whenComplete((value, failure) -> run.lifted.complete(null));
                     run.service = service; run.strokes = next; run.completion = completion;
                     run.held = more; run.endpoints = new float[next.length][2];
                     for (int p = 0; p < next.length; p++) run.endpoints[p] = plan.paths[p][last];
@@ -1344,6 +1348,7 @@ public final class AndroidUseExecutor {
                 });
                 if (!await(run.completion, UI_TIMEOUT_MS, cancellation)) {
                     run.held = false;
+                    run.lifted.complete(null);
                     throw new ActionException("gesture_cancelled", "Android cancelled the gesture; observe before retrying");
                 }
             }
@@ -1351,7 +1356,7 @@ public final class AndroidUseExecutor {
             return receipt(action, "accessibility").put("motion", plan.motion).put("pointerCount", plan.paths.length)
                     .put("plannedDurationMs", plan.durationMs).put("segments", plan.durations.length);
         } catch (Exception error) {
-            try { releaseHeldGesture(run); }
+            try { releaseHeldGesture(run, cancellation); }
             catch (Exception releaseError) {
                 ActionException failure = new ActionException("gesture_release_failed",
                         "Gesture stopped but pointer release could not be confirmed; observe before continuing", releaseError);
@@ -1369,7 +1374,7 @@ public final class AndroidUseExecutor {
         };
     }
 
-    private void releaseHeldGesture(GestureRun run) throws Exception {
+    private void releaseHeldGesture(GestureRun run, Cancellation original) throws Exception {
         // Cancellation revokes further movement. Let the bounded in-flight segment
         // finish, then lift only the existing pointers at their final positions.
         boolean interrupted = Thread.interrupted();
@@ -1379,8 +1384,9 @@ public final class AndroidUseExecutor {
             // Queue behind that callback before inspecting its recorded pointers.
             onMain(cleanup, () -> null);
             if (run.completion == null || !run.held) return;
-            if (!await(run.completion, 1000, cleanup)) { run.held = false; return; }
+            if (!await(run.completion, 1000, cleanup)) { run.held = false; run.lifted.complete(null); return; }
             CompletableFuture<Boolean> released = new CompletableFuture<>();
+            original.track("gesture_release", UUID.randomUUID().toString(), released);
             onMain(cleanup, () -> {
                 GestureDescription.Builder builder = new GestureDescription.Builder();
                 for (int p = 0; p < run.strokes.length; p++) {
@@ -1394,10 +1400,12 @@ public final class AndroidUseExecutor {
             if (!await(released, 1000, cleanup))
                 throw new ActionException("gesture_release_failed", "Gesture release was cancelled; task outcome is unknown");
             run.held = false;
+            run.lifted.complete(null);
         } finally { if (interrupted) Thread.currentThread().interrupt(); }
     }
 
     private static final class GestureRun {
+        final CompletableFuture<Void> lifted = new CompletableFuture<>();
         DroyAccessibilityService service;
         GestureDescription.StrokeDescription[] strokes;
         CompletableFuture<Boolean> completion;
@@ -1432,6 +1440,7 @@ public final class AndroidUseExecutor {
                     @Override public void onCompleted(GestureDescription description) { completed.complete(true); }
                     @Override public void onCancelled(GestureDescription description) { completed.complete(false); }
                 }, main);
+                if (submitted) cancellation.track("gesture", UUID.randomUUID().toString(), completed);
                 if (hold && submitted) {
                     holdSubmitted[0] = true;
                     holdEndsAt[0] = SystemClock.elapsedRealtime() + duration;
@@ -1448,9 +1457,7 @@ public final class AndroidUseExecutor {
             if (args.has("holdMs")) result.put("holdMs", args.getInt("holdMs")).put("pointerCount", 1);
             return result;
         } finally {
-            try {
-                if (hold && !completed.isDone()) finishSubmittedHold(completed, holdSubmitted, holdEndsAt);
-            } finally { completed.cancel(false); }
+            if (hold && !completed.isDone()) finishSubmittedHold(completed, holdSubmitted, holdEndsAt);
         }
     }
 
@@ -1471,14 +1478,17 @@ public final class AndroidUseExecutor {
 
     private JSONObject screenshot(Cancellation cancellation) throws Exception {
         CompletableFuture<AccessibilityService.ScreenshotResult> completed = new CompletableFuture<>();
+        CompletableFuture<Void> settled = new CompletableFuture<>();
         AccessibilityService.ScreenshotResult captured = null;
         CaptureStamp basis = onMain(cancellation, () -> prepareScreenshotStamp(null, cancellation));
         try {
             onMain(cancellation, () -> {
                 DroyAccessibilityService service = requireService(cancellation);
-                service.takeScreenshot(Display.DEFAULT_DISPLAY, main::post, new AccessibilityService.TakeScreenshotCallback() {
+                cancellation.track("screenshot_callback", UUID.randomUUID().toString(), settled);
+                try { service.takeScreenshot(Display.DEFAULT_DISPLAY, main::post, new AccessibilityService.TakeScreenshotCallback() {
                     @Override public void onSuccess(AccessibilityService.ScreenshotResult result) {
-                        if (!completed.complete(result)) result.getHardwareBuffer().close();
+                        try { if (!completed.complete(result)) result.getHardwareBuffer().close(); }
+                        finally { settled.complete(null); }
                     }
                     @Override public void onFailure(int errorCode) {
                         String code = errorCode == AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW
@@ -1487,8 +1497,9 @@ public final class AndroidUseExecutor {
                                 ? "screenshot_rate_limited" : "screenshot_failed";
                         completed.completeExceptionally(new ActionException(code,
                                 "Android screenshot failed (code " + errorCode + "); protected content requires user takeover"));
+                        settled.complete(null);
                     }
-                });
+                }); } catch (RuntimeException failure) { settled.complete(null); throw failure; }
                 return null;
             });
             captured = await(completed, UI_TIMEOUT_MS, cancellation);
@@ -1843,21 +1854,26 @@ public final class AndroidUseExecutor {
     private <T> T onMain(Cancellation cancellation, Callable<T> action) throws Exception {
         cancellation.check();
         CompletableFuture<T> future = new CompletableFuture<>();
+        CompletableFuture<Void> settled = new CompletableFuture<>();
+        java.util.concurrent.atomic.AtomicInteger dispatch = new java.util.concurrent.atomic.AtomicInteger();
+        cancellation.track("main_callback", UUID.randomUUID().toString(), settled);
         Runnable operation = () -> {
-            if (future.isDone()) return;
+            if (!dispatch.compareAndSet(0, 1)) return;
             try {
+                if (future.isDone()) return;
                 cancellation.check();
                 future.complete(action.call());
             } catch (Exception error) {
                 future.completeExceptionally(error);
-            }
+            } finally { dispatch.set(2); settled.complete(null); }
         };
-        if (!main.post(operation)) throw new ActionException("main_thread_unavailable", "Android main thread is unavailable");
+        if (!main.post(operation)) { settled.complete(null); throw new ActionException("main_thread_unavailable", "Android main thread is unavailable"); }
         try {
             return await(future, UI_TIMEOUT_MS, cancellation);
         } finally {
             future.cancel(false);
             main.removeCallbacks(operation);
+            if (dispatch.compareAndSet(0, 2)) settled.complete(null);
         }
     }
 

@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.LongSupplier;
+import java.util.concurrent.CompletableFuture;
 
 /** Owns the device independently from the model's text or tool arguments. */
 final class ControlPolicy {
@@ -16,9 +17,20 @@ final class ControlPolicy {
     private record CallKey(String task, String call) {}
     private final Set<CallKey> cancelledCalls = new HashSet<>();
     private boolean cancellationCapacityExceeded;
+    private final NativeTaskControl scopes;
+    private final ThreadLocal<NativeTaskControl.Call> boundScope = new ThreadLocal<>();
 
     ControlPolicy() { this(() -> System.nanoTime() / 1_000_000L); }
-    ControlPolicy(LongSupplier clock) { this.clock = clock; }
+    ControlPolicy(LongSupplier clock) { this(clock, new NativeTaskControl()); }
+    ControlPolicy(LongSupplier clock, NativeTaskControl scopes) { this.clock = clock; this.scopes = scopes; }
+    void bindScope(NativeTaskControl.Call call) { if (call == null) boundScope.remove(); else boundScope.set(call); }
+    void trackResource(String kind, String id, CompletableFuture<?> completion) {
+        NativeTaskControl.Call scope = boundScope.get();
+        if (scope != null) scope.track(kind, id, completion);
+    }
+    synchronized void pauseTask(String task) {
+        for (Ticket ticket : calls.values()) if (ticket.task.equals(task)) ticket.cancelled = true;
+    }
 
     synchronized void enable() { generation++; stopped = false; owner = null; calls.clear(); }
     synchronized void stop() { generation++; stopped = true; owner = null; calls.clear(); }
@@ -29,18 +41,22 @@ final class ControlPolicy {
     }
 
     synchronized Ticket begin(String task, String call, long budgetMs) {
+        NativeTaskControl.Call scope = boundScope.get();
+        if (scope == null && scopes.registered(task)) throw new NativeTaskControl.Rejected("TASK_SCOPE_REQUIRED");
+        if (scope != null) try { scope.check(); } catch (InterruptedException paused) { throw new NativeTaskControl.Rejected("TASK_SCOPE_PAUSED"); }
         if (cancellationCapacityExceeded) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("取消记录已达上限，请重启引擎", "The cancellation record limit was reached. Please restart the engine"));
         if (stopped) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("Android Use 操作已暂停，请在权限设置中恢复", "Android Use operations are paused. Please resume in Permissions"));
         if (task == null || task.isBlank() || task.length() > 256 || call == null || call.isBlank() || call.length() > 256)
             throw new IllegalArgumentException(io.droyagent.app.NativeLocale.text("无效的任务或调用标识", "Invalid task or call ID"));
         if (cancelledCalls.contains(new CallKey(task, call))) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("这次手机操作已取消", "This phone operation was cancelled"));
+        if (owner != null && scopes.blockedAndQuiet(owner)) owner = null;
         if (owner != null && !owner.equals(task)) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("另一项任务正在使用手机，请先停止它", "Another task is using the phone. Please stop it first"));
         if (calls.containsKey(call)) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("拒绝重复的手机操作调用", "Duplicate phone operation call rejected"));
         if (!calls.isEmpty()) throw new IllegalStateException(io.droyagent.app.NativeLocale.text("手机动作必须逐个执行", "Phone actions must run one at a time"));
         owner = task;
         long now = clock.getAsLong();
         long deadline = budgetMs == Long.MAX_VALUE ? Long.MAX_VALUE : now + budgetMs;
-        Ticket ticket = new Ticket(task, call, generation, deadline);
+        Ticket ticket = new Ticket(task, call, generation, deadline, scope);
         calls.put(call, ticket);
         return ticket;
     }
@@ -65,7 +81,8 @@ final class ControlPolicy {
         // Ending the waiter must also revoke a main-thread callback that was
         // already running when its local wait timed out.
         ticket.cancelled = true;
-        calls.remove(ticket.call, ticket);
+        ticket.finished = true;
+        if (ticket.outstanding == 0) calls.remove(ticket.call, ticket);
     }
 
     final class Ticket {
@@ -74,13 +91,17 @@ final class ControlPolicy {
         final long deadline;
         boolean cancelled;
         private boolean dispatched;
-        Ticket(String task, String call, long epoch, long deadline) {
-            this.task = task; this.call = call; this.epoch = epoch; this.deadline = deadline;
+        private final NativeTaskControl.Call scope;
+        private int outstanding;
+        private boolean finished;
+        Ticket(String task, String call, long epoch, long deadline, NativeTaskControl.Call scope) {
+            this.task = task; this.call = call; this.epoch = epoch; this.deadline = deadline; this.scope = scope;
         }
         void check() throws InterruptedException {
             synchronized (ControlPolicy.this) {
                 if (cancelled || stopped || epoch != generation || Thread.currentThread().isInterrupted())
                     throw new InterruptedException(io.droyagent.app.NativeLocale.text("手机操作已停止", "Phone operation stopped"));
+                if (scope != null) scope.check();
                 if (clock.getAsLong() >= deadline) throw new DeadlineExceeded(dispatched);
             }
         }
@@ -91,7 +112,17 @@ final class ControlPolicy {
             }
         }
         void dispatched() throws InterruptedException {
-            synchronized (ControlPolicy.this) { check(); dispatched = true; }
+            synchronized (ControlPolicy.this) { check(); dispatched = true; if (scope != null) scope.dispatched(); }
+        }
+        void track(String kind, String id, CompletableFuture<?> completion) {
+            synchronized (ControlPolicy.this) { outstanding++; }
+            if (scope != null) scope.track(kind, id, completion);
+            completion.whenComplete((value, failure) -> {
+                synchronized (ControlPolicy.this) {
+                    outstanding--;
+                    if (finished && outstanding == 0) calls.remove(call, this);
+                }
+            });
         }
         boolean wasDispatched() { synchronized (ControlPolicy.this) { return dispatched; } }
     }

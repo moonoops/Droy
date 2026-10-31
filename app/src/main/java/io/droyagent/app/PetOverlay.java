@@ -43,10 +43,10 @@ final class PetOverlay implements OverlayInteraction.Listener {
     private TextView pendingMarker;
     private LinearLayout bubble;
     private ScrollView bubbleWindow;
+    private LinearLayout questionFrame, questionActions;
     private PetBubbleWindow bubbleHost;
     private View effectWindow;
     private int effectWindowId = -1;
-    private boolean interactionMenu;
     private String interactionState = "";
     private String interactionTask = "";
     private boolean interactionTaskActive;
@@ -59,6 +59,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
     private int petWindowId = -1, bubbleWindowId = -1;
     private Rect safe = new Rect();
     private Rect keyboard = new Rect();
+    private boolean accessibilityKeyboardKnown;
     private int screenWidth, screenHeight;
     private boolean onLeft, docked, dragging, manualBubble, busy;
     private boolean appVisible, chatVisible;
@@ -66,10 +67,14 @@ final class PetOverlay implements OverlayInteraction.Listener {
     private String appearance = "";
     private final PetMessages messages = new PetMessages();
     private final PetChatterPolicy chatter = new PetChatterPolicy();
+    private final PetInteractionActions.IdleSelector idleActions = new PetInteractionActions.IdleSelector();
+    private final PetTapSequence tapSequence = new PetTapSequence(ViewConfiguration.getDoubleTapTimeout());
+    private Runnable settleTap;
     private boolean stageBubble;
     private boolean problemBubble;
     private String displayedMessage = "", displayedMessageKey = "";
     private String bubbleContent = "";
+    private String bubbleControlKey = "";
     private PetQuestionDraft questionDraft;
     private boolean editingAnswer;
     private long lastAnnouncedAt;
@@ -266,7 +271,9 @@ final class PetOverlay implements OverlayInteraction.Listener {
     };
 
     private void refreshNow() {
+        String priorQuestion = pendingKey();
         snapshot = ToolProgress.current(context);
+        if (!priorQuestion.equals(pendingKey())) cancelTaps();
         if (!snapshot.optBoolean("active")) chatter.reset();
         Activity current = foregroundActivity.get();
         if (current instanceof MainActivity main) main.withdrawResolvedQuestion();
@@ -328,9 +335,10 @@ final class PetOverlay implements OverlayInteraction.Listener {
             internalWindow = host != null; attachedToken = hostToken; windows = internalWindow ? host.getWindowManager() : systemWindows;
             addPet(); enter(now - lastEntryAt > 3000); lastEntryAt = now;
         }
-        pet.setContentDescription(name(context) + NativeLocale.text("，Droy 宠物。单击播放动作，双击查看任务，拖动调整位置；有待确认问题时单击处理", ", Droy pet. Tap to animate, double-tap to view the task, or drag to move. Tap to respond to a pending question"));
+        pet.setContentDescription(overlayText(pending() != null ? R.string.pet_overlay_question_description :
+            taskControls() ? R.string.pet_overlay_working_description : R.string.pet_overlay_idle_description));
         pendingMarker.setVisibility(pending() != null ? View.VISIBLE : View.GONE);
-        pendingMarker.setContentDescription(NativeLocale.text("有问题等你回应", "A question needs your response"));
+        pendingMarker.setContentDescription(overlayText(R.string.pet_overlay_question_needed));
         if (!interactionState.isEmpty()) {
             if (problem || PetInteractionActions.interrupted(interactionTaskActive, interactionTask, snapshot.optString("taskId"),
                     snapshot.optString("phase"), pending() != null)) cancelInteraction(true);
@@ -350,16 +358,17 @@ final class PetOverlay implements OverlayInteraction.Listener {
         JSONObject pending = pending();
         if (entering && pending == null && announcement.isEmpty() && !snapshot.optString("phase").equals("blocked")) return;
         if (pending == null && bubble != null && bubble.getTag() != null) collapse();
-        String nextAppearance = NativeLocale.active() + ":" + name(context) + ":" + preferences.getString("appearanceMode", "system")
-            + ":" + preferences.getString("themePalette", "purple") + ":" + preferences.getString("colorSource", "preset")
-            + ":" + context.getResources().getConfiguration().uiMode;
+        String nextAppearance = NativeLocale.active() + ":" + name(context);
         if (!appearance.equals(nextAppearance)) {
             appearance = nextAppearance;
             if (bubble != null) showBubble(manualBubble);
         }
         if (problemBubble && pending == null && !problem
-                && !"slow".equals(snapshot.optString("summaryKind"))) collapse();
-        if (bubble != null && manualBubble && !interactionMenu && !bubbleContent.equals(displayedSummary()) && (pending != null || stage.isEmpty())) showBubble(true);
+                && !"slow".equals(snapshot.optString("summaryKind"))) {
+            if (manualBubble) problemBubble = false;
+            else collapse();
+        }
+        if (bubble != null && manualBubble && (!bubbleControlKey.equals(controlKey()) || !bubbleContent.equals(displayedSummary()))) showBubble(true);
         if (stage.isEmpty() && stageBubble && pending == null) {
             collapse();
         }
@@ -371,10 +380,16 @@ final class PetOverlay implements OverlayInteraction.Listener {
             proactiveUntil = 0; stopTransition(true); showBubble(false); stageBubble = true;
         } else if (problem && !showingConversation()) {
             String key = snapshot.optString("taskId") + ":problem:" + snapshot.optLong("startedAt") + ":" + summary();
-            if (!key.equals(lastAnnouncement)) { lastAnnouncement = key; proactiveUntil = 0; stopTransition(true); showBubble(true); problemBubble = true; }
+            if (!key.equals(lastAnnouncement)) {
+                lastAnnouncement = key; proactiveUntil = 0; stopTransition(true);
+                if (bubble == null || !manualBubble) { showBubble(false); problemBubble = true; }
+            }
         } else if (stage.isEmpty() && "slow".equals(snapshot.optString("summaryKind")) && !showingConversation()) {
             String key = snapshot.optString("taskId") + ":slow:" + snapshot.optLong("startedAt");
-            if (!key.equals(lastAnnouncement)) { lastAnnouncement = key; proactiveUntil = 0; showBubble(true); problemBubble = true; }
+            if (!key.equals(lastAnnouncement)) {
+                lastAnnouncement = key; proactiveUntil = 0;
+                if (bubble == null || !manualBubble) { showBubble(false); problemBubble = true; }
+            }
         }
     }
 
@@ -398,32 +413,30 @@ final class PetOverlay implements OverlayInteraction.Listener {
         GradientDrawable markerShape = new GradientDrawable(); markerShape.setColor(0xFFFFE797);
         markerShape.setCornerRadii(new float[]{dp(10),dp(10),dp(10),dp(10),dp(10),dp(10),dp(2),dp(2)});
         markerShape.setStroke(dp(1), 0xFF3D3430); pendingMarker.setBackground(markerShape);
-        pendingMarker.setGravity(Gravity.CENTER); pendingMarker.setContentDescription(NativeLocale.text("有问题等你回应", "A question needs your response"));
+        pendingMarker.setGravity(Gravity.CENTER); pendingMarker.setContentDescription(overlayText(R.string.pet_overlay_question_needed));
         FrameLayout.LayoutParams markerLayout = new FrameLayout.LayoutParams(dp(24), dp(28), Gravity.TOP | Gravity.RIGHT);
         pet.addView(pendingMarker, markerLayout); pendingMarker.setVisibility(View.GONE);
         pet.setClickable(true); pet.setFocusable(false);
         pet.setOnClickListener(view -> {
+            if (busy || dragging || holding || clearanceDepth > 0 || petHidden || petTouchPaused) return;
+            snapshot = ToolProgress.current(context);
             stopTransition(true); emerge(); bounce();
             if (pending() != null) toggleBubble();
-            else sprite.showVariant("tap", "tap", true);
-        });
-        androidx.core.view.ViewCompat.addAccessibilityAction(pet, NativeLocale.text("打开任务面板", "Open task panel"),
-            (view, arguments) -> { toggleBubble(); return true; });
-        final FrameLayout gesturePet = pet;
-        final GestureDetector taps = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
-            @Override public boolean onDown(MotionEvent event) { return true; }
-            @Override public boolean onSingleTapUp(MotionEvent event) { gesturePet.performClick(); return true; }
-            @Override public boolean onDoubleTap(MotionEvent event) {
-                if (pending() != null) { stopTransition(true); emerge(); showBubble(true); }
-                else toggleBubble();
-                return true;
+            else if (taskControls()) showBubble(true);
+            else {
+                String state = idleActions.next(sprite::hasState);
+                if (state != null) playInteraction(state);
+                else sprite.showVariant("tap", "tap", true);
             }
         });
-        taps.setIsLongpressEnabled(false);
+        androidx.core.view.ViewCompat.addAccessibilityAction(pet, overlayText(R.string.pet_overlay_open_panel),
+            (view, arguments) -> { openPetMessage(); return true; });
+        final FrameLayout gesturePet = pet;
         pet.setOnTouchListener(new View.OnTouchListener() {
             float downX, downY; int originX, originY;
             final Runnable longPress = () -> {
                 if (pet != gesturePet || dragging) return;
+                cancelTaps();
                 holding = true; removeBubble(); emerge();
                 pet.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
                 sprite.showVariant("pet", "tap", true);
@@ -432,15 +445,18 @@ final class PetOverlay implements OverlayInteraction.Listener {
                 switch (event.getActionMasked()) {
                     case android.view.MotionEvent.ACTION_DOWN:
                         cancelInteraction(true);
+                        if (settleTap != null) { MAIN.removeCallbacks(settleTap); settleTap = null; }
+                        previewUntil = Math.max(previewUntil, SystemClock.elapsedRealtime() + ViewConfiguration.getDoubleTapTimeout() + 1000);
                         downX = event.getRawX(); downY = event.getRawY(); originX = petLayout.x; originY = petLayout.y;
                         dragging = holding = false; MAIN.removeCallbacks(dock); stopTransition(true); cancelMovement();
                         originX = petLayout.x; originY = petLayout.y;
                         MAIN.postDelayed(longPress, ViewConfiguration.getLongPressTimeout());
-                        taps.onTouchEvent(event); return true;
+                        return true;
                     case android.view.MotionEvent.ACTION_MOVE:
                         float dx = event.getRawX() - downX, dy = event.getRawY() - downY;
                         if (!dragging && Math.hypot(dx, dy) > ViewConfiguration.get(context).getScaledTouchSlop()) {
                             MAIN.removeCallbacks(longPress); holding = false;
+                            cancelTaps();
                             dragging = true; temporarilyMoved = false; removeBubble(); setDocked(false); sprite.showState("working", false);
                         }
                         if (dragging) {
@@ -448,7 +464,6 @@ final class PetOverlay implements OverlayInteraction.Listener {
                             petLayout.y = PetPosition.clamp(originY + Math.round(dy), safe.top, usableBottom() - petLayout.height);
                             sprite.setFacingLeft(dx < 0); sprite.setRotation(Math.max(-8f, Math.min(8f, dx / dp(12)))); updatePet();
                         }
-                        taps.onTouchEvent(event);
                         return true;
                     case android.view.MotionEvent.ACTION_UP:
                     case android.view.MotionEvent.ACTION_CANCEL:
@@ -468,11 +483,18 @@ final class PetOverlay implements OverlayInteraction.Listener {
                             int edge = onLeft ? safe.left : safe.right - petLayout.width;
                             if (Math.abs(petLayout.x - edge) < dp(28)) moveTo(edge, petLayout.y, 180);
                             MAIN.postDelayed(dock, 8000);
-                        } else if (!holding && event.getActionMasked() == android.view.MotionEvent.ACTION_UP) taps.onTouchEvent(event);
+                        } else if (!holding && event.getActionMasked() == android.view.MotionEvent.ACTION_UP) {
+                            if (settleTap != null) MAIN.removeCallbacks(settleTap);
+                            if (tapSequence.tap(event.getEventTime()) == PetTapSequence.Result.OPEN) openPetMessage();
+                            settleTap = () -> {
+                                if (pet == gesturePet && tapSequence.settle(SystemClock.uptimeMillis()) == PetTapSequence.Result.SINGLE)
+                                    gesturePet.performClick();
+                            };
+                            MAIN.postDelayed(settleTap, ViewConfiguration.getDoubleTapTimeout());
+                        }
                         else MAIN.postDelayed(dock, 4000);
                         if (movedOrHeld || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
-                            MotionEvent cancel = MotionEvent.obtain(event); cancel.setAction(MotionEvent.ACTION_CANCEL);
-                            taps.onTouchEvent(cancel); cancel.recycle();
+                            cancelTaps();
                         }
                         holding = false; MAIN.postDelayed(refreshDisplay, 1200); return true;
                     default: return false;
@@ -490,7 +512,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
         pet.post(() -> { if (pet != null) { petWindowId = windowId(pet); OverlayInteraction.registerWindow(petWindowId); } });
         setDocked(true);
         pet.setOnApplyWindowInsetsListener((view, insets) -> {
-            updateKeyboardInsets(view, insets); return insets;
+            updateKeyboardInsets(insets); return insets;
         });
         pet.requestApplyInsets(); MAIN.postDelayed(blink, 11000); applyVisibility();
     }
@@ -661,7 +683,43 @@ final class PetOverlay implements OverlayInteraction.Listener {
         } else { displayedMessageKey = ""; showBubble(true); }
     }
 
+    private void openPetMessage() {
+        if (pet == null || busy || dragging || holding || clearanceDepth > 0 || petHidden || petTouchPaused) return;
+        snapshot = ToolProgress.current(context);
+        previewUntil = Math.max(previewUntil, SystemClock.elapsedRealtime() + 8000);
+        stopTransition(true); emerge(); bounce();
+        displayedMessageKey = "";
+        if (bubble == null || !manualBubble || pending() == null && !bubbleControlKey.equals(controlKey())) showBubble(true);
+    }
+
+    private void cancelTaps() {
+        tapSequence.cancel();
+        if (settleTap != null) { MAIN.removeCallbacks(settleTap); settleTap = null; }
+    }
+
+    private boolean taskControls() {
+        String phase = snapshot.optString("phase");
+        return !snapshot.optString("taskId").isEmpty() && (snapshot.optBoolean("active") ||
+            java.util.Set.of("pausing", "paused", "resuming", "stopping").contains(phase));
+    }
+
+    private String controlKey() {
+        String phase = snapshot.optString("phase");
+        String state = java.util.Set.of("pausing", "paused", "resuming", "stopping").contains(phase) ? phase : "working";
+        return snapshot.optString("taskId") + ":" + controlTaskId(snapshot) + ":" + state
+            + ":" + snapshot.optLong("controlRevision") + ":" + snapshot.optBoolean("active");
+    }
+
+    private String controlTaskId(JSONObject progress) {
+        String controller = progress.optString("controlTaskId");
+        return controller.isEmpty() ? progress.optString("taskId") : controller;
+    }
+
     private JSONObject pending() { return snapshot.optJSONObject("pending"); }
+    private String pendingKey() {
+        JSONObject value = pending();
+        return value == null ? "" : snapshot.optString("taskId") + ":" + value.optString("requestId");
+    }
     private boolean waitingProgress() { return snapshot.optBoolean("active") && snapshot.optString("phase").equals("waiting"); }
     private String summary() {
         JSONObject p = pending();
@@ -670,6 +728,19 @@ final class PetOverlay implements OverlayInteraction.Listener {
     }
     private boolean workingSummary() { return snapshot.optBoolean("active") && "working".equals(snapshot.optString("summaryKind")); }
     private String displayedSummary() {
+        if (manualBubble && pending() == null) {
+            if (!taskControls()) return overlayText(R.string.pet_overlay_no_work);
+            if ("error".equals(snapshot.optString("summaryKind")) && !summary().isBlank()) return summary();
+            int stateText = switch (snapshot.optString("phase")) {
+                case "pausing" -> R.string.pet_overlay_pausing;
+                case "paused" -> R.string.pet_overlay_paused;
+                case "resuming" -> R.string.pet_overlay_resuming;
+                case "stopping" -> R.string.pet_overlay_stopping;
+                default -> 0;
+            };
+            if (stateText != 0) return overlayText(stateText);
+            return summary().isBlank() ? overlayText(R.string.pet_overlay_working) : summary();
+        }
         if (pending() != null || "slow".equals(snapshot.optString("summaryKind")) && snapshot.optString("activityKind").isEmpty()) return summary();
         if (!proactiveText.isEmpty() && SystemClock.elapsedRealtime() < proactiveUntil) return proactiveText;
         boolean working = workingSummary() || "slow".equals(snapshot.optString("summaryKind")) && !snapshot.optString("activityKind").isEmpty();
@@ -693,76 +764,70 @@ final class PetOverlay implements OverlayInteraction.Listener {
         removeBubble(); emerge(); manualBubble = manual;
         JSONObject p = pending();
         bubbleColors = PetBubbleColors.from(context);
-        boolean compact = !manual && p == null && !"slow".equals(snapshot.optString("summaryKind"));
+        boolean errorSummary = "error".equals(snapshot.optString("summaryKind"));
+        boolean compact = !manual && p == null && !errorSummary && !"slow".equals(snapshot.optString("summaryKind"));
         bubble = new LinearLayout(context); bubble.setOrientation(LinearLayout.VERTICAL);
-        bubble.setPadding(dp(compact ? 10 : 12), dp(compact ? 7 : 10), dp(compact ? 10 : 12), dp(compact ? 7 : 10));
+        bubble.setPadding(dp(p != null ? 16 : compact ? 10 : 12), dp(compact ? 8 : 10),
+            dp(p != null ? 16 : compact ? 10 : 12), dp(8));
         bubble.setTag(p == null ? null : p.optString("requestId"));
-        if (manual || p != null || "slow".equals(snapshot.optString("summaryKind"))) {
-            TextView title = text(name(context) + (p != null ? NativeLocale.text(" · 等你回应", " · Your response needed") : waitingProgress() ? NativeLocale.text(" · 等待中", " · Waiting") : snapshot.optBoolean("active") ? NativeLocale.text(" · 工作中", " · Working") : ""), 12, bubbleColors.onSurfaceVariant);
-            title.setTypeface(null, android.graphics.Typeface.BOLD); title.setAccessibilityHeading(true);
-            title.setPadding(0, 0, 0, dp(5)); bubble.addView(title);
-        }
         String message = displayedSummary();
-        bubbleContent = message;
-        TextView content = text(message, compact ? 12 : 13, bubbleColors.onSurface);
-        if (compact) { content.setMaxLines(2); content.setEllipsize(android.text.TextUtils.TruncateAt.END); }
+        bubbleContent = message; bubbleControlKey = controlKey();
+        TextView content = text(message, compact ? 12 : 14, bubbleColors.onSurface);
+        if (p == null && !errorSummary) { content.setMaxLines(2); content.setEllipsize(android.text.TextUtils.TruncateAt.END); }
         content.setLineSpacing(dp(2), 1f);
         JSONArray questions = p == null ? null : p.optJSONArray("questions");
-        if (questions == null || questions.length() == 0) bubble.addView(content);
-        String task = p == null && !"slow".equals(snapshot.optString("summaryKind")) && !proactiveTask.isEmpty() && SystemClock.elapsedRealtime() < proactiveUntil
-            ? proactiveTask : snapshot.optString("taskId");
-        if (p != null && questions != null && questions.length() > 0) {
-            addQuestionForm(task, p, questions);
-        } else if (p != null && p.optBoolean("inline")) {
-            JSONArray options = p.optJSONArray("options");
-            if (options != null) for (int i = 0; i < options.length(); i++) {
-                JSONObject option = options.optJSONObject(i); if (option == null) continue;
-                String requestId = p.optString("requestId"), optionId = option.optString("id");
-                bubble.addView(button(option.optString("label"), () -> action(task, "answer", requestId, optionId)));
-            }
-        }
-        if (manual || p != null || "slow".equals(snapshot.optString("summaryKind"))) {
-            LinearLayout actions = new LinearLayout(context); actions.setOrientation(LinearLayout.HORIZONTAL);
-            actions.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-            actions.setPadding(0, dp(4), 0, 0);
-            Button open = button(p != null && !p.optBoolean("inline") ? NativeLocale.text("查看并处理", "View and respond") : NativeLocale.text("查看任务", "View task"), () -> openTask(task));
-            styleButton(open, bubbleColors.primary, bubbleColors.onPrimary);
-            actions.addView(open, new LinearLayout.LayoutParams(-2, dp(48)));
-            if (!task.isEmpty() && snapshot.optBoolean("active")) {
-                Button stop = button(NativeLocale.text("停止任务", "Stop task"), () -> action(task, "cancel", null, null));
-                styleButton(stop, bubbleColors.errorContainer, bubbleColors.onErrorContainer);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(48)); lp.leftMargin = dp(4); actions.addView(stop, lp);
-            }
-            if (manual && p == null && !busy && !sprite.interactions().isEmpty()) {
-                Button play = button(NativeLocale.text("互动动作", "Play actions"), this::showInteractions);
-                styleButton(play, Color.TRANSPARENT, bubbleColors.primary);
-                play.setContentDescription(NativeLocale.text("选择宠物互动动作", "Choose a companion play action"));
-                if (!snapshot.optBoolean("active")) actions.addView(play, 0, new LinearLayout.LayoutParams(-2, dp(48)));
-                else bubble.addView(play);
-            }
-            int available = Math.min(dp(p != null ? 244 : 220), safe.width()) - dp(30);
-            int actionWidth = 0;
-            for (int index = 0; index < actions.getChildCount(); index++) {
-                View child = actions.getChildAt(index);
-                child.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
-                actionWidth += child.getMeasuredWidth() + dp(4);
-            }
-            if (actionWidth > available) {
-                actions.setOrientation(LinearLayout.VERTICAL);
-                for (int index = 0; index < actions.getChildCount(); index++)
-                    actions.getChildAt(index).setLayoutParams(new LinearLayout.LayoutParams(-1, -2));
-            }
-            bubble.addView(actions);
+        boolean form = questions != null && questions.length() > 0;
+        String task = snapshot.optString("taskId");
+        if (form) addQuestionForm(task, p, questions);
+        else if (manual && p == null && !taskControls()) {
+            LinearLayout row = new LinearLayout(context); row.setGravity(Gravity.CENTER_VERTICAL);
+            row.addView(content, new LinearLayout.LayoutParams(0, -2, 1));
+            ImageButton open = iconButton(R.drawable.pet_overlay_open_app, R.string.pet_overlay_open_app, bubbleColors.primary, () -> {
+                context.startActivity(new Intent(context, NativeAppActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+                collapse();
+            });
+            open.setTag("droy-pet-open-app");
+            row.addView(open, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            bubble.addView(row);
         } else {
-            bubble.setOnClickListener(v -> { bounce(); showBubble(true); }); bubble.setContentDescription(message + NativeLocale.text("，点击展开任务操作", ". Tap to expand task actions"));
+            bubble.addView(content);
+            if (p != null && p.optBoolean("inline")) {
+                JSONArray options = p.optJSONArray("options");
+                if (options != null) for (int i = 0; i < options.length(); i++) {
+                    JSONObject option = options.optJSONObject(i); if (option == null) continue;
+                    String requestId = p.optString("requestId"), optionId = option.optString("id");
+                    bubble.addView(button(option.optString("label"), () -> action(task, "answer", requestId, optionId)));
+                }
+            } else if (p != null) {
+                LinearLayout row = new LinearLayout(context); row.setGravity(Gravity.END);
+                String request = p.optString("requestId");
+                ImageButton open = iconButton(R.drawable.pet_overlay_open_app, R.string.pet_overlay_open_full_task,
+                    bubbleColors.primary, () -> { MainActivity.revealQuestion(context, task, request); collapse(); });
+                open.setTag("droy-pet-open-full-task");
+                row.addView(open, new LinearLayout.LayoutParams(dp(48), dp(48)));
+                bubble.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
+            } else if (manual && p == null && taskControls()) addTaskControls(task);
+        }
+        if (compact) {
+            bubble.setOnClickListener(view -> openPetMessage());
+            bubble.setContentDescription(message);
         }
         bubbleWindow = new ScrollView(context); bubbleWindow.setFillViewport(false); bubbleWindow.addView(bubble);
         bubbleWindow.setClipToPadding(true); bubbleWindow.setVerticalScrollBarEnabled(false);
         bubbleBackground = new PetBubbleDrawable(context.getResources().getDisplayMetrics().density, bubbleColors.surface, bubbleColors.outline);
-        bubbleMaxWidth = Math.min(dp(questions != null && questions.length() > 0 ? 288 : p != null ? 244 : compact ? 172 : 220), safe.width());
+        bubbleMaxWidth = form ? Math.max(dp(48), safe.width() - dp(16))
+            : Math.min(dp(compact ? 172 : errorSummary || taskControls() ? 250 : 220), safe.width());
+        View surface = bubbleWindow;
+        if (form) {
+            questionFrame = new LinearLayout(context); questionFrame.setOrientation(LinearLayout.VERTICAL);
+            questionFrame.addView(bubbleWindow, new LinearLayout.LayoutParams(-1, 0, 1));
+            questionFrame.addView(questionActions, new LinearLayout.LayoutParams(-1, -2));
+            surface = questionFrame;
+        }
         bubbleLayout = layout(bubbleMaxWidth, WindowManager.LayoutParams.WRAP_CONTENT, "Droy pet message");
         bubbleWindow.setOnApplyWindowInsetsListener((view, insets) -> {
-            updateKeyboardInsets(view, insets); return insets;
+            updateKeyboardInsets(insets); return insets;
         });
         bubbleWindow.setOnTouchListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_OUTSIDE) { releaseAnswerFocus(); return true; }
@@ -781,14 +846,20 @@ final class PetOverlay implements OverlayInteraction.Listener {
             releaseAnswerFocus(); return true;
         });
         positionBubble();
-        bubbleHost = new PetBubbleWindow(internalWindow ? activity() : context, bubbleWindow, bubbleBackground, bubbleLayout, this::releaseAnswerFocus);
+        surface.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_OUTSIDE) { releaseAnswerFocus(); return true; }
+            return false;
+        });
+        bubbleHost = new PetBubbleWindow(internalWindow ? activity() : context, surface, bubbleBackground, bubbleLayout, this::releaseAnswerFocus);
         bubbleHost.show();
         bubbleWindowId = windowId(bubbleWindow); OverlayInteraction.registerWindow(bubbleWindowId);
         bubbleWindow.post(() -> { if (bubbleWindow != null) { bubbleWindowId = windowId(bubbleWindow); OverlayInteraction.registerWindow(bubbleWindowId); positionBubble(); } });
-        if (manual) sprite.showVariant("tap", "tap", true);
+        if (manual) sprite.showState(animation(), false);
         else sprite.showState(p != null || waitingProgress() ? "waiting" : snapshot.optString("phase").equals("completed") || snapshot.optString("phase").equals("interrupted") ? animation() : "speaking", true);
         applyVisibility();
-        if (p == null && !snapshot.optString("phase").equals("blocked") && !waitingProgress() && !"slow".equals(snapshot.optString("summaryKind"))) MAIN.postDelayed(hideMessage, manual ? 8000 : 4000);
+        if (p == null && !snapshot.optString("phase").equals("blocked") && !waitingProgress()
+                && !java.util.Set.of("pausing", "resuming", "stopping").contains(snapshot.optString("phase"))
+                && !"slow".equals(snapshot.optString("summaryKind"))) MAIN.postDelayed(hideMessage, manual ? 8000 : 4000);
     }
     private void addQuestionForm(String task, JSONObject pending, JSONArray questions) {
         String draftKey = task + ":" + pending.optString("requestId");
@@ -801,49 +872,57 @@ final class PetOverlay implements OverlayInteraction.Listener {
                 TextView heading = text(question.optString("header"), 12, bubbleColors.onSurfaceVariant);
                 heading.setPadding(0, dp(index == 0 ? 0 : 12), 0, dp(4)); bubble.addView(heading);
             }
-            TextView questionText = text(question.optString("question"), 14, bubbleColors.onSurface);
+            TextView questionText = text(question.optString("question"), 18, bubbleColors.onSurface);
+            questionText.setTypeface(null, android.graphics.Typeface.BOLD); questionText.setAccessibilityHeading(true);
             questionText.setPadding(0, dp(index == 0 ? 0 : 8), 0, dp(6));
             questionText.setLineSpacing(dp(2), 1f); bubble.addView(questionText);
+            JSONArray options = question.optJSONArray("options");
+            boolean allowCustom = question.optBoolean("allowCustom", true);
+            int guidanceResource = options == null || options.length() == 0 ? R.string.pet_overlay_question_custom : allowCustom
+                ? answer.multiple() ? R.string.pet_overlay_question_multiple : R.string.pet_overlay_question_single
+                : answer.multiple() ? R.string.pet_overlay_question_multiple_choices : R.string.pet_overlay_question_single_choice;
+            TextView guidance = text(overlayText(guidanceResource), 13, bubbleColors.onSurfaceVariant);
+            guidance.setPadding(0, 0, 0, dp(8)); bubble.addView(guidance);
             if (!question.optString("detail").isEmpty()) {
                 TextView detail = text(question.optString("detail"), 12, bubbleColors.onSurfaceVariant);
                 detail.setTextIsSelectable(true); detail.setPadding(0, 0, 0, dp(6)); bubble.addView(detail);
             }
-            JSONArray options = question.optJSONArray("options");
             java.util.List<CompoundButton> choices = new java.util.ArrayList<>();
             EditText custom = new EditText(context);
             custom.setTextSize(14); custom.setTextColor(bubbleColors.onSurface); custom.setHintTextColor(bubbleColors.onSurfaceVariant);
-            custom.setHint(options != null && options.length() > 0 ? NativeLocale.text("填写其他回答", "Write another answer") : NativeLocale.text("填写你的回答", "Write your answer"));
-            custom.setContentDescription(question.optString("question") + NativeLocale.text("，手动填写回答", ". Write an answer"));
+            custom.setShadowLayer(Math.max(1, dp(1)), 0, 0, 0xD9FFFFFF);
+            custom.setHint(overlayText(options != null && options.length() > 0 ? R.string.pet_overlay_custom_hint : R.string.pet_overlay_answer_hint));
+            custom.setContentDescription(overlayText(R.string.pet_overlay_custom_description, question.optString("question")));
             custom.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
             custom.setMinLines(1); custom.setMaxLines(4); custom.setGravity(Gravity.TOP | Gravity.LEFT);
-            custom.setPadding(dp(9), dp(10), dp(9), dp(10)); custom.setMinHeight(dp(48));
-            custom.setBackgroundTintList(android.content.res.ColorStateList.valueOf(bubbleColors.primary));
+            custom.setPadding(dp(12), dp(12), dp(12), dp(12)); custom.setMinHeight(dp(48));
+            GradientDrawable inputShape = new GradientDrawable(); inputShape.setCornerRadius(dp(12)); inputShape.setColor(0x80FFFFFF);
+            inputShape.setStroke(dp(1), 0x99FFFFFF); custom.setBackground(inputShape);
             custom.setText(answer.custom);
             boolean[] syncing = {false};
-            Button[] skipControl = new Button[1];
             Runnable updateChoices = () -> {
                 syncing[0] = true;
                 for (CompoundButton choice : choices) choice.setChecked(answer.selected.contains((String)choice.getTag()));
                 if (!custom.getText().toString().equals(answer.custom)) custom.setText(answer.custom);
-                if (skipControl[0] != null) skipControl[0].setText(answer.skipped
-                    ? NativeLocale.text("暂不回答，可重新填写", "Left unanswered. You can still answer") : NativeLocale.text("暂不回答", "Leave unanswered"));
                 syncing[0] = false;
             };
             if (options != null) for (int optionIndex = 0; optionIndex < options.length(); optionIndex++) {
                 JSONObject option = options.optJSONObject(optionIndex);
                 if (option == null) continue;
+                if (optionIndex == 0) addDivider(bubble);
                 String label = option.optString("label"), description = option.optString("description");
                 CompoundButton choice = answer.multiple() ? new CheckBox(context) : new RadioButton(context);
                 choice.setTag(label); choice.setText(description.isEmpty() ? label : label + "\n" + description);
                 choice.setTextSize(14); choice.setTextColor(bubbleColors.onSurface); choice.setGravity(Gravity.CENTER_VERTICAL);
+                choice.setShadowLayer(Math.max(1, dp(1)), 0, 0, 0xD9FFFFFF);
                 choice.setSingleLine(false); choice.setEllipsize(null);
                 choice.setButtonTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked}, new int[]{}},
                     new int[]{bubbleColors.primary, bubbleColors.onSurfaceVariant}));
-                choice.setPadding(dp(2), dp(7), dp(4), dp(7)); choice.setMinHeight(dp(48));
+                choice.setPadding(0, dp(4), 0, dp(4)); choice.setMinHeight(dp(48));
                 choice.setChecked(answer.selected.contains(label));
                 choice.setOnClickListener(view -> { answer.choose(label, answer.multiple() ? choice.isChecked() : true); updateChoices.run(); });
-                choices.add(choice); bubble.addView(choice, new LinearLayout.LayoutParams(-1, -2));
+                choices.add(choice); bubble.addView(choice, new LinearLayout.LayoutParams(-1, -2)); addDivider(bubble);
             }
             custom.addTextChangedListener(new android.text.TextWatcher() {
                 @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) {}
@@ -854,32 +933,75 @@ final class PetOverlay implements OverlayInteraction.Listener {
                 }
                 @Override public void afterTextChanged(android.text.Editable value) {}
             });
-            custom.setOnTouchListener((view, event) -> {
-                if (event.getActionMasked() == MotionEvent.ACTION_DOWN) focusAnswer(custom);
-                return false;
-            });
             custom.setOnFocusChangeListener((view, focused) -> { if (focused) focusAnswer(custom); });
-            if (question.optBoolean("allowCustom", true)) bubble.addView(custom, new LinearLayout.LayoutParams(-1, -2));
-            // Generic skip labels can be mistaken for dismissible ads by accessibility helpers.
-            Button skip = button(NativeLocale.text("暂不回答", "Leave unanswered"), () -> { answer.skip(); updateChoices.run(); });
-            skipControl[0] = skip; updateChoices.run();
-            styleButton(skip, Color.TRANSPARENT, bubbleColors.primary); bubble.addView(skip);
-        }
-        TextView error = text(NativeLocale.text("请回答或跳过每个问题", "Answer or skip each question"), 12, bubbleColors.error);
-        error.setPadding(0, dp(7), 0, dp(3)); error.setVisibility(View.GONE); bubble.addView(error);
-        Button submit = button(NativeLocale.text("发送回答", "Send answer"), () -> {
-            if (!draft.complete()) {
-                error.setVisibility(View.VISIBLE); positionBubble();
-                error.sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_ANNOUNCEMENT); return;
+            custom.setOnClickListener(view -> focusAnswer(custom));
+            if (allowCustom) {
+                LinearLayout.LayoutParams inputLayout = new LinearLayout.LayoutParams(-1, -2); inputLayout.topMargin = dp(8);
+                bubble.addView(custom, inputLayout);
             }
+        }
+        TextView error = text(overlayText(R.string.pet_overlay_answer_incomplete), 12, bubbleColors.error);
+        error.setPadding(0, dp(7), 0, dp(3)); error.setVisibility(View.GONE); bubble.addView(error);
+        Runnable submitAnswer = () -> {
             try { action(task, "answer", pending.optString("requestId"), null, draft.encode()); }
             catch (org.json.JSONException invalid) { throw new IllegalStateException(invalid); }
+        };
+        questionActions = new LinearLayout(context); questionActions.setOrientation(LinearLayout.HORIZONTAL);
+        questionActions.setGravity(Gravity.CENTER_VERTICAL); questionActions.setPadding(dp(8), 0, dp(8), dp(6));
+        FrameLayout skip = new FrameLayout(context); skip.setClickable(true); skip.setFocusable(true);
+        skip.setMinimumWidth(dp(48)); skip.setMinimumHeight(dp(48));
+        skip.setContentDescription(overlayText(R.string.pet_overlay_leave_unanswered_description));
+        GradientDrawable skipMask = new GradientDrawable(); skipMask.setColor(bubbleColors.controlSurface); skipMask.setCornerRadius(dp(10));
+        skipMask.setStroke(Math.max(1, dp(1)), 0xCCFFFFFF);
+        android.graphics.drawable.InsetDrawable skipPlate = new android.graphics.drawable.InsetDrawable(skipMask, 0, dp(8), 0, dp(8));
+        skip.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x20465363), skipPlate, null));
+        skip.setPadding(0, 0, 0, 0);
+        skip.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info); info.setClassName(Button.class.getName());
+            }
         });
-        styleButton(submit, bubbleColors.primary, bubbleColors.onPrimary);
-        bubble.addView(submit);
+        TextView skipLabel = text(overlayText(R.string.pet_overlay_leave_unanswered), 12, bubbleColors.primary);
+        skipLabel.setGravity(Gravity.CENTER); skipLabel.setPadding(dp(10), 0, dp(10), 0);
+        skipLabel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        skipLabel.setAccessibilityDelegate(new View.AccessibilityDelegate() {
+            @Override public void onInitializeAccessibilityNodeInfo(View host, android.view.accessibility.AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(host, info);
+                // Services may include unimportant views. Only the parent owns the action's spoken meaning.
+                info.setText(null); info.setContentDescription(null);
+            }
+            @Override public void onPopulateAccessibilityEvent(View host, android.view.accessibility.AccessibilityEvent event) {
+                event.getText().clear(); event.setContentDescription(null);
+            }
+        });
+        skip.addView(skipLabel, new FrameLayout.LayoutParams(-2, dp(48), Gravity.CENTER));
+        skip.setOnClickListener(view -> {
+            try { action(task, "answer", pending.optString("requestId"), null, draft.encodeSkipped()); }
+            catch (org.json.JSONException invalid) { throw new IllegalStateException(invalid); }
+        });
+        Button submit = button(overlayText(R.string.pet_overlay_send_answer), () -> {
+            if (!draft.complete()) {
+                error.setVisibility(View.VISIBLE); positionBubble();
+                error.post(() -> { if (bubbleWindow != null) error.requestRectangleOnScreen(new Rect(0, 0, error.getWidth(), error.getHeight()), false); });
+                error.sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_ANNOUNCEMENT); return;
+            }
+            submitAnswer.run();
+        });
+        styleButton(submit, bubbleColors.controlSurface, bubbleColors.primary);
+        android.graphics.drawable.Drawable send = context.getDrawable(R.drawable.native_ui_send).mutate();
+        send.setTint(bubbleColors.primary); send.setBounds(0, 0, dp(24), dp(24));
+        submit.setCompoundDrawables(null, null, send, null); submit.setCompoundDrawablePadding(dp(6));
+        skipLabel.setSingleLine(true); submit.setSingleLine(true);
+        skip.setTag("droy-pet-leave-unanswered"); submit.setTag("droy-pet-submit-answer");
+        questionActions.addView(skip, new LinearLayout.LayoutParams(-2, dp(48)));
+        questionActions.addView(new View(context), new LinearLayout.LayoutParams(0, 1, 1));
+        questionActions.addView(submit, new LinearLayout.LayoutParams(-2, dp(48)));
     }
     private void focusAnswer(EditText input) {
-        if (bubbleWindow == null || bubbleLayout == null) return;
+        if (bubbleWindow == null || bubbleLayout == null || bubbleHost == null || clearanceDepth > 0 || bubbleHidden
+                || !input.isAttachedToWindow() || !input.isShown()
+                || input.getRootView() != bubbleHost.surface()) return;
         if (!editingAnswer) {
             editingAnswer = true;
             bubbleLayout.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
@@ -890,7 +1012,8 @@ final class PetOverlay implements OverlayInteraction.Listener {
         input.post(() -> showAnswerKeyboard(input));
     }
     private void showAnswerKeyboard(EditText input) {
-        if (!editingAnswer || !input.isAttachedToWindow() || !input.hasWindowFocus()) return;
+        if (!editingAnswer || clearanceDepth > 0 || bubbleHidden || !input.isAttachedToWindow()
+                || !input.isShown() || !input.hasWindowFocus()) return;
         context.getSystemService(android.view.inputmethod.InputMethodManager.class).showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
     }
     private void releaseAnswerFocus() {
@@ -904,7 +1027,75 @@ final class PetOverlay implements OverlayInteraction.Listener {
         if (bubbleHost != null) bubbleHost.update(bubbleLayout);
     }
     private TextView text(String value, int sp, int color) {
-        TextView t = new TextView(context); t.setText(value); t.setTextSize(sp); t.setTextColor(color); t.setIncludeFontPadding(false); return t;
+        TextView t = new TextView(context); t.setText(value); t.setTextSize(sp); t.setTextColor(color); t.setIncludeFontPadding(false);
+        t.setShadowLayer(Math.max(1, dp(1)), 0, 0, 0xD9FFFFFF); return t;
+    }
+    private String overlayText(int resource, Object... arguments) {
+        android.content.res.Configuration configuration = new android.content.res.Configuration(context.getResources().getConfiguration());
+        configuration.setLocale(java.util.Locale.forLanguageTag(NativeLocale.active()));
+        return context.createConfigurationContext(configuration).getString(resource, arguments);
+    }
+    private void addDivider(LinearLayout parent) {
+        View divider = new View(context); divider.setBackgroundColor(0x22667381);
+        parent.addView(divider, new LinearLayout.LayoutParams(-1, Math.max(1, dp(1))));
+    }
+    private ImageButton iconButton(int icon, int description, int color, Runnable action) {
+        ImageButton button = new ImageButton(context);
+        button.setImageResource(icon); button.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        button.setMinimumWidth(dp(48)); button.setMinimumHeight(dp(48));
+        button.setImageTintList(new android.content.res.ColorStateList(new int[][]{new int[]{-android.R.attr.state_enabled}, new int[]{}},
+            new int[]{(color & 0x00FFFFFF) | 0x66000000, color}));
+        GradientDrawable plate = new GradientDrawable(); plate.setColor(bubbleColors.controlSurface); plate.setCornerRadius(dp(10));
+        plate.setStroke(Math.max(1, dp(1)), 0xCCFFFFFF);
+        android.graphics.drawable.InsetDrawable inset = new android.graphics.drawable.InsetDrawable(plate, dp(8), dp(8), dp(8), dp(8));
+        button.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x20465363), inset, null));
+        button.setPadding(dp(12), dp(12), dp(12), dp(12));
+        button.setContentDescription(overlayText(description)); button.setTooltipText(overlayText(description));
+        button.setOnClickListener(view -> action.run()); return button;
+    }
+    private void addTaskControls(String task) {
+        addDivider(bubble);
+        String phase = snapshot.optString("phase");
+        boolean paused = "paused".equals(phase) || "resuming".equals(phase);
+        boolean available = !busy && snapshot.optLong("controlRevision", -1) >= 0;
+        boolean stable = available &&
+            !java.util.Set.of("pausing", "resuming", "stopping").contains(phase);
+        long revision = snapshot.optLong("controlRevision", -1);
+        String controller = controlTaskId(snapshot);
+        LinearLayout row = new LinearLayout(context); row.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        ImageButton primary = iconButton(paused ? R.drawable.native_companion_play_arrow : R.drawable.native_work_pause,
+            paused ? R.string.pet_overlay_resume : R.string.pet_overlay_pause, bubbleColors.primary,
+            () -> controlTask(task, controller, paused ? "resume" : "pause", revision));
+        primary.setTag(paused ? "droy-pet-resume" : "droy-pet-pause"); primary.setEnabled(stable);
+        row.addView(primary, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        View divider = new View(context); divider.setBackgroundColor(0x22667381);
+        row.addView(divider, new LinearLayout.LayoutParams(Math.max(1, dp(1)), dp(24)));
+        ImageButton stop = iconButton(R.drawable.native_ui_stop, R.string.pet_overlay_stop, bubbleColors.onErrorContainer,
+            () -> controlTask(task, controller, "stop", revision));
+        stop.setTag("droy-pet-stop"); stop.setEnabled(available && !"stopping".equals(phase));
+        row.addView(stop, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        bubble.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
+    }
+    private void controlTask(String task, String controller, String command, long revision) {
+        JSONObject current = ToolProgress.current(context);
+        if (busy || current.optJSONObject("pending") != null || !task.equals(current.optString("taskId"))
+                || !controller.equals(controlTaskId(current)) || revision < 0
+                || current.optLong("controlRevision", -1) != revision) { refreshNow(); return; }
+        busy = true; MAIN.removeCallbacks(hideMessage);
+        if (bubble != null) setControlsEnabled(bubble, false);
+        new Thread(() -> {
+            String error = null;
+            try { PetActions.control(controller, command, revision); }
+            catch (Exception failure) { error = failure.getMessage(); }
+            String failure = error;
+            MAIN.post(() -> {
+                busy = false;
+                if (failure != null) Toast.makeText(context, failure, Toast.LENGTH_LONG).show();
+                refreshNow();
+                if (pet != null && bubble != null && manualBubble) showBubble(true);
+            });
+        }, "droy-pet-control").start();
     }
     private Button button(String label, Runnable action) {
         Button button = new Button(context); button.setText(label); button.setAllCaps(false); button.setTextSize(12);
@@ -925,33 +1116,50 @@ final class PetOverlay implements OverlayInteraction.Listener {
     }
     private void positionBubble() {
         if (bubbleWindow == null || petLayout == null) return;
-        int tail = dp(6);
-        int maxWidth = Math.min(bubbleMaxWidth, safe.width());
-        bubble.measure(View.MeasureSpec.makeMeasureSpec(maxWidth - tail, View.MeasureSpec.AT_MOST),
+        int margin = questionFrame == null ? 0 : dp(8), tail = dp(4);
+        int left = safe.left + margin, right = safe.right - margin;
+        int top = safe.top + margin, bottom = Math.max(top + dp(48), usableBottom() - margin);
+        int maxWidth = Math.min(bubbleMaxWidth, right - left);
+        bubble.measure(View.MeasureSpec.makeMeasureSpec(Math.max(1, maxWidth - tail), View.MeasureSpec.AT_MOST),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
         int width = manualBubble || pending() != null ? maxWidth : Math.min(maxWidth, bubble.getMeasuredWidth() + tail);
+        int height = bubble.getMeasuredHeight();
+        if (questionFrame != null) {
+            questionActions.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            height = Math.min(dp(420), height + questionActions.getMeasuredHeight());
+        }
         PetBubblePlacement.Placement position = PetBubblePlacement.place(petLayout.x, petLayout.y, petLayout.width,
-            petLayout.height, width, bubble.getMeasuredHeight(), safe.left, safe.top, safe.right, usableBottom());
+            petLayout.height, width, height, left, top, right, bottom);
         boolean horizontal = position.side() == PetBubblePlacement.Side.LEFT || position.side() == PetBubblePlacement.Side.RIGHT;
-        bubbleWindow.setPadding(position.side() == PetBubblePlacement.Side.LEFT ? tail : 0,
+        View paddingTarget = questionFrame == null ? bubbleWindow : questionFrame;
+        paddingTarget.setPadding(position.side() == PetBubblePlacement.Side.LEFT ? tail : 0,
             position.side() == PetBubblePlacement.Side.TOP ? tail : 0,
             position.side() == PetBubblePlacement.Side.RIGHT ? tail : 0,
             position.side() == PetBubblePlacement.Side.BOTTOM ? tail : 0);
-        bubble.measure(View.MeasureSpec.makeMeasureSpec(width - (horizontal ? tail : 0), View.MeasureSpec.EXACTLY),
+        int contentWidth = Math.max(1, width - (horizontal ? tail : 0));
+        bubble.measure(View.MeasureSpec.makeMeasureSpec(contentWidth, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
-        position = PetBubblePlacement.place(petLayout.x, petLayout.y, petLayout.width, petLayout.height, width,
-            bubble.getMeasuredHeight() + (horizontal ? 0 : tail), safe.left, safe.top, safe.right, usableBottom());
+        height = bubble.getMeasuredHeight() + (horizontal ? 0 : tail);
+        if (questionFrame != null) {
+            questionActions.measure(View.MeasureSpec.makeMeasureSpec(contentWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            height = Math.min(dp(420), height + questionActions.getMeasuredHeight());
+        }
+        position = PetBubblePlacement.place(petLayout.x, petLayout.y, petLayout.width, petLayout.height,
+            width, height, left, top, right, bottom);
         bubbleLayout.width = width; bubbleLayout.height = position.height();
         bubbleLayout.x = position.x(); bubbleLayout.y = position.y();
         bubbleBackground.pointTo(position.side(), position.tailOffset());
         if (bubbleHost != null) { bubbleHost.update(bubbleLayout); bubbleHost.surface().invalidateOutline(); }
     }
+
     private void action(String task, String action, String request, String option) {
         action(task, action, request, option, null);
     }
     private void action(String task, String action, String request, String option, JSONArray answers) {
         if (busy) return; busy = true; MAIN.removeCallbacks(hideMessage);
-        if (bubble != null) setControlsEnabled(bubble, false);
+        if (bubble != null) setControlsEnabled(questionFrame == null ? bubble : questionFrame, false);
         new Thread(() -> {
             String error = null;
             try { if (answers == null) PetActions.send(task, action, request, option); else PetActions.answer(task, request, answers); }
@@ -975,35 +1183,6 @@ final class PetOverlay implements OverlayInteraction.Listener {
         view.setEnabled(enabled);
         if (view instanceof ViewGroup group) for (int i = 0; i < group.getChildCount(); i++) setControlsEnabled(group.getChildAt(i), enabled);
     }
-    private void openTask(String task) {
-        JSONObject question = pending();
-        if (question != null) MainActivity.revealQuestion(context, task, question.optString("requestId"));
-        else MainActivity.revealTask(context, task);
-        collapse();
-    }
-    private void showInteractions() {
-        snapshot = ToolProgress.current(context);
-        if (pet == null || sprite == null || busy || pending() != null || clearanceDepth > 0) { refreshNow(); return; }
-        String packageId = sprite.packageId();
-        showBubble(true);
-        bubble.removeAllViews(); interactionMenu = true;
-        previewUntil = Math.max(previewUntil, SystemClock.elapsedRealtime() + 30000);
-        TextView heading = text(NativeLocale.text("Droy · 互动动作", "Droy · Play actions"), 14, bubbleColors.onSurface);
-        heading.setPadding(0, 0, 0, dp(6)); bubble.addView(heading);
-        for (String state : sprite.interactions()) {
-            Button play = button(sprite.interactionLabel(state), () -> {
-                if (sprite != null && packageId.equals(sprite.packageId())) playInteraction(state);
-            });
-            play.setTag("droy-pet-interaction:" + state);
-            bubble.addView(play);
-        }
-        bubble.addView(button(NativeLocale.text("返回任务", "Back to task"), () -> showBubble(true)));
-        String task = snapshot.optString("taskId");
-        if (snapshot.optBoolean("active") && !task.isEmpty())
-            bubble.addView(button(NativeLocale.text("停止任务", "Stop task"), () -> action(task, "cancel", null, null)));
-        MAIN.removeCallbacks(hideMessage); positionBubble();
-    }
-
     private void playInteraction(String state) {
         snapshot = ToolProgress.current(context);
         if (pet == null || sprite == null || busy || pending() != null || dragging || clearanceDepth > 0
@@ -1074,14 +1253,15 @@ final class PetOverlay implements OverlayInteraction.Listener {
     private void collapse() { removeBubble(); manualBubble = false; if (pet != null) MAIN.postDelayed(dock, 1200); }
     private void removeBubble() {
         MAIN.removeCallbacks(hideMessage);
-        stageBubble = false; problemBubble = false; interactionMenu = false;
+        stageBubble = false; problemBubble = false;
         releaseAnswerFocus();
         if (bubbleWindow != null) { OverlayInteraction.unregisterWindow(bubbleWindowId);
             if (bubbleHost != null) bubbleHost.dismiss();
-            bubbleHost = null; bubbleWindow = null; bubble = null; bubbleBackground = null; bubbleWindowId = -1; }
+            bubbleHost = null; bubbleWindow = null; bubble = null; questionFrame = questionActions = null; bubbleBackground = null; bubbleWindowId = -1; }
     }
 
     @Override public CompletableFuture<Void> prepare(Rect area, boolean capture) {
+        cancelTaps();
         cancelInteraction(true);
         stopTransition(true); cancelMovement(); MAIN.removeCallbacks(dock);
         restoreSequence++;
@@ -1148,27 +1328,37 @@ final class PetOverlay implements OverlayInteraction.Listener {
             }));
         }
     }
-    private void updateKeyboardInsets(View view, WindowInsets localInsets) {
+    private void updateKeyboardInsets(WindowInsets localInsets) {
+        boolean connected = io.droyagent.androiduse.DroyAccessibilityService.isConnected(context);
+        if (connected && accessibilityKeyboardKnown) return;
+        if (!connected) accessibilityKeyboardKnown = false;
         if (!localInsets.isVisible(WindowInsets.Type.ime())) {
-            if (!io.droyagent.androiduse.DroyAccessibilityService.isConnected(context)) onKeyboardBounds(new Rect());
+            applyKeyboardBounds(new Rect());
             return;
         }
-        // Small overlay-window insets are local intersections. Ask the application
-        // display-area metrics for full-screen geometry before translating a local fallback.
-        WindowMetrics metrics = systemWindows.getCurrentWindowMetrics();
+        // Floating-window origins can move with the IME. Anchor its height to the
+        // display, never to the bubble's translated position or current Window bounds.
+        WindowMetrics metrics = systemWindows.getMaximumWindowMetrics();
         Insets displayIme = metrics.getWindowInsets().getInsets(WindowInsets.Type.ime());
         Rect bounds = metrics.getBounds();
-        if (displayIme.bottom > 0) {
-            onKeyboardBounds(new Rect(bounds.left, bounds.bottom - displayIme.bottom, bounds.right, bounds.bottom));
-        } else {
-            Insets localIme = localInsets.getInsets(WindowInsets.Type.ime());
-            if (localIme.bottom > 0) {
-                int[] origin = new int[2]; view.getLocationOnScreen(origin);
-                onKeyboardBounds(new Rect(0, origin[1] + view.getHeight() - localIme.bottom, screenWidth, screenHeight));
-            }
-        }
+        int height = displayIme.bottom > 0 ? displayIme.bottom : localInsets.getInsets(WindowInsets.Type.ime()).bottom;
+        if (height > 0 && height <= bounds.height())
+            applyKeyboardBounds(new Rect(bounds.left, bounds.bottom - height, bounds.right, bounds.bottom));
     }
     @Override public void onKeyboardBounds(Rect bounds) {
+        Rect display = systemWindows.getMaximumWindowMetrics().getBounds();
+        if (!bounds.isEmpty() && !display.contains(bounds)) return;
+        // The accessibility service reports actual global IME bounds, including
+        // its disappearance. Overlay-local Insets must not overwrite that source.
+        accessibilityKeyboardKnown = true;
+        applyKeyboardBounds(bounds);
+    }
+    @Override public void onAccessibilityConnectionChanged() {
+        accessibilityKeyboardKnown = false;
+        if (pet != null) pet.requestApplyInsets();
+        if (bubbleWindow != null) bubbleWindow.requestApplyInsets();
+    }
+    private void applyKeyboardBounds(Rect bounds) {
         if (keyboard.equals(bounds)) return;
         if (!bounds.isEmpty()) cancelInteraction(true);
         keyboard.set(bounds);
@@ -1190,6 +1380,7 @@ final class PetOverlay implements OverlayInteraction.Listener {
     Rect petBounds() { return pet == null ? new Rect() : new Rect(petLayout.x, petLayout.y, petLayout.x + petLayout.width, petLayout.y + petLayout.height); }
     private Rect bubbleBounds() { return bubbleWindow == null ? new Rect() : new Rect(bubbleLayout.x, bubbleLayout.y, bubbleLayout.x + bubbleLayout.width, bubbleLayout.y + bubbleLayout.height); }
     private void removeWindows() {
+        cancelTaps();
         cancelInteraction(false);
         stopTransition(false); removeBubble(); cancelMovement(); MAIN.removeCallbacks(blink); MAIN.removeCallbacks(dock);
         holding = dragging = false;

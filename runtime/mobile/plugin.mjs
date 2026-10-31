@@ -22,6 +22,7 @@ import { protectHardwareDisclosure } from './hardware-disclosure.mjs';
 import { installCompanions } from './companions/host.mjs';
 import { installNativeApi } from './native-api.mjs';
 import { installCompanionMaintenanceHost } from './companions/maintenance-host.mjs';
+import { installTaskControl } from './task-control-host.mjs';
 
 export const name = 'droy-android-use';
 export const inject = ['tools', 'llm', 'attachments', 'webServer', 'settings', 'agents', 'userQuestions', 'systemPrompt', 'droyPluginPolicy'];
@@ -31,7 +32,9 @@ export function apply(ctx) {
   ctx.inject(['sessionProjections'], scope => installTokenUsage(scope));
   const getLocale = () => resolveMobileLocale(ctx);
   const message = text => translateBackendText(text, getLocale());
-  const bridge = createBridge({ getLocale });
+  const bridge = createBridge({ getLocale,
+    getScope: input => ctx.get('droyTaskControl')?.admitNative(input),
+    currentScope: taskId => ctx.get('droyTaskControl')?.currentScope(taskId) });
   installCompanions(ctx,bridge);
   installNativeApi(ctx);
   installCompanionMaintenanceHost(ctx);
@@ -41,8 +44,13 @@ export function apply(ctx) {
   const verification = createVerificationWorkflow(ctx, bridge);
   const progress = createExecutionProgress(payload => bridge.progress(payload),
     () => ctx.logger.warn('DROY_PROGRESS_REPORT_FAILED'), undefined, getLocale);
-  ctx.on('session/event', (session, event) => progress.sessionEvent(session, event));
+  ctx.on('session/event', (session, event) => {
+    progress.sessionEvent(session, event);
+    if (event.type === 'turn/end' && event.data.reason?.kind === 'completed')
+      void ctx.get('droyTaskControl')?.completed(String(session.id)).catch(() => ctx.logger.warn('TASK_CONTROL_COMPLETION_UNCONFIRMED'));
+  });
   ctx.effect(() => () => progress.dispose());
+  installTaskControl(ctx, bridge, progress);
   installPetInteractions(ctx, progress);
   const petGeneration = installPetGeneration(ctx);
   ctx.provide('droyPetGeneration', petGeneration);
@@ -61,7 +69,7 @@ export function apply(ctx) {
   }));
   ctx.webServer.register({ kind:'exact', path:'/droy/ready', async handler(req,res) {
     if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
-    const required = ['sessionController','tools','settings','agents','agentPresets','attachments','llm','connection','workspaceRegistry','droyInitialization','droyLifecycle','droyPluginPolicy','droyCompanions'];
+    const required = ['sessionController','tools','settings','agents','agentPresets','attachments','llm','connection','workspaceRegistry','droyInitialization','droyLifecycle','droyPluginPolicy','droyCompanions','droyTaskControl'];
     const tools = ctx.tools.schemas().map(tool => tool.name);
     const pendingServices=required.filter(service=>ctx.get(service)===undefined);
     const ready = !ctx.get('droyLifecycle')?.stopping && !pendingServices.length
@@ -83,7 +91,11 @@ export function apply(ctx) {
   const releasing = new Map();
   const release = agent => {
     if (!active.delete(String(agent.id))) return;
-    const operation = (async () => { await audio.settle(agent.id); await bridge.end(agent.id); })()
+    const scope = ctx.get('droyTaskControl')?.currentScope(String(agent.id));
+    const operation = (async () => {
+      await audio.settle(agent.id); await bridge.end(agent.id, scope);
+      ctx.get('droyTaskControl')?.ended(String(agent.id), scope);
+    })()
       .catch(error => { ctx.logger.warn('DROY_TASK_RELEASE_FAILED'); throw error; });
     releasing.set(String(agent.id), operation);
     operation.finally(() => { if (releasing.get(String(agent.id)) === operation) releasing.delete(String(agent.id)); }).catch(() => {});

@@ -24,7 +24,10 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.lang.reflect.Field;
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -47,6 +50,7 @@ public final class PetOverlayDeviceTest {
     private Context context;
     private SharedPreferences preferences;
     private android.app.Activity activity;
+    private TestPageActivity darkBackdrop;
     private DeviceUi ui;
     private int originalAccessibilityFlags;
     private boolean accessibilityFlagsChanged, startedRuntime;
@@ -55,6 +59,7 @@ public final class PetOverlayDeviceTest {
     private String originalEffectiveLanguage;
     private final Map<String, Object> originalPreferences = new HashMap<>();
     private final Map<Field, Object> originalProgress = new HashMap<>();
+    private final Map<String, Long> originalControlRevisions = new HashMap<>();
 
     @Before public void setUp() throws Exception {
         instrumentation = InstrumentationRegistry.getInstrumentation();
@@ -70,10 +75,13 @@ public final class PetOverlayDeviceTest {
         originalEffectiveLanguage = NativeLocale.active();
         // The fixture's synthetic progress is process-local; restore it without adding a production reset API.
         synchronized (ToolProgress.class) {
-            for (String name : new String[]{"currentTask", "currentPhase", "summary", "summaryKind", "activityKind", "pending", "active", "startedAt", "activeTasks"}) {
+            for (String name : new String[]{"currentTask", "currentControlTask", "currentPhase", "summary", "summaryKind", "activityKind", "pending", "active", "startedAt", "activeTasks", "controlRevision"}) {
                 Field field = ToolProgress.class.getDeclaredField(name); field.setAccessible(true);
                 originalProgress.put(field, field.get(null));
             }
+            Field revisions = ToolProgress.class.getDeclaredField("controlRevisions"); revisions.setAccessible(true);
+            @SuppressWarnings("unchecked") Map<String, Long> current = (Map<String, Long>)revisions.get(null);
+            originalControlRevisions.putAll(current);
         }
         AccessibilityServiceInfo service = automation.getServiceInfo();
         originalAccessibilityFlags = service.flags;
@@ -137,12 +145,15 @@ public final class PetOverlayDeviceTest {
 
     @After public void tearDown() throws Exception {
         try {
-            if (startedRuntime) {
-                if (activity != null && !activity.isDestroyed()) instrumentation.runOnMainSync(activity::finish);
-                instrumentation.runOnMainSync(RuntimeService::requestStop);
-                DeviceUi.await("Pet test left the runtime running", 15000, RuntimeService::canManageHistory);
-                PetOverlay.runtimeStopped();
-                instrumentation.waitForIdleSync();
+            try { closeDarkBackdrop(); }
+            finally {
+                if (startedRuntime) {
+                    if (activity != null && !activity.isDestroyed()) instrumentation.runOnMainSync(activity::finish);
+                    instrumentation.runOnMainSync(RuntimeService::requestStop);
+                    DeviceUi.await("Pet test left the runtime running", 15000, RuntimeService::canManageHistory);
+                    PetOverlay.runtimeStopped();
+                    instrumentation.waitForIdleSync();
+                }
             }
         } finally {
             try {
@@ -164,6 +175,9 @@ public final class PetOverlayDeviceTest {
                 });
                 synchronized (ToolProgress.class) {
                     for (Map.Entry<Field, Object> entry : originalProgress.entrySet()) entry.getKey().set(null, entry.getValue());
+                    Field revisions = ToolProgress.class.getDeclaredField("controlRevisions"); revisions.setAccessible(true);
+                    @SuppressWarnings("unchecked") Map<String, Long> current = (Map<String, Long>)revisions.get(null);
+                    current.clear(); current.putAll(originalControlRevisions);
                 }
                 if (accessibilityFlagsChanged) {
                     AccessibilityServiceInfo service = automation.getServiceInfo();
@@ -180,27 +194,33 @@ public final class PetOverlayDeviceTest {
     }
 
     @Test public void actualTouchOpensTheBubbleDragsDocksAndRestoresThePosition() throws Exception {
+        assertTrue("Enable system animations for actual idle-action playback", android.animation.ValueAnimator.areAnimatorsEnabled());
         capture("01-idle-peek");
         tap(petBounds());
+        DeviceUi.await("The confirmed single tap did not play an idle interaction", 2000,
+            () -> !((String)overlayField("interactionState")).isEmpty());
         assertFalse("An ordinary single tap opened a task panel", bubbleVisible());
         assertFalse("A single tap did not bring the cat out of its resting pose", (Boolean)overlayField("docked"));
         String tapState = onMain(() -> ((PetSpriteView)overlayFieldOnMain("sprite")).state());
-        assertTrue("Single tap did not play a tap variant: " + tapState,
-            tapState.equals("tap") || tapState.equals("tapTilt") || tapState.equals("tapWave"));
+        assertTrue("Single tap did not play an available interaction: " + tapState,
+            onMain(() -> ((PetSpriteView)overlayFieldOnMain("sprite")).interactions().contains(tapState)));
         capture("01-single-tap-animation-no-panel");
+        singlePetTap();
+        DeviceUi.await("A second deliberate idle tap did not play a different interaction", 2000,
+            () -> !((String)overlayField("interactionState")).isEmpty() && !tapState.equals(overlayField("interactionState")));
+        assertFalse("A deliberate idle single tap opened its status panel", bubbleVisible());
         doubleTap(petBounds());
-        DeviceUi.await("Double-tapping the cat did not open its message", 5000,
-            () -> cachedMessage().startsWith(NAME) && nativeBounds(cachedMessage(), false) != null);
-        String firstGreeting = cachedMessage();
+        awaitText(overlayText(R.string.pet_overlay_no_work));
+        Rect open = awaitIcon("droy-pet-open-app", R.string.pet_overlay_open_app);
+        assertIconTags("droy-pet-open-app");
+        Object firstBubble = overlayField("bubbleHost");
+        ui.tapAt(petBounds().centerX(), petBounds().centerY());
+        SystemClock.sleep(ViewConfiguration.getDoubleTapTimeout() + 64L);
+        assertSame("A third tap in one burst replaced or folded the status window", firstBubble, overlayField("bubbleHost"));
+        assertEquals("A multi-tap burst also played a delayed single action", "", overlayField("interactionState"));
         capture("02-tap-bubble");
-        doubleTap(petBounds());
-        DeviceUi.await("Double-tapping the cat did not fold its greeting", 3000, () -> nativeBounds(firstGreeting, false) == null);
-        doubleTap(petBounds());
-        DeviceUi.await("A new intentional greeting did not vary", 3000,
-            () -> !firstGreeting.equals(cachedMessage()) && cachedMessage().startsWith(NAME)
-                && nativeBounds(cachedMessage(), false) != null);
-        tap(awaitText(NativeLocale.text("查看任务", "View task")));
-        DeviceUi.await("The bubble's task button did not return to Droy", 10000, this::activityFocused);
+        tap(open);
+        DeviceUi.await("The idle bubble's Open Droy icon did not return to the app", 10000, this::activityFocused);
         assertFalse("Returning to Droy left the overlay message open", bubbleVisible());
         goHome();
 
@@ -245,7 +265,7 @@ public final class PetOverlayDeviceTest {
 
     @Test public void pendingMessagePersistsAndCaptureWaitsForHiddenWindowsThenRestoresThem() throws Exception {
         JSONObject pending = new JSONObject().put("requestId", "pet-device-fixture-request")
-            .put("title", "选择页面").put("message", MESSAGE).put("inline", true)
+            .put("title", "选择页面").put("message", MESSAGE).put("inline", true).put("kind", "approval")
             .put("options", new JSONArray().put(new JSONObject().put("id", "page-a").put("label", "打开示例页面"))
                 .put(new JSONObject().put("id", "stay").put("label", "先停在这里")));
         JSONObject progress = new JSONObject().put("taskId", "pet-device-fixture-task")
@@ -255,6 +275,15 @@ public final class PetOverlayDeviceTest {
         DeviceUi.await("A real pending question did not open its answer surface", 500, this::bubbleVisible);
         awaitText(MESSAGE);
         assertNotNull("The simple answer was not rendered as an accessible button", awaitText("打开示例页面"));
+        assertIconTags();
+        assertNull("An explicit approval was replaced with a generic Skip action", nativeBounds(overlayText(R.string.pet_overlay_leave_unanswered_description), true));
+        assertNull("An explicit approval exposed a generic answer submission", nativeBounds(overlayText(R.string.pet_overlay_send_answer), false));
+        instrumentation.runOnMainSync(() -> {
+            android.widget.TextView reason = bubbleTextOnMain(MESSAGE);
+            assertNotNull("The approval reason was lost", reason);
+            assertNull("The approval reason may not be ellipsized", reason.getEllipsize());
+            assertEquals("An explicit approval was converted into an ordinary question form", null, overlayFieldOnMain("questionFrame"));
+        });
         capture("07-pending-light");
         SystemClock.sleep(6500);
         assertNotNull("An unanswered question disappeared on the ordinary progress timer", nativeBounds(MESSAGE, false));
@@ -297,6 +326,9 @@ public final class PetOverlayDeviceTest {
     }
 
     @Test public void structuredQuestionSelectsMultipleAnswersTypesOverAnotherAppAndPreservesItsDraft() throws Exception {
+        String alpaca = "cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2";
+        PetOverlay.select(context, alpaca);
+        DeviceUi.await("The question fixture alpaca did not finish appearing", 5000, () -> selectedSprite(alpaca));
         Bundle accessibilityState = new Bundle();
         accessibilityState.putString("stream", "\nDROY_PET_IME_ACCESSIBILITY connected="
             + io.droyagent.androiduse.DroyAccessibilityService.isConnected(context) + "\n");
@@ -310,6 +342,12 @@ public final class PetOverlayDeviceTest {
         publish(new JSONObject().put("taskId", "structured-question-task").put("phase", "waiting_input")
             .put("active", true).put("summary", "等待选择").put("pending", pending));
         awaitText("页面甲");
+        Rect firstChoice = awaitText("页面甲"), secondChoice = awaitText("页面乙");
+        assertTrue("Choice rows lost their 48dp target", firstChoice.height() >= dp(48) && secondChoice.height() >= dp(48));
+        assertTrue("Question choices have oversized external gaps", secondChoice.top - firstChoice.bottom <= dp(4));
+        Rect available = (Rect)overlayField("safe");
+        assertTrue("Structured question did not use the available phone width", bubbleBounds().width() >= available.width() - dp(16) - 1);
+        assertQuestionFooter();
         assertFalse("A new question stole focus before the user chose to type", (Boolean)overlayField("editingAnswer"));
         assertTrue("A new question opened the keyboard without a touch", keyboardWindowBounds().isEmpty());
         tap(awaitText("页面甲"));
@@ -329,15 +367,15 @@ public final class PetOverlayDeviceTest {
         assertStructuredSelection("after-input-tap", draft, 2, field.get());
         DeviceUi.await("Typing did not give the answer bubble input focus", 5000, () -> (Boolean)overlayField("editingAnswer"));
         assertStructuredSelection("after-input-focus", draft, 2, field.get());
-        DeviceUi.await("The actual IME did not appear over the other app", 5000, () -> !((Rect)overlayField("keyboard")).isEmpty());
-        assertStructuredSelection("after-ime-visible", draft, 2, field.get());
-        DeviceUi.await("Companion IME geometry does not match the actual keyboard", 5000, () -> {
-            Rect actualIme = keyboardWindowBounds(), observed = (Rect)overlayField("keyboard");
-            return !actualIme.isEmpty() && Math.abs(actualIme.top - observed.top) <= dp(2);
-        });
-        Rect actualIme = keyboardWindowBounds();
-        assertTrue("Answer field overlaps the keyboard", nativeBounds(description, true).bottom <= actualIme.top);
-        assertTrue("Answer bubble overlaps the keyboard", bubbleBounds().bottom <= actualIme.top);
+        Rect[] geometry = awaitQuestionImeGeometry(description);
+        Rect actualIme = geometry[0], visibleInput = geometry[1];
+        field.set(visibleInput);
+        assertStructuredSelection("after-ime-visible", draft, 2, visibleInput);
+        assertTrue("The actual IME did not expand beyond its transient inset", actualIme.height() >= dp(48));
+        assertFalse("The focused answer input is not visible", visibleInput.isEmpty());
+        assertTrue("Answer field overlaps the keyboard", visibleInput.bottom <= actualIme.top);
+        assertTrue("Answer bubble overlaps the keyboard", geometry[2].bottom <= actualIme.top);
+        assertQuestionFooter();
         assertStructuredSelection("before-set-native-text", draft, 2, field.get());
         boolean edited = setNativeText(description, "页面丙");
         assertStructuredSelection("after-set-native-text", draft, 2, field.get());
@@ -349,21 +387,75 @@ public final class PetOverlayDeviceTest {
             ui.swipe(area.centerX(), area.bottom - dp(20), area.centerX(), area.top + dp(20), 300);
         }
         assertTrue("Submit action cannot be reached above the keyboard", awaitText(submitLabel).bottom <= actualIme.top);
+        assertQuestionFooter();
         capture("structured-question-keyboard");
         automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK);
         DeviceUi.await("Back did not close the IME", 5000, () -> ((Rect)overlayField("keyboard")).isEmpty());
+        assertEquals("Cancelling answer entry lost the manual draft", "页面丙", draft.answers.get(0).custom);
+        assertQuestionFooter();
         singlePetTap();
         DeviceUi.await("Question did not fold", 3000, () -> overlayField("bubbleWindow") == null);
         singlePetTap();
         awaitText("页面丙");
         assertSame("Folding lost the answer draft", draft, overlayField("questionDraft"));
         assertEquals(2, draft.encode().getJSONObject(0).getJSONArray("selected").length());
+        assertQuestionFooter();
         capture("structured-question-restored");
+        String beforeCapture = draft.encode().toString();
+        PetBubbleWindow originalHost = (PetBubbleWindow)overlayField("bubbleHost");
+        CompletableFuture<Void> clear = onMain(() -> PetOverlay.get(context).prepare(new Rect(), true));
+        clear.get(3, TimeUnit.SECONDS);
+        assertFalse("Capture left the structured form visible", bubbleVisible());
+        instrumentation.runOnMainSync(() -> assertEquals("Capture retained opaque question pixels", 0f, originalHost.surface().getAlpha(), 0f));
+        instrumentation.runOnMainSync(() -> PetOverlay.get(context).finish());
+        DeviceUi.await("Capture did not restore the structured question", 1000, this::bubbleVisible);
+        assertSame("Capture replaced the structured draft", draft, overlayField("questionDraft"));
+        assertSame("Capture recreated the structured window", originalHost, overlayField("bubbleHost"));
+        assertEquals("Capture changed selected or manual answers", beforeCapture, draft.encode().toString());
+        assertQuestionFooter();
         pending.put("requestId", "replacement-question-fixture");
         publish(new JSONObject().put("taskId", "structured-question-task").put("phase", "waiting_input")
             .put("active", true).put("summary", "新问题").put("pending", pending));
         DeviceUi.await("A replacement question kept the previous draft", 3000, () -> overlayField("questionDraft") != draft);
         assertEquals("", ((PetQuestionDraft)overlayField("questionDraft")).answers.get(0).custom);
+    }
+
+    private Rect[] awaitQuestionImeGeometry(String description) throws Exception {
+        AtomicReference<Rect[]> settled = new AtomicReference<>();
+        AtomicReference<String> last = new AtomicReference<>("IME geometry not sampled");
+        Rect[] previousIme = new Rect[1];
+        long[] stableSince = {0};
+        try {
+            DeviceUi.await("The real IME, focused input and answer window did not settle above the keyboard", 10_000, () -> {
+                Rect actual = keyboardWindowBounds(), observed = (Rect)overlayField("keyboard");
+                Rect input = nativeBounds(description, true);
+                Rect bubble = onMain(() -> {
+                    WindowManager.LayoutParams layout = (WindowManager.LayoutParams)overlayFieldOnMain("bubbleLayout");
+                    return layout == null ? new Rect() : new Rect(layout.x, layout.y, layout.x + layout.width, layout.y + layout.height);
+                });
+                boolean focused = onMain(() -> {
+                    android.widget.EditText view = findQuestionInput((android.view.View)overlayFieldOnMain("bubble"));
+                    return view != null && view.hasFocus() && view.isShown() && view.getGlobalVisibleRect(new Rect());
+                });
+                last.set("actual=" + actual.toShortString() + " observed=" + observed.toShortString()
+                    + " input=" + (input == null ? "none" : input.toShortString()) + " bubble=" + bubble.toShortString() + " focused=" + focused);
+                boolean ready = actual.height() >= dp(48) && observed.height() >= dp(48)
+                    && Math.abs(actual.top - observed.top) <= dp(2) && Math.abs(actual.bottom - observed.bottom) <= dp(2)
+                    && input != null && !input.isEmpty() && focused && bubble.contains(input)
+                    && input.bottom <= actual.top && bubble.bottom <= actual.top;
+                if (!ready) { previousIme[0] = null; stableSince[0] = 0; return false; }
+                long now = SystemClock.uptimeMillis();
+                if (!actual.equals(previousIme[0])) { previousIme[0] = new Rect(actual); stableSince[0] = now; return false; }
+                if (now - stableSince[0] < 120) return false;
+                settled.set(new Rect[]{new Rect(actual), new Rect(input), new Rect(bubble)});
+                return true;
+            });
+        } catch (AssertionError failure) {
+            try { capture("structured-question-ime-geometry-timeout"); }
+            catch (Exception | AssertionError diagnostic) { failure.addSuppressed(diagnostic); }
+            throw new AssertionError("IME/input geometry did not settle: " + last.get(), failure);
+        }
+        return settled.get();
     }
 
     private void assertStructuredSelection(String step, PetQuestionDraft expected, int count, Rect touchBounds) throws Exception {
@@ -372,8 +464,8 @@ public final class PetOverlayDeviceTest {
             PetQuestionDraft.Answer answer = current == null || current.answers.isEmpty() ? null : current.answers.get(0);
             android.view.View bubble = (android.view.View)overlayFieldOnMain("bubble");
             android.view.View focused = bubble == null ? null : bubble.findFocus();
-            android.widget.TextView skipped = findTextView(bubble, NativeLocale.text("暂不回答，可重新填写", "Left unanswered. You can still answer"));
-            android.widget.TextView skip = skipped != null ? skipped : findTextView(bubble, NativeLocale.text("暂不回答", "Leave unanswered"));
+            android.view.View root = bubbleRootOnMain();
+            android.view.View skip = root == null ? null : root.findViewWithTag("droy-pet-leave-unanswered");
             int[] choices = questionChoiceCounts(bubble);
             WindowManager.LayoutParams layout = (WindowManager.LayoutParams)overlayFieldOnMain("bubbleLayout");
             String bubbleArea = layout == null ? "none" : new Rect(layout.x, layout.y, layout.x + layout.width, layout.y + layout.height).toShortString();
@@ -460,9 +552,6 @@ public final class PetOverlayDeviceTest {
     }
 
     @Test public void typedErrorsBypassChatterBudgetDeduplicateAndYieldToPendingQuestions() throws Exception {
-        String alpaca = "cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2";
-        PetOverlay.select(context, alpaca);
-        DeviceUi.await("Alpaca did not appear", 5000, () -> selectedSprite(alpaca));
         String task = "pet-typed-error-fixture";
         JSONObject progress = new JSONObject().put("taskId", task).put("phase", "thinking")
             .put("active", true).put("summary", NativeLocale.text("正在处理虚构任务", "Working on the fictional task."))
@@ -482,6 +571,9 @@ public final class PetOverlayDeviceTest {
             assertEquals("controlling", policy.observe(task, "controlling", now - 3_000));
         });
 
+        String alpaca = "cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2";
+        PetOverlay.select(context, alpaca);
+        DeviceUi.await("Alpaca did not appear", 5000, () -> selectedSprite(alpaca));
         openPlayAction("spitScreen");
         assertEquals("The play action must be active before publishing its interrupting error", "spitScreen", overlayField("interactionState"));
         assertNotNull("The play action must have a live effect to verify cleanup", overlayField("effectWindow"));
@@ -495,8 +587,7 @@ public final class PetOverlayDeviceTest {
         assertEquals("An error consumed or reset the ordinary message quota", "controlling",
             ((PetChatterPolicy)overlayField("chatter")).current());
         capture("typed-error-visible-" + NativeLocale.active());
-        doubleTap(petBounds());
-        DeviceUi.await("Double-tapping did not fold the model error", 3000, () -> !bubbleVisible());
+        collapseBubble();
         publish(progress);
         instrumentation.waitForIdleSync(); SystemClock.sleep(1200);
         assertFalse("An identical model error reopened after being folded", bubbleVisible());
@@ -574,7 +665,8 @@ public final class PetOverlayDeviceTest {
         publish(new JSONObject().put("taskId", "question-task-b").put("phase", "waiting_input")
             .put("active", true).put("summary", "任务乙的问题").put("pending", question));
         awaitText("任务乙的问题");
-        tap(awaitText("查看并处理"));
+        assertIconTags("droy-pet-open-full-task");
+        tap(awaitIcon("droy-pet-open-full-task", R.string.pet_overlay_open_full_task));
         DeviceUi.await("The pending question was routed using the earlier notification's task", 3000, () -> {
             AtomicReference<String> target = new AtomicReference<>();
             instrumentation.runOnMainSync(() -> target.set(activity.getIntent().getStringExtra("petTaskId")));
@@ -596,15 +688,16 @@ public final class PetOverlayDeviceTest {
             .put("active", true).put("summary", message).put("summaryKind", "slow").put("pending", JSONObject.NULL);
         publish(slow);
         awaitText(message);
-        assertNotNull("Slow model wait must keep a stop control", awaitText("停止任务"));
+        assertIconTags();
+        singlePetTap();
+        assertTaskControls(message, false, true, true);
         capture("slow-model-stop");
-        doubleTap(petBounds());
-        DeviceUi.await("The slow message did not fold", 3000, () -> !bubbleVisible());
+        collapseBubble();
         publish(slow); instrumentation.waitForIdleSync();
         assertFalse("The same slow request reopened after a duplicate event", bubbleVisible());
         publish(new JSONObject().put("taskId", "pet-slow-fixture").put("phase", "executing")
             .put("active", true).put("summary", "正在执行操作").put("pending", JSONObject.NULL));
-        doubleTap(petBounds()); awaitText("正在执行操作");
+        singlePetTap(); awaitText("正在执行操作");
         assertNull("Execution retained the slow request copy", nativeBounds(message, false));
     }
 
@@ -629,30 +722,26 @@ public final class PetOverlayDeviceTest {
         assertTrue("Ordinary bubble is wider than its compact limit", compact.width() <= dp(172) + 1);
         assertTrue("Ordinary progress wastes vertical space", compact.height() <= dp(100));
         assertTrue("Bubble text escaped its window", compact.contains(text));
-        assertNull("Ordinary progress should not expose large action controls", nativeBounds("停止任务", false));
+        assertIconTags();
         Rect cat = petBounds();
         assertTrue("Speech bubble is detached from the cat", Math.abs(compact.right - cat.left) <= 2
             || Math.abs(compact.left - cat.right) <= 2 || Math.abs(compact.bottom - cat.top) <= 2
             || Math.abs(compact.top - cat.bottom) <= 2);
         capture("11-compact-progress");
         tap(text);
-        Rect stop = awaitText("停止任务");
-        assertTrue("Expanded controls lost their touch target", stop.height() >= dp(48));
+        assertTaskControls(message, false, true, true);
         capture("12-expanded-progress");
-        doubleTap(petBounds());
-        DeviceUi.await("Expanded bubble did not fold", 3000, () -> !bubbleVisible());
+        collapseBubble();
         publish(new JSONObject().put("taskId", "pet-device-compact-task").put("phase", "executing")
             .put("active", true).put("summary", "正在查看当前页面").put("pending", JSONObject.NULL));
         instrumentation.waitForIdleSync();
         assertFalse("A subsequent progress update reopened the notification", bubbleVisible());
-        doubleTap(petBounds());
+        singlePetTap();
         awaitText("正在查看当前页面");
         DeviceUi.await("Recoverable progress stayed pinned like a blocker", 8000, () -> !bubbleVisible());
     }
 
     @Test public void englishCompactGlassAndPanelActionsFitWithoutShrinkingTheirTouchTargets() throws Exception {
-        // Pin only this process's presentation language. The live Host may mirror
-        // its saved language; the test must neither race it nor change DSH/product.
         instrumentation.runOnMainSync(() -> NativeLocale.mirrorProcessLanguage("en"));
         assertEquals("en", NativeLocale.active());
         String message = "Checking the fictional page and keeping this task's progress concise while the work continues.";
@@ -667,36 +756,108 @@ public final class PetOverlayDeviceTest {
             assertEquals(2, content.getMaxLines());
             assertTextSize(content, 12);
         });
-        capture("glass-compact-english");
-        doubleTap(petBounds());
-        Rect open = awaitText("View task"), stop = awaitText("Stop task");
-        assertTrue("The task panel exceeded 220dp", bubbleBounds().width() <= dp(220) + 1);
-        assertTrue("English actions wrapped into separate rows", Math.abs(open.top - stop.top) <= dp(1));
-        assertTrue("English action controls overlap", open.right <= stop.left);
-        assertTrue("View task escaped the panel", bubbleBounds().contains(open));
-        assertTrue("Stop task escaped the panel", bubbleBounds().contains(stop));
+        assertIconTags();
+        capture("fog-compact-english");
+        singlePetTap();
+        assertTaskControls(message, false, true, true);
         awaitOverlayFrameCommit();
-        instrumentation.runOnMainSync(() -> {
-            assertTextSize(bubbleTextOnMain(message), 13);
-            for (String label : new String[]{"View task", "Stop task"}) {
-                android.widget.Button action = (android.widget.Button)bubbleTextOnMain(label);
-                assertNotNull(action); assertTextSize(action, 12);
-                assertTrue("The button touch target shrank below 48dp", action.getHeight() >= dp(48));
-                assertEquals("English button label wrapped", 1, action.getLayout().getLineCount());
-                assertEquals("English button label was ellipsized", 0, action.getLayout().getEllipsisCount(0));
-                assertTrue("English text overflows its button", action.getLayout().getLineWidth(0)
-                    <= action.getWidth() - action.getCompoundPaddingLeft() - action.getCompoundPaddingRight() + 1);
-                android.graphics.drawable.RippleDrawable ripple = (android.graphics.drawable.RippleDrawable)action.getBackground();
-                android.graphics.drawable.InsetDrawable inset = (android.graphics.drawable.InsetDrawable)ripple.getDrawable(0);
-                assertEquals("The visible pill lost its compact 32dp height", dp(32), inset.getDrawable().getBounds().height(), dp(1));
-            }
-        });
-        capture("glass-panel-english-light");
+        instrumentation.runOnMainSync(() -> assertTextSize(bubbleTextOnMain(message), 14));
+        assertFogTint();
+        PetBubbleColors light = (PetBubbleColors)overlayField("bubbleColors");
+        assertEquals("The fog surface is not neutral white", 0xFFFFFFFF, light.surface);
+        capture("fog-panel-english-light");
         assertTrue(preferences.edit().putString("appearanceMode", "dark").commit());
-        PetOverlay.refresh(context); awaitText("View task");
-        capture("glass-panel-english-dark");
-        doubleTap(petBounds());
-        DeviceUi.await("Double-tapping did not close the English task panel", 3000, () -> !bubbleVisible());
+        PetOverlay.refresh(context);
+        assertTaskControls(message, false, true, true);
+        PetBubbleColors dark = PetBubbleColors.from(context);
+        assertEquals("Saved dark mode changed the overlay tint", light.surface, dark.surface);
+        assertEquals("Saved dark mode changed the overlay text", light.onSurface, dark.onSurface);
+        assertEquals("Saved dark mode changed the overlay secondary text", light.onSurfaceVariant, dark.onSurfaceVariant);
+        assertEquals("Saved dark mode changed the overlay outline", light.outline, dark.outline);
+        assertEquals("Saved dark mode changed the overlay task icons", light.primary, dark.primary);
+        assertEquals("Saved dark mode changed the overlay stop icon", light.error, dark.error);
+        assertFogTint();
+        capture("fog-panel-english-dark");
+    }
+
+    @Test public void taskControlIconsTrackPausedAndTransitionSnapshotsWithoutClaimingEngineExecution() throws Exception {
+        String locale = InstrumentationRegistry.getArguments().getString("petFixtureLocale", "en");
+        assertTrue("Pet fixture locale must be en or zh", Set.of("en", "zh").contains(locale));
+        instrumentation.runOnMainSync(() -> NativeLocale.mirrorProcessLanguage(locale));
+        String alpaca = "cb5c4126-8c3b-41a5-a1bd-3d3b95cdeee2";
+        PetOverlay.select(context, alpaca);
+        DeviceUi.await("The selected alpaca did not finish appearing", 5000, () ->
+            alpaca.equals(((PetSpriteView)overlayField("sprite")).packageId()) && !(Boolean)overlayField("entering"));
+        String work = NativeLocale.text("正在对比商品信息", "Checking a fictional page");
+        JSONObject progress = new JSONObject().put("taskId", "pet-control-presentation-fixture")
+            .put("controlTaskId", "pet-control-owner-fixture")
+            .put("phase", "executing").put("active", true).put("summary", work)
+            .put("controlRevision", 40).put("pending", JSONObject.NULL);
+        publish(progress);
+        assertTrue(PetOverlay.notify(context, "pet-control-presentation-fixture", "pet-control-presentation-hint-" + locale, work));
+        awaitText(work);
+        capture("fog-control-auto-hint-" + locale);
+        singlePetTap();
+        assertTaskControls(work, false, true, true);
+        capture("fog-control-working");
+        String[] phases = {"pausing", "paused", "resuming", "stopping"};
+        int[] descriptions = {R.string.pet_overlay_pausing, R.string.pet_overlay_paused, R.string.pet_overlay_resuming, R.string.pet_overlay_stopping};
+        for (int i = 0; i < phases.length; i++) {
+            publish(progress.put("phase", phases[i]).put("active", true).put("controlRevision", 41 + i));
+            String summary = overlayText(descriptions[i]);
+            awaitText(summary);
+            boolean resume = phases[i].equals("paused") || phases[i].equals("resuming");
+            assertTaskControls(summary, resume, phases[i].equals("paused"), !phases[i].equals("stopping"));
+            if (phases[i].equals("paused")) {
+                DeviceUi.await("The paused message kept covering the foreground app", 9000, () -> !bubbleVisible());
+                JSONObject retained = ToolProgress.current(context);
+                assertTrue("Hiding the paused bubble ended the logical task", retained.getBoolean("active"));
+                assertEquals("Hiding the paused bubble resumed the task", "paused", retained.getString("phase"));
+                assertEquals("Hiding the paused bubble changed its controller revision", 42, retained.getLong("controlRevision"));
+                singlePetTap();
+                assertTaskControls(summary, true, true, true);
+            }
+            capture("fog-control-" + phases[i]);
+        }
+        String failure = NativeLocale.text("尚未确认操作已停止，仍可结束当前任务。",
+            "Could not confirm cancellation. You can still stop this task.");
+        publish(progress.put("phase", "pausing").put("summaryKind", "error").put("summary", failure).put("controlRevision", 45));
+        assertTaskControls(failure, false, false, true);
+        publish(progress.put("phase", "stopped").put("active", false).put("summaryKind", "").put("controlRevision", 46));
+        awaitText(overlayText(R.string.pet_overlay_no_work));
+        awaitIcon("droy-pet-open-app", R.string.pet_overlay_open_app);
+        assertIconTags("droy-pet-open-app");
+        assertEquals("The last presentation snapshot lost its control revision", 46, ToolProgress.current(context).getLong("controlRevision"));
+        assertEquals("Task controls lost their distinct controller identity", "pet-control-owner-fixture", ToolProgress.current(context).getString("controlTaskId"));
+        assertFalse("Presentation snapshots must not start a phone-operation session", ToolProgress.screenOperationActive());
+        capture("fog-control-idle-" + locale);
+    }
+
+    private void assertFogTint() throws Exception {
+        instrumentation.runOnMainSync(() -> {
+            PetBubbleDrawable drawable = (PetBubbleDrawable)overlayFieldOnMain("bubbleBackground");
+            assertNotNull("The actual bubble has no fog drawable", drawable);
+            PetBubbleWindow host = (PetBubbleWindow)overlayFieldOnMain("bubbleHost");
+            WindowManager.LayoutParams attributes = (WindowManager.LayoutParams)host.surface().getLayoutParams();
+            assertTrue("The fog overlay dimmed the entire background app", (attributes.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND) == 0 || attributes.dimAmount == 0f);
+            Rect bounds = drawable.getBounds();
+            assertFalse("The actual fog drawable has no measured bounds", bounds.isEmpty());
+            Bitmap sample = Bitmap.createBitmap(bounds.width(), bounds.height(), Bitmap.Config.ARGB_8888);
+            try {
+                drawable.draw(new android.graphics.Canvas(sample));
+                Field blur = PetBubbleDrawable.class.getDeclaredField("blurAvailable"); blur.setAccessible(true);
+                Field fade = PetBubbleDrawable.class.getDeclaredField("alpha"); fade.setAccessible(true);
+                Field radius = PetBubbleWindow.class.getDeclaredField("blurRadius"); radius.setAccessible(true);
+                assertEquals("The actual blur host lost its 8dp local blur radius", Math.min(100, dp(8)), radius.getInt(host));
+                int pixel = sample.getPixel(sample.getWidth() / 2, sample.getHeight() / 2);
+                int expected = fade.getInt(drawable) * (blur.getBoolean(drawable) ? 85 : 112) / 255;
+                assertEquals("The real bubble tint lost its high transmission", expected, android.graphics.Color.alpha(pixel), 1);
+                assertEquals("The real bubble tint is not neutral", 255, android.graphics.Color.red(pixel));
+                assertEquals(255, android.graphics.Color.green(pixel));
+                assertEquals(255, android.graphics.Color.blue(pixel));
+            } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+            finally { sample.recycle(); }
+        });
     }
 
     private android.widget.TextView bubbleTextOnMain(String text) {
@@ -763,14 +924,12 @@ public final class PetOverlayDeviceTest {
         capture("wait-01-visible");
         SystemClock.sleep(6500);
         assertNotNull("The explicit wait disappeared on the normal six-second timer", nativeBounds(message, false));
-        awaitText(NAME + " · 等待中");
-        awaitText("停止任务");
+        assertTaskControls(message, false, true, true);
         capture("wait-02-expanded");
-        doubleTap(petBounds());
-        DeviceUi.await("The user could not fold the waiting bubble", 3000, () -> !bubbleVisible());
+        collapseBubble();
         PetOverlay.refresh(context); instrumentation.waitForIdleSync();
         assertFalse("An unchanged wait reopened after being folded", bubbleVisible());
-        doubleTap(petBounds());
+        singlePetTap();
         awaitText(message);
         publish(progress.put("phase", "executing").put("summary", "已到时间，正在领取优惠券"));
         awaitText("已到时间，正在领取优惠券");
@@ -778,30 +937,32 @@ public final class PetOverlayDeviceTest {
         capture("wait-03-resumed");
         DeviceUi.await("Resumed work retained a persistent waiting bubble", 8000, () -> !bubbleVisible());
         publish(progress.put("phase", "waiting").put("summary", message));
-        doubleTap(petBounds());
+        singlePetTap();
         awaitText(message);
         publish(progress.put("phase", "interrupted").put("active", false).put("summary", "本轮执行已停止，点我查看任务"));
-        awaitText("本轮执行已停止，点我查看任务");
+        awaitText(overlayText(R.string.pet_overlay_no_work));
+        awaitIcon("droy-pet-open-app", R.string.pet_overlay_open_app);
+        assertIconTags("droy-pet-open-app");
         assertNull("Cancellation left stale waiting text", nativeBounds(message, false));
         capture("wait-04-cancelled");
     }
 
-    @Test public void workingChatterStaysStableAcrossPhasesAndUnrelatedInputDoesNotHideThePet() throws Exception {
+    @Test public void workingSummaryStaysStableAcrossPhasesAndUnrelatedInputDoesNotHideThePet() throws Exception {
+        String message = "正在核对虚构页面";
         JSONObject progress = new JSONObject().put("taskId", "pet-device-working-task").put("phase", "thinking")
-            .put("active", true).put("summary", "正在努力执行").put("summaryKind", "working").put("pending", JSONObject.NULL);
+            .put("active", true).put("summary", message).put("summaryKind", "working").put("pending", JSONObject.NULL);
         publish(progress);
         instrumentation.waitForIdleSync();
         assertFalse("Working status opened an unsolicited bubble", bubbleVisible());
-        doubleTap(petBounds());
-        DeviceUi.await("Working chatter did not use the custom pet name", 5000,
-            () -> cachedMessage().startsWith(NAME) && nativeBounds(cachedMessage(), false) != null);
-        String message = cachedMessage();
+        singlePetTap();
+        awaitText(message);
+        assertTaskControls(message, false, true, true);
         Object firstBubble = overlayField("bubble");
         for (String phase : new String[]{"executing", "verifying", "thinking"}) publish(progress.put("phase", phase));
         SystemClock.sleep(5100);
-        assertEquals("Mechanical phases randomized the existing bubble", message, cachedMessage());
+        assertEquals("Mechanical phases changed the concrete work summary", message, cachedMessage());
         assertSame("Mechanical phases rebuilt the existing working bubble", firstBubble, overlayField("bubble"));
-        assertNotNull("Stable working chatter vanished before its normal timeout", nativeBounds(message, false));
+        assertNotNull("Stable working summary vanished before its normal timeout", nativeBounds(message, false));
         AtomicReference<CompletableFuture<Void>> prepared = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> prepared.set(PetOverlay.get(context).prepare(new Rect(0, 0, 1, 1), false)));
         prepared.get().get(3, TimeUnit.SECONDS);
@@ -809,15 +970,14 @@ public final class PetOverlayDeviceTest {
         assertSame("An unrelated input rebuilt the bubble", firstBubble, overlayField("bubble"));
         instrumentation.runOnMainSync(() -> PetOverlay.get(context).finish());
         assertTrue("Finishing an unrelated input hid the cat", petVisible());
-        awaitText("停止任务");
-        assertEquals("Expanding the current bubble randomized its message", message, cachedMessage());
-        capture("13-stable-working-chatter");
-        doubleTap(petBounds());
-        DeviceUi.await("The expanded working bubble did not fold", 3000, () -> nativeBounds(message, false) == null);
-        doubleTap(petBounds());
-        DeviceUi.await("A new deliberate working greeting repeated the previous sentence", 3000,
-            () -> !message.equals(cachedMessage()) && cachedMessage().startsWith(NAME)
-                && nativeBounds(cachedMessage(), false) != null);
+        assertTaskControls(message, false, true, true);
+        assertEquals("Task controls changed the current summary", message, cachedMessage());
+        capture("13-stable-working-summary");
+        collapseBubble();
+        singlePetTap();
+        awaitText(message);
+        assertEquals("Reopening invented a new task summary", message, cachedMessage());
+        assertTaskControls(message, false, true, true);
     }
 
     @Test public void adaptiveHasNoIdleWindowKeepsWorkAndDismissesOnlyTheFinalNotice() throws Exception {
@@ -923,7 +1083,7 @@ public final class PetOverlayDeviceTest {
         }
     }
 
-    @Test public void builtinSpecialActionsAreReachableFromTheVisiblePetAndRestoreTheTask() throws Exception {
+    @Test public void builtinSpecialActionsDrawTheirActualFramesAndRestoreTheTask() throws Exception {
         assertTrue("Enable system animations for the actual playback fixture", android.animation.ValueAnimator.areAnimatorsEnabled());
         String[][] entries = {
             {"default", "knead", "tailCurl", "sleep"},
@@ -1018,16 +1178,9 @@ public final class PetOverlayDeviceTest {
     }
 
     private void openPlayAction(String state) throws Exception {
-        doubleTap(petBounds());
-        if (state.equals("knead")) {
-            assertTrue("The visible status lost the Droy identity", cachedMessage().startsWith("Droy"));
-            capture("builtin-Droy-status");
-        }
-        tap(awaitText(NativeLocale.text("互动动作", "Play actions")));
-        if (state.equals("knead")) capture("builtin-interaction-menu");
-        AtomicReference<String> label = new AtomicReference<>();
-        instrumentation.runOnMainSync(() -> label.set(((PetSpriteView)overlayFieldOnMain("sprite")).interactionLabel(state)));
-        tap(awaitText(label.get()));
+        // Select a deterministic animation for actual window/frame cleanup checks.
+        // The public idle-tap gesture and its non-repetition are exercised separately.
+        instrumentation.runOnMainSync(() -> invokeOverlay("playInteraction", new Class<?>[]{String.class}, state));
     }
     private boolean selectedSprite(String id) {
         Object value = overlayField("sprite");
@@ -1041,6 +1194,7 @@ public final class PetOverlayDeviceTest {
     }
 
     @Test public void customPackageSelectionLoadsVoiceAndRejectsBrokenCandidateWithoutReplacingIt() throws Exception {
+        instrumentation.runOnMainSync(() -> NativeLocale.mirrorProcessLanguage("zh"));
         String id = java.util.UUID.randomUUID().toString(), brokenId = java.util.UUID.randomUUID().toString();
         File directory = new File(context.getFilesDir(), "dsh-home/pets/" + id);
         File broken = new File(context.getFilesDir(), "dsh-home/pets/" + brokenId);
@@ -1065,9 +1219,11 @@ public final class PetOverlayDeviceTest {
             });
             assertEquals(id, preferences.getString("petId", ""));
             assertEquals(NAME, preferences.getString("petName", ""));
-            doubleTap(petBounds());
+            publish(new JSONObject().put("taskId", "custom-persona-voice-fixture").put("phase", "executing")
+                .put("active", true).put("summary", "正在检查虚构内容").put("summaryKind", "working")
+                .put("activityKind", "working").put("pending", JSONObject.NULL));
             DeviceUi.await("Selected character voice was not used by the pet", 3000,
-                () -> cachedMessage().equals("Droy：我在这里。") || cachedMessage().equals("Droy：有事叫我。"));
+                () -> cachedMessage().equals("Droy正在核对。") || cachedMessage().equals("Droy还在认真检查。"));
             capture("18-custom-package-loading-fixture");
             assertThrows(Exception.class, () -> PetOverlay.select(context, brokenId));
             assertEquals("A broken candidate replaced the saved pet", id, preferences.getString("petId", ""));
@@ -1138,7 +1294,7 @@ public final class PetOverlayDeviceTest {
         catch (ReflectiveOperationException error) { throw new AssertionError(error); }
     }
 
-    private String cachedMessage() { return (String) overlayField("displayedMessage"); }
+    private String cachedMessage() { return (String) overlayField("bubbleContent"); }
     private Object overlayField(String name) {
         AtomicReference<Object> value = new AtomicReference<>();
         instrumentation.runOnMainSync(() -> {
@@ -1152,7 +1308,10 @@ public final class PetOverlayDeviceTest {
 
     private void publish(JSONObject progress) {
         instrumentation.runOnMainSync(() -> {
-            try { ToolProgress.updateFromEngine(progress); }
+            try {
+                if (!progress.has("controlRevision")) progress.put("controlRevision", 0);
+                ToolProgress.updateFromEngine(progress);
+            }
             catch (org.json.JSONException error) { throw new AssertionError(error); }
         });
         PetOverlay.refresh(context);
@@ -1188,6 +1347,35 @@ public final class PetOverlayDeviceTest {
         assertTrue("Android rejected the Home action", automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME));
         DeviceUi.await("Droy did not yield to the other app", 5000, () -> !activityFocused());
         automation.waitForIdle(300, 5000);
+        if ("true".equals(InstrumentationRegistry.getArguments().getString("petDarkBackdrop"))) showDarkBackdrop();
+    }
+    private void showDarkBackdrop() throws Exception {
+        closeDarkBackdrop();
+        startInForeground(() -> darkBackdrop = (TestPageActivity)instrumentation.startActivitySync(new Intent(context, TestPageActivity.class)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK)));
+        instrumentation.runOnMainSync(() -> {
+            android.view.View background = new android.view.View(darkBackdrop);
+            background.setBackgroundColor(0xFF121212);
+            darkBackdrop.setContentView(background);
+            darkBackdrop.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF121212));
+            darkBackdrop.getWindow().setStatusBarColor(0xFF121212);
+            darkBackdrop.getWindow().setNavigationBarColor(0xFF121212);
+            darkBackdrop.getWindow().getDecorView().setSystemUiVisibility(0);
+            // TestPage also receives the app's lifecycle callback. Exclude this
+            // owned backdrop from internal hosting so QA still uses real overlays.
+            PetOverlay.foreground(darkBackdrop, false);
+        });
+        DeviceUi.await("The dark backdrop did not retain the external pet window", 5000, () -> onMain(() -> {
+            WindowManager.LayoutParams pet = (WindowManager.LayoutParams)overlayFieldOnMain("petLayout");
+            return darkBackdrop.hasWindowFocus() && !(Boolean)overlayFieldOnMain("appVisible")
+                && !(Boolean)overlayFieldOnMain("internalWindow") && pet != null
+                && pet.type == WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+        }));
+        automation.waitForIdle(300, 5000);
+    }
+    private void closeDarkBackdrop() {
+        if (darkBackdrop != null && !darkBackdrop.isDestroyed()) instrumentation.runOnMainSync(darkBackdrop::finishAndRemoveTask);
+        darkBackdrop = null;
     }
     private boolean activityFocused() {
         AtomicReference<Boolean> focused = new AtomicReference<>(false);
@@ -1199,7 +1387,12 @@ public final class PetOverlayDeviceTest {
         instrumentation.runOnMainSync(() -> bounds.set(PetOverlay.get(context).petBounds()));
         return bounds.get();
     }
-    private String petDescription() { return NAME + NativeLocale.text("，Droy 宠物。单击播放动作，双击查看任务，拖动调整位置；有待确认问题时单击处理", ", Droy pet. Tap to animate, double-tap to view the task, or drag to move. Tap to respond to a pending question"); }
+    private String petDescription() {
+        JSONObject progress = ToolProgress.current(context);
+        return overlayText(progress.optJSONObject("pending") != null ? R.string.pet_overlay_question_description
+            : progress.optBoolean("active") || Set.of("pausing", "paused", "resuming", "stopping").contains(progress.optString("phase"))
+                ? R.string.pet_overlay_working_description : R.string.pet_overlay_idle_description);
+    }
     private boolean petVisible() { return nativeBounds(petDescription(), true) != null; }
     private String windowVisibilityDiagnostics() {
         StringBuilder result = new StringBuilder();
@@ -1221,19 +1414,145 @@ public final class PetOverlayDeviceTest {
         return result.toString();
     }
     private boolean bubbleVisible() {
-        AtomicReference<String> body = new AtomicReference<>();
+        AtomicReference<Boolean> visible = new AtomicReference<>(false);
         instrumentation.runOnMainSync(() -> {
-            android.widget.LinearLayout bubble = (android.widget.LinearLayout)overlayFieldOnMain("bubble");
-            if (bubble == null) return;
-            for (int i = 0; i < bubble.getChildCount(); i++) {
-                android.view.View child = bubble.getChildAt(i);
-                if (child instanceof android.widget.TextView text && !(child instanceof android.widget.Button))
-                    body.set(text.getText().toString());
-            }
+            PetBubbleWindow host = (PetBubbleWindow)overlayFieldOnMain("bubbleHost");
+            android.view.View surface = host == null ? null : host.surface();
+            visible.set(surface != null && surface.isAttachedToWindow() && surface.isShown() && surface.getAlpha() > 0f
+                && surface.getGlobalVisibleRect(new Rect()));
         });
-        // Android may return a null accessibility window title for a visible overlay.
-        // Verify the actual rendered message node, not the optional window title.
-        return body.get() != null && nativeBounds(body.get(), false) != null;
+        return visible.get();
+    }
+
+    private String overlayText(int resource) {
+        android.content.res.Configuration configuration = new android.content.res.Configuration(context.getResources().getConfiguration());
+        configuration.setLocale(java.util.Locale.forLanguageTag(NativeLocale.active()));
+        return context.createConfigurationContext(configuration).getString(resource);
+    }
+    private android.view.View bubbleRootOnMain() {
+        android.view.View question = (android.view.View)overlayFieldOnMain("questionFrame");
+        return question == null ? (android.view.View)overlayFieldOnMain("bubble") : question;
+    }
+    private Rect awaitIcon(String tag, int description) throws Exception {
+        String label = overlayText(description);
+        AtomicReference<Rect> result = new AtomicReference<>();
+        DeviceUi.await("The accessible icon did not become visible: " + label, 5000, () -> {
+            result.set(nativeBounds(label, true)); return result.get() != null;
+        });
+        Rect bounds = result.get();
+        assertTrue("The icon target is narrower than 48dp: " + label, bounds.width() >= dp(48));
+        assertTrue("The icon target is shorter than 48dp: " + label, bounds.height() >= dp(48));
+        assertTrue("The icon escaped its actual window: " + label, bubbleBounds().contains(bounds));
+        instrumentation.runOnMainSync(() -> {
+            android.view.View root = bubbleRootOnMain();
+            android.view.View view = root == null ? null : root.findViewWithTag(tag);
+            assertTrue("Task control is not an ImageButton", view instanceof android.widget.ImageButton);
+            assertEquals(label, view.getContentDescription());
+            assertTrue("Task icon is not accessible as a click target", view.isClickable());
+            android.widget.ImageButton icon = (android.widget.ImageButton)view;
+            assertEquals("Icon glyph width is not 24dp", dp(24), icon.getWidth() - icon.getPaddingLeft() - icon.getPaddingRight());
+            assertEquals("Icon glyph height is not 24dp", dp(24), icon.getHeight() - icon.getPaddingTop() - icon.getPaddingBottom());
+        });
+        return bounds;
+    }
+    private void assertIconTags(String... expected) {
+        instrumentation.runOnMainSync(() -> {
+            List<String> actual = new ArrayList<>();
+            collectIconTags(bubbleRootOnMain(), actual);
+            assertEquals("The overlay exposed an extra or missing icon action", Set.of(expected), Set.copyOf(actual));
+            assertEquals("The overlay duplicated an icon action", expected.length, actual.size());
+        });
+    }
+    private void assertTaskControls(String message, boolean paused, boolean primaryEnabled, boolean stopEnabled) throws Exception {
+        String primaryTag = paused ? "droy-pet-resume" : "droy-pet-pause";
+        Rect primary = awaitIcon(primaryTag, paused ? R.string.pet_overlay_resume : R.string.pet_overlay_pause);
+        Rect stop = awaitIcon("droy-pet-stop", R.string.pet_overlay_stop);
+        Rect content = awaitText(message);
+        assertTrue("Task icons were placed beside the summary instead of below it", primary.top >= content.bottom && stop.top >= content.bottom);
+        assertEquals("Task icons escaped their shared action row", primary.top, stop.top, dp(1));
+        assertTrue("Task icon touch targets overlap", primary.right <= stop.left);
+        assertTrue("Working message exceeded its 250dp limit", bubbleBounds().width() <= dp(250) + 1);
+        assertIconTags(primaryTag, "droy-pet-stop");
+        instrumentation.runOnMainSync(() -> {
+            android.view.View root = bubbleRootOnMain();
+            assertEquals("Primary task-control enabled state is stale", primaryEnabled, root.findViewWithTag(primaryTag).isEnabled());
+            assertEquals("Stop enabled state is stale", stopEnabled, root.findViewWithTag("droy-pet-stop").isEnabled());
+        });
+    }
+    private void assertQuestionFooter() throws Exception {
+        AtomicReference<Rect[]> settled = new AtomicReference<>();
+        AtomicReference<String> last = new AtomicReference<>("Question footer geometry not sampled");
+        try {
+            DeviceUi.await("The question footer did not settle within its actual window", 3000, () -> {
+                Rect[] nodes = new Rect[2];
+                List<AccessibilityWindowInfo> windows = automation.getWindows();
+                try {
+                    for (AccessibilityWindowInfo window : windows) {
+                        AccessibilityNodeInfo root = window.getRoot();
+                        if (root == null) continue;
+                        try {
+                            Rect skip = findNode(root, overlayText(R.string.pet_overlay_leave_unanswered_description), true);
+                            Rect send = findNode(root, overlayText(R.string.pet_overlay_send_answer), false);
+                            if (skip != null || send != null) { nodes[0] = skip; nodes[1] = send; }
+                            if (skip != null && send != null) break;
+                        } finally { root.recycle(); }
+                    }
+                } finally { for (AccessibilityWindowInfo window : windows) window.recycle(); }
+                Rect[] frame = onMain(() -> {
+                    WindowManager.LayoutParams layout = (WindowManager.LayoutParams)overlayFieldOnMain("bubbleLayout");
+                    Rect requested = layout == null ? new Rect() : new Rect(layout.x, layout.y, layout.x + layout.width, layout.y + layout.height);
+                    PetBubbleWindow host = (PetBubbleWindow)overlayFieldOnMain("bubbleHost");
+                    android.view.View surface = host == null ? null : host.surface();
+                    Rect actual = new Rect();
+                    if (surface != null && surface.isAttachedToWindow() && surface.isShown() && !surface.isLayoutRequested()) {
+                        int[] location = new int[2]; surface.getLocationOnScreen(location);
+                        actual.set(location[0], location[1], location[0] + surface.getWidth(), location[1] + surface.getHeight());
+                    }
+                    return new Rect[]{requested, actual};
+                });
+                last.set("skip=" + (nodes[0] == null ? "none" : nodes[0].toShortString())
+                    + " send=" + (nodes[1] == null ? "none" : nodes[1].toShortString())
+                    + " requested=" + frame[0].toShortString() + " actual=" + frame[1].toShortString());
+                if (nodes[0] == null || nodes[1] == null || frame[1].isEmpty() || !frame[0].equals(frame[1])
+                        || Math.abs(nodes[0].top - nodes[1].top) > dp(1)
+                        || !frame[1].contains(nodes[0]) || !frame[1].contains(nodes[1])) return false;
+                settled.set(new Rect[]{new Rect(nodes[0]), new Rect(nodes[1]), new Rect(frame[1])});
+                return true;
+            });
+        } catch (AssertionError failure) {
+            try { capture("structured-question-footer-geometry-timeout"); }
+            catch (Exception | AssertionError diagnostic) { failure.addSuppressed(diagnostic); }
+            throw new AssertionError("Question footer geometry did not settle: " + last.get(), failure);
+        }
+        Rect skip = settled.get()[0], send = settled.get()[1], window = settled.get()[2];
+        assertNotNull("The specific unanswered action is not accessible", skip);
+        assertNotNull("The send-answer action is not accessible", send);
+        assertTrue("Skip lost its 48dp target", skip.width() >= dp(48) && skip.height() >= dp(48));
+        assertTrue("Send lost its 48dp target", send.width() >= dp(48) && send.height() >= dp(48));
+        assertEquals("Question footer actions are not in one compact row", skip.top, send.top, dp(1));
+        assertTrue("Question footer actions overlap", skip.right <= send.left);
+        assertTrue("Skip escaped its actual question window", window.contains(skip));
+        assertTrue("Send escaped its actual question window", window.contains(send));
+        assertIconTags();
+        assertNull("A question exposed an unrelated task menu", nativeBounds(NativeLocale.text("互动动作", "Play actions"), false));
+        assertNull("A question exposed an unrelated Open Droy action", nativeBounds(overlayText(R.string.pet_overlay_open_app), true));
+        assertNull("A question exposed a Stop action", nativeBounds(overlayText(R.string.pet_overlay_stop), true));
+        instrumentation.runOnMainSync(() -> {
+            android.view.View root = bubbleRootOnMain();
+            assertNotNull("Structured questions lost their fixed frame", overlayFieldOnMain("questionFrame"));
+            android.widget.LinearLayout actions = (android.widget.LinearLayout)overlayFieldOnMain("questionActions");
+            assertEquals(android.widget.LinearLayout.HORIZONTAL, actions.getOrientation());
+            assertSame("The answer footer must be outside the scrolling body", root, actions.getParent());
+            assertSame(root, ((android.view.View)overlayFieldOnMain("bubbleWindow")).getParent());
+        });
+    }
+    private void collectIconTags(android.view.View view, List<String> tags) {
+        if (view instanceof android.widget.ImageButton) tags.add(String.valueOf(view.getTag()));
+        if (view instanceof android.view.ViewGroup group) for (int i = 0; i < group.getChildCount(); i++) collectIconTags(group.getChildAt(i), tags);
+    }
+    private void collapseBubble() throws Exception {
+        instrumentation.runOnMainSync(() -> invokeOverlay("collapse", new Class<?>[]{}));
+        DeviceUi.await("The message window did not collapse", 3000, () -> !bubbleVisible());
     }
     private Rect awaitText(String value) throws Exception {
         AtomicReference<Rect> found = new AtomicReference<>();
@@ -1332,6 +1651,13 @@ public final class PetOverlayDeviceTest {
     private void capture(String stage) throws Exception {
         instrumentation.waitForIdleSync();
         awaitOverlayFrameCommit();
+        if (darkBackdrop != null) instrumentation.runOnMainSync(() -> {
+            assertFalse("The dark QA backdrop switched the pet to internal hosting", (Boolean)overlayFieldOnMain("internalWindow"));
+            for (String field : new String[]{"petLayout", "bubbleLayout"}) {
+                WindowManager.LayoutParams layout = (WindowManager.LayoutParams)overlayFieldOnMain(field);
+                if (layout != null) assertEquals("The dark QA backdrop must use real external windows", WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, layout.type);
+            }
+        });
         Bitmap image = automation.takeScreenshot();
         assertNotNull("Could not capture the pet interaction: " + stage, image);
         try {

@@ -52,4 +52,22 @@ public class PetQuestionDraftTest {
         assertEquals(0, skipped.getJSONArray("selected").length());
         assertFalse(skipped.has("custom"));
     }
+    @Test public void skippingTheGroupBuildsEmptyAnswersWithoutClearingTheDraft() throws Exception {
+        PetQuestionDraft draft = new PetQuestionDraft("task:request", new JSONArray()
+            .put(new JSONObject().put("id", "first").put("multiSelect", true))
+            .put(new JSONObject().put("id", "second"))
+            .put(new JSONObject().put("id", "third")));
+        draft.answers.get(0).choose("A", true); draft.answers.get(0).choose("B", true);
+        draft.answers.get(0).type("Extra detail"); draft.answers.get(1).type("  My answer  ");
+        String before = draft.encode().toString();
+        JSONArray skipped = draft.encodeSkipped();
+        assertEquals(3, skipped.length());
+        for (int i = 0; i < skipped.length(); i++) {
+            assertEquals(draft.answers.get(i).question.getString("id"), skipped.getJSONObject(i).getString("id"));
+            assertEquals(0, skipped.getJSONObject(i).getJSONArray("selected").length());
+            assertFalse(skipped.getJSONObject(i).has("custom"));
+        }
+        assertEquals("Retry and fold must retain the original draft until the server acknowledges", before, draft.encode().toString());
+        assertFalse(draft.answers.get(0).skipped); assertFalse(draft.answers.get(1).skipped);
+    }
 }

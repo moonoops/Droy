@@ -1,0 +1,30 @@
+<resources>
+    <string name="pet_overlay_idle_description">Droy pet. Tap to play, tap repeatedly to view its status, or drag to move.</string>
+    <string name="pet_overlay_working_description">Droy pet. Tap to view the current task controls, or drag to move.</string>
+    <string name="pet_overlay_question_description">Droy pet. Tap to show or hide the question, or drag to move. Your draft is kept.</string>
+    <string name="pet_overlay_open_panel">Show Droy message</string>
+    <string name="pet_overlay_no_work">Droy has no work right now</string>
+    <string name="pet_overlay_open_app">Open Droy</string>
+    <string name="pet_overlay_open_full_task">Open full task</string>
+    <string name="pet_overlay_working">Droy is working on the task</string>
+    <string name="pet_overlay_pausing">Pausing the task…</string>
+    <string name="pet_overlay_paused">Task paused. Ready when you are.</string>
+    <string name="pet_overlay_resuming">Resuming the task…</string>
+    <string name="pet_overlay_stopping">Stopping the task…</string>
+    <string name="pet_overlay_pause">Pause task</string>
+    <string name="pet_overlay_resume">Resume task</string>
+    <string name="pet_overlay_stop">Stop task</string>
+    <string name="pet_overlay_question_needed">A question needs your response</string>
+    <string name="pet_overlay_question_multiple">Choose several, or add an answer</string>
+    <string name="pet_overlay_question_single">Choose one, or write an answer</string>
+    <string name="pet_overlay_question_multiple_choices">Choose several</string>
+    <string name="pet_overlay_question_single_choice">Choose one</string>
+    <string name="pet_overlay_question_custom">Write your answer</string>
+    <string name="pet_overlay_custom_hint">Add your thoughts…</string>
+    <string name="pet_overlay_answer_hint">Write your answer…</string>
+    <string name="pet_overlay_custom_description">%1$s. Write an answer</string>
+    <string name="pet_overlay_leave_unanswered">Skip</string>
+    <string name="pet_overlay_leave_unanswered_description">Leave this question empty and continue</string>
+    <string name="pet_overlay_send_answer">Send answer</string>
+    <string name="pet_overlay_answer_incomplete">Answer each question, or skip this request.</string>
+</resources>

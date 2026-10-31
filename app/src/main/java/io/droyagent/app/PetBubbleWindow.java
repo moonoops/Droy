@@ -25,7 +25,7 @@ final class PetBubbleWindow {
                     WindowManager.LayoutParams parameters, Runnable onBack) {
         this.background = background;
         manager = context.getSystemService(WindowManager.class);
-        blurRadius = Math.min(100, Math.round(24 * context.getResources().getDisplayMetrics().density));
+        blurRadius = Math.min(100, Math.round(8 * context.getResources().getDisplayMetrics().density));
         dialog = new ComponentDialog(context, R.style.DroyPetBubbleTheme) {
             @Override public boolean onTouchEvent(MotionEvent event) {
                 if (event.getActionMasked() == MotionEvent.ACTION_OUTSIDE) return content.dispatchTouchEvent(event);

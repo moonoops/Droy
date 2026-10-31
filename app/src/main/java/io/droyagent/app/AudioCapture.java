@@ -72,6 +72,7 @@ final class AudioCapture {
         boolean communication;
         volatile MediaProjection projection;
         volatile AudioCaptureService service;
+        final java.util.concurrent.CompletableFuture<Void> settled = new java.util.concurrent.CompletableFuture<>();
         volatile int serviceStartId;
         Session(String id, String owner, String requestId, String source, String scope,
                 String packageName, boolean saveFile, long limitMs, long createdAt) {
@@ -161,6 +162,13 @@ final class AudioCapture {
     synchronized void cancelStart(String owner, String requestId) {
         for (Session session : sessions.values())
             if (session.owner.equals(owner) && session.requestId.equals(requestId)) requestStop(session, "start_cancelled");
+    }
+    synchronized void stopOwner(String owner) {
+        for (Session session : sessions.values()) if (session.owner.equals(owner)) requestStop(session, "task_paused");
+    }
+    synchronized java.util.concurrent.CompletableFuture<Void> completion(String captureId, String owner) throws Exception {
+        Session session = find(captureId, owner);
+        return session.settled;
     }
 
     synchronized JSONObject stopFromUi(String captureId) throws Exception {
@@ -258,6 +266,7 @@ final class AudioCapture {
         if (session == null || !session.active()) return;
         session.reason = reason; session.message = io.droyagent.app.NativeLocale.text("录音服务启动失败", "Recording service failed to start"); session.state = "failed"; session.stopRequested = true;
         persistForCleanup(session); if (active == session) active = null;
+        session.settled.complete(null);
         trimBuffers();
         captureReleased(session.owner);
     }
@@ -273,6 +282,7 @@ final class AudioCapture {
             session.state = "failed"; session.stopRequested = true; session.reason = "metadata_write_failed";
             session.message = io.droyagent.app.NativeLocale.text("录音状态无法保存，采集未开始", "Recording state could not be saved. Capture did not start"); session.metadataError = failure.getMessage();
             if (active == session) active = null;
+            session.settled.complete(null);
             trimBuffers(); captureReleased(session.owner); throw failure;
         }
         Intent intent = new Intent(caller, AudioCaptureService.class).putExtra("captureId", session.id)
@@ -405,6 +415,7 @@ final class AudioCapture {
         session.state = normal ? "completed" : session.bytes > 0 ? "interrupted" : "failed";
         if (normal) session.message = session.saveFile ? io.droyagent.app.NativeLocale.text("录音已停止", "Recording stopped") : io.droyagent.app.NativeLocale.text("音频采集已停止", "Audio capture stopped");
         persistForCleanup(session); if (active == session) active = null;
+        session.settled.complete(null);
         trimBuffers();
         captureReleased(session.owner);
         AudioCaptureService service = session.service;
@@ -417,6 +428,7 @@ final class AudioCapture {
         if (session.state.equals("awaiting_user") || (session.state.equals("starting") && session.service == null)) {
             session.state = reason.equals("user_stop") ? "completed" : "interrupted";
             session.message = io.droyagent.app.NativeLocale.text("未开始采集", "Capture has not started"); persistForCleanup(session); if (active == session) active = null; trimBuffers();
+            session.settled.complete(null);
             captureReleased(session.owner); return;
         }
         AudioRecord recorder = session.recorder;
@@ -584,7 +596,7 @@ final class AudioCapture {
                     session.state = "interrupted"; session.reason = "process_interrupted";
                     session.message = io.droyagent.app.NativeLocale.text("上次采集已中断，保留可恢复的录音", "The previous capture was interrupted. Recoverable audio has been kept");
                 }
-                sessions.put(id, session); persist(session);
+                sessions.put(id, session); session.settled.complete(null); persist(session);
             } catch (Exception damaged) {
                 // Keep damaged metadata and PCM on disk for diagnosis; never reopen the microphone on recovery.
                 android.util.Log.w("DroyAudio", "Cannot recover audio session metadata: " + path.getName(), damaged);

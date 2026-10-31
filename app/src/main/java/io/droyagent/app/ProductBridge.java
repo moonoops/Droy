@@ -14,6 +14,7 @@ import io.droyagent.androiduse.AppDiagnosticsTools;
 import io.droyagent.androiduse.SystemDiagnosticsTools;
 import io.droyagent.androiduse.ProcessMemoryTools;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
@@ -36,7 +37,8 @@ final class ProductBridge extends NanoHTTPD {
     private final ToolProgress progress;
     private final NativeFirstUseAuthorization firstUse;
     private final VerificationFlow verification = new VerificationFlow(SystemClock::elapsedRealtime);
-    final ControlPolicy policy = new ControlPolicy(SystemClock::elapsedRealtime);
+    private final NativeTaskControl taskControl = NativeTaskControl.shared();
+    final ControlPolicy policy = new ControlPolicy(SystemClock::elapsedRealtime, taskControl);
 
     static String deviceTimeZone() {
         String zone = java.util.TimeZone.getDefault().toZoneId().normalized().getId();
@@ -49,6 +51,10 @@ final class ProductBridge extends NanoHTTPD {
         settings = context.getSharedPreferences("product", Context.MODE_PRIVATE);
         Context app = context.getApplicationContext();
         this.context = app;
+        int bootCount;
+        try { bootCount = android.provider.Settings.Global.getInt(app.getContentResolver(), android.provider.Settings.Global.BOOT_COUNT, -1); }
+        catch (SecurityException unavailable) { bootCount = -1; }
+        taskControl.rootLedger(new NativeRootLedger(app.getSharedPreferences("native-root-dispatch-leases", Context.MODE_PRIVATE), bootCount));
         executor = new AndroidUseExecutor(app);
         catalog = new CapabilityCatalog(app);
         firstUse = NativeFirstUseAuthorization.get(app);
@@ -75,6 +81,9 @@ final class ProductBridge extends NanoHTTPD {
         if (!MessageDigest.isEqual(supplied.getBytes(StandardCharsets.UTF_8), ("Bearer " + token).getBytes(StandardCharsets.UTF_8)))
             return response(Response.Status.UNAUTHORIZED, failure("UNAUTHORIZED", NativeLocale.text("拒绝未授权访问", "Unauthorized access denied")));
         CallTrace trace = new CallTrace();
+        NativeTaskControl.Call admitted = null;
+        boolean successfulObservation = false;
+        String requestTask = "";
         try {
             if (session.getMethod() == Method.GET && session.getUri().equals("/locale"))
                 return ok(NativeLocale.bootstrap());
@@ -91,6 +100,18 @@ final class ProductBridge extends NanoHTTPD {
                 .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
                 .decode(java.nio.ByteBuffer.wrap(body)).toString();
             JSONObject request = new JSONObject(json);
+            requestTask = request.optString("taskId");
+            if (session.getUri().equals("/task/control")) return ok(taskControl(request));
+            String scopedTask = request.optString("taskId"), scopedOperation = request.optString("operationId");
+            boolean scopedExecution = session.getUri().equals("/tool") || session.getUri().equals("/permissions/preflight") ||
+                session.getUri().equals("/audio") && request.optString("operation").equals("transcribe");
+            if (scopedExecution && (taskControl.registered(scopedTask) || request.has("operationId") || request.has("epoch"))) {
+                if (!request.has("operationId") || !request.has("epoch") || !request.has("callId"))
+                    throw new NativeTaskControl.Rejected("TASK_SCOPE_REQUIRED");
+                admitted = taskControl.admit(scopedTask, scopedOperation, NativeTaskControl.epoch(request.get("epoch")), request.getString("callId"),
+                    session.getUri().equals("/audio") ? "transcribe" : request.getString("action"));
+                policy.bindScope(admitted);
+            }
             if (session.getUri().equals("/clock")) return ok(new JSONObject()
                 .put("now", System.currentTimeMillis()).put("timeZone", deviceTimeZone()));
             if (session.getUri().equals("/setup")) return ok(setupRequest(request));
@@ -109,8 +130,21 @@ final class ProductBridge extends NanoHTTPD {
                     return response(Response.Status.OK, failure(code, NativeLocale.text("本地语义处理未完成", "Local semantic processing did not complete")));
                 }
             }
-            if (session.getUri().equals("/audio"))
-                return ok(audioRequest(request, audioOwner(request)));
+            if (session.getUri().equals("/audio")) {
+                try {
+                    if (admitted != null) admitted.check();
+                    if (admitted != null && request.optString("operation").equals("transcribe")) admitted.dispatched();
+                    JSONObject result = audioRequest(request, audioOwner(request));
+                    if (admitted != null && request.optString("operation").equals("transcribe")) {
+                        admitted.track("transcription", result.getString("transcriptId"), AudioTranscription.get(context).completion(result.getString("transcriptId"), scopedTask));
+                        admitted.check();
+                    }
+                    return ok(result);
+                } catch (Exception failure) {
+                    if (admitted != null) AudioTranscription.get(context).cancelStart(scopedTask, request.optString("callId"));
+                    throw failure;
+                }
+            }
             if (session.getUri().equals("/audio/file")) {
                 checkAudioDataAccess();
                 java.io.File file = AudioCapture.get(context).file(request.getString("captureId"), audioOwner(request));
@@ -161,6 +195,7 @@ final class ProductBridge extends NanoHTTPD {
                     task, call, request.has("humanBudgetMs") ? budget(request.get("humanBudgetMs")) : 120000, policy));
             }
             if (session.getUri().equals("/cancel")) {
+                if (!scopeCleanupAllowed(request)) return ok(new JSONObject().put("ignored", true));
                 policy.cancel(task, call);
                 hardware.closeOwner(task);
                 memory.cancel(task);
@@ -171,9 +206,11 @@ final class ProductBridge extends NanoHTTPD {
                 return ok(new JSONObject());
             }
             if (session.getUri().equals("/task/end")) {
+                if (!scopeCleanupAllowed(request)) return ok(new JSONObject().put("ignored", true));
                 policy.end(task); verification.end(task);
                 memory.end(task);
-                hardware.closeOwner(task);
+                java.util.concurrent.CompletableFuture<Void> settled = hardware.closeOwnerSettled(task);
+                if (request.has("operationId")) taskControl.trackResource(task, request.getString("operationId"), "hardware_cleanup", task, settled);
                 ToolProgress.endScreenOperation(task); RuntimeService.refreshExecutionProgress();
                 firstUse.end(task);
                 return ok(new JSONObject());
@@ -183,7 +220,11 @@ final class ProductBridge extends NanoHTTPD {
             JSONObject args = request.optJSONObject("args");
             JSONObject arguments = args == null ? new JSONObject() : args;
             long budget = request.has("budgetMs") ? budget(request.get("budgetMs")) : defaultBudget(action, arguments);
-            return ok(executeTool(action, arguments, task, call, budget, trace));
+            JSONObject result = executeTool(action, arguments, task, call, budget, trace);
+            successfulObservation = Set.of("observe", "screenshot").contains(action);
+            return ok(result);
+        } catch (NativeTaskControl.Rejected e) {
+            return response(Response.Status.OK, scopeFailure(e.code, requestTask));
         } catch (ControlPolicy.DeadlineExceeded e) { return response(Response.Status.OK, failure("action_timeout", e.getMessage(), "deadline_exceeded", trace)); }
         catch (ActionException e) { return response(Response.Status.OK, actionFailure(e, trace)); }
         catch (InterruptedException | java.io.InterruptedIOException e) { return response(Response.Status.OK, failure("CANCELLED", NativeLocale.text("操作已停止；先核实已经发生的动作，不自动重放", "Operation stopped. Verify completed actions before continuing; do not replay automatically"), "cancelled", trace)); }
@@ -191,6 +232,91 @@ final class ProductBridge extends NanoHTTPD {
         catch (SecurityException e) { return response(Response.Status.OK, failure("PERMISSION_DENIED", e.getMessage(), "system_permission_denied", trace)); }
         catch (IllegalArgumentException | IllegalStateException e) { return response(Response.Status.OK, failure("REJECTED", e.getMessage(), "request_rejected", trace)); }
         catch (Exception e) { return response(Response.Status.INTERNAL_ERROR, failure("BRIDGE_ERROR", NativeLocale.text("原生接口失败：", "Native interface failed: ") + e.getClass().getSimpleName(), "native_failure", trace)); }
+        finally { policy.bindScope(null); if (admitted != null) admitted.finish(successfulObservation); }
+    }
+
+    private JSONObject scopeFailure(String code, String task) {
+        try {
+            JSONObject result = failure(code, NativeLocale.text("手机任务状态已变化，请刷新后继续", "Phone task state changed. Refresh before continuing."));
+            result.getJSONObject("error").put("nativeInstanceId", taskControl.instanceId());
+            // A missing in-memory scope cannot prove that its privileged child exited.
+            Set<String> unconfirmed = taskControl.unconfirmedRoot(task);
+            JSONArray pending = new JSONArray();
+            for (String id : unconfirmed) pending.put(new JSONObject().put("kind", "root_process").put("id", id).put("state", "unknown"));
+            result.getJSONObject("error").put("scopeRestorationAllowed", unconfirmed.isEmpty()).put("pending", pending)
+                .put("outcomeUnknown", true).put("needsObservation", true);
+            return result;
+        } catch (org.json.JSONException impossible) { throw new AssertionError(impossible); }
+    }
+
+    private boolean scopeCleanupAllowed(JSONObject request) throws Exception {
+        String task = request.optString("taskId");
+        if (!taskControl.registered(task) && !request.has("operationId")) return true;
+        return request.has("operationId") && request.has("epoch") && taskControl.acceptsCancel(task, request.getString("operationId"), NativeTaskControl.epoch(request.get("epoch")));
+    }
+
+    private JSONObject taskControl(JSONObject request) throws Exception {
+        String task = request.getString("taskId"), operation = request.getString("operationId"), action = request.getString("operation");
+        if (action.equals("open")) return taskControlState(taskControl.open(task, operation));
+        if (action.equals("status")) return taskControlState(taskControl.status(task, operation));
+        NativeTaskControl.State previous = taskControl.status(task, operation);
+        NativeTaskControl.State state = taskControl.change(task, operation, action, NativeTaskControl.epoch(request.get("expectedEpoch")), request.optString("pauseId"));
+        if (state.epoch() != previous.epoch() && Set.of("pause", "stop").contains(action)) {
+            // The scope fence above precedes every cancellation/cleanup request.
+            policy.pauseTask(task); firstUse.end(task); memory.cancel(task);
+            AudioCapture.get(context).stopOwner(task); AudioTranscription.get(context).stopOwner(task);
+            java.util.concurrent.CompletableFuture<Void> cleanup = taskControl.cleanup(task, operation);
+            hardware.closeOwnerSettled(task).whenComplete((value, failure) -> { if (failure == null) cleanup.complete(null); });
+        }
+        return taskControlState(taskControl.status(task, operation));
+    }
+
+    private static JSONObject taskControlState(NativeTaskControl.State state) throws Exception {
+        JSONArray pending = new JSONArray();
+        for (NativeTaskControl.Pending work : state.pending()) pending.put(new JSONObject().put("kind", work.kind()).put("id", work.id())
+            .put("callId", work.callId()).put("state", "settling").put("dispatched", work.dispatched()));
+        return new JSONObject().put("taskId", state.taskId()).put("operationId", state.operationId()).put("epoch", state.epoch())
+            .put("nativeInstanceId", NativeTaskControl.shared().instanceId())
+            .put("pauseId", state.pauseId().isEmpty() ? JSONObject.NULL : state.pauseId()).put("phase", state.phase()).put("paused", state.paused())
+            .put("quiescent", state.quiescent()).put("pending", pending).put("outcomeUnknown", state.outcomeUnknown()).put("needsObservation", state.needsObservation());
+    }
+
+    private static final class NativeRootLedger implements NativeTaskControl.RootLedger {
+        private final SharedPreferences saved;
+        private final int bootCount;
+        NativeRootLedger(SharedPreferences saved, int bootCount) {
+            this.saved = saved; this.bootCount = bootCount;
+            SharedPreferences.Editor edit = saved.edit();
+            if (NativeTaskControl.newerBoot(saved.getInt("boot-count", -1), bootCount)) edit.clear();
+            if (!edit.putInt("boot-count", bootCount).commit()) throw new IllegalStateException("Native root lease boot boundary was not saved");
+        }
+        private static String hash(String value) {
+            try {
+                byte[] bytes = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+                char[] encoded = new char[bytes.length * 2], digits = "0123456789abcdef".toCharArray();
+                for (int i = 0; i < bytes.length; i++) { encoded[i * 2] = digits[(bytes[i] & 255) >>> 4]; encoded[i * 2 + 1] = digits[bytes[i] & 15]; }
+                return new String(encoded);
+            }
+            catch (java.security.NoSuchAlgorithmException impossible) { throw new AssertionError(impossible); }
+        }
+        private static String key(String task, String operation) { return hash(task) + "." + hash(operation); }
+        public synchronized void add(String task, String operation, String id) {
+            String key = key(task, operation);
+            Set<String> ids = new java.util.HashSet<>(saved.getStringSet(key, Set.of())); ids.add(id);
+            if (!saved.edit().putInt("boot-count", bootCount).putStringSet(key, ids).commit()) throw new IllegalStateException("Native root lease was not saved");
+        }
+        public synchronized void remove(String task, String operation, String id) {
+            String key = key(task, operation);
+            Set<String> ids = new java.util.HashSet<>(saved.getStringSet(key, Set.of())); ids.remove(id);
+            SharedPreferences.Editor edit = saved.edit();
+            if (ids.isEmpty()) edit.remove(key); else edit.putStringSet(key, ids);
+            if (!edit.commit()) throw new IllegalStateException("Native root lease confirmation was not saved");
+        }
+        public synchronized Set<String> pending(String task) {
+            Set<String> ids = new java.util.HashSet<>(); String prefix = hash(task) + ".";
+            for (String key : saved.getAll().keySet()) if (key.startsWith(prefix)) ids.addAll(saved.getStringSet(key, Set.of()));
+            return Set.copyOf(ids);
+        }
     }
 
     @Override public void stop() {
@@ -313,6 +439,7 @@ final class ProductBridge extends NanoHTTPD {
                     @Override public void dispatched() throws InterruptedException {
                         check(); ticket.dispatched(); trace.dispatchedAtMs = SystemClock.elapsedRealtime() - trace.startedAt;
                     }
+                    @Override public void track(String kind, String id, java.util.concurrent.CompletableFuture<?> settled) { ticket.track(kind, id, settled); }
                 };
                 cancellation.check();
                 verification.beforeAction(task, action, args, screenMutation);
@@ -328,6 +455,7 @@ final class ProductBridge extends NanoHTTPD {
                 if (observeAfterLaunch) { dispatchArgs = new JSONObject(arguments.toString()); dispatchArgs.put("afterObserve", false); }
                 long dispatchedAt = SystemClock.elapsedRealtime();
                 trace.dispatchEntered = true;
+                if (!trace.readOnly && !trace.dispatchTracked) ticket.dispatched();
                 JSONObject result;
                 try { result = verificationReturn ? returnToVerificationApp(task, cancellation)
                         : action.equals("verification") ? verification.request(task, dispatchArgs)
@@ -391,6 +519,7 @@ final class ProductBridge extends NanoHTTPD {
                 @Override public long remainingMillis(long maximumMs) throws Exception {
                     check(); return ticket.remainingMillis(maximumMs);
                 }
+                @Override public void track(String kind, String id, java.util.concurrent.CompletableFuture<?> settled) { ticket.track(kind, id, settled); }
             };
             JSONObject result = sequence.run(new ActionSequence.Host() {
                 @Override public void check() throws Exception { cancellation.check(); }
@@ -467,7 +596,9 @@ final class ProductBridge extends NanoHTTPD {
             firstUse.checkDispatch(owner, call, ticket, policy);
             VoiceWake.get(context).pauseForVoice();
             ticket.check();
+            ticket.dispatched();
             JSONObject result = audio.start(args, owner, call);
+            policy.trackResource("audio_capture", result.getString("captureId"), audio.completion(result.getString("captureId"), owner));
             ticket.check();
             return result;
         } catch (Exception failure) {
@@ -530,6 +661,7 @@ final class ProductBridge extends NanoHTTPD {
             @Override public void dispatched() throws InterruptedException {
                 check(); original.dispatched();
             }
+            @Override public void track(String kind, String id, java.util.concurrent.CompletableFuture<?> settled) { original.track(kind, id, settled); }
         };
         launch.check();
         JSONObject result = executor.execute("open_app", new JSONObject().put("packageName", target)
@@ -544,6 +676,7 @@ final class ProductBridge extends NanoHTTPD {
     private JSONObject observeAfterLaunch(String targetPackage, Cancellation original) throws Exception {
         JSONObject observeTool = catalog.tool("observe");
         Cancellation observation = new Cancellation() {
+            @Override public void track(String kind, String id, java.util.concurrent.CompletableFuture<?> settled) { original.track(kind, id, settled); }
             @Override public void check() throws InterruptedException {
                 original.check();
                 try { checkPermission(observeTool, false); }

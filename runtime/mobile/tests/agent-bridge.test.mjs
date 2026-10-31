@@ -414,7 +414,9 @@ test('REAL DSH loop → MOCK provider → HTTP Android bridge → verified tool 
     await eventually(()=>fixture.progressRequests.some(r=>r.phase==='completed'),'task progress completion');
     assert.ok(fixture.progressRequests.some(r=>r.phase==='thinking'));
     assert.ok(fixture.progressRequests.some(r=>r.phase==='executing'));
-    assert.ok(fixture.progressRequests.every(r=>Object.keys(r).every(key=>['path','taskId','phase','active','summary','summaryKind','activityKind','pending'].includes(key))));
+    assert.ok(fixture.progressRequests.every(r=>Object.keys(r).every(key=>['path','taskId','phase','active','summary','summaryKind','activityKind','pending','controlTaskId','controlRevision'].includes(key))));
+    assert.ok(fixture.progressRequests.every(r=>r.controlRevision===0));
+    assert.ok(fixture.progressRequests.every(r=>r.controlTaskId===r.taskId));
     assert.deepEqual(fixture.errors,[]);
     assert.equal(JSON.parse(toolResults(fixture.adapter.requests[1])[0].content[0].text).modelImageInput, 'unsupported');
     assert.deepEqual(fixture.requests.filter(r=>r.path==='/tool').map(r=>r.action),['capabilities','observe','input_text','observe']);
