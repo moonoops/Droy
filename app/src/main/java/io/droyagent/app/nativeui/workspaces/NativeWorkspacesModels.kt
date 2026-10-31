@@ -8,7 +8,8 @@ data class NativeWorkspaceSession(val id: String, val title: String?, val runnin
     val needsMigration: Boolean = false)
 data class NativeWorkspacesCatalog(val workspaces: List<NativeWorkspaceRow>, val sessions: List<NativeWorkspaceSession>,
     val defaultWorkspaceId: String?, val pinnedSessionIds: List<String>, val archivedSessionIds: List<String>,
-    val directoryBrowsingAvailable: Boolean)
+    val directoryBrowsingAvailable: Boolean, val managedWorkspaceIds: Set<String> = emptySet(),
+    val managedSessionIds: Set<String> = emptySet())
 data class NativeWorkspaceDirectoryEntry(val name: String, val path: String, val hidden: Boolean)
 data class NativeWorkspaceDirectory(val path: String, val home: String, val crumbs: List<NativeWorkspaceDirectoryEntry>,
     val entries: List<NativeWorkspaceDirectoryEntry>, val truncated: Boolean)

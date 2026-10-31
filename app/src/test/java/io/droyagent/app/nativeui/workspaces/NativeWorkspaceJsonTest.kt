@@ -6,6 +6,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NativeWorkspaceJsonTest {
+    @Test fun ownershipMetadataRemovesCompanionRowsWithoutHidingReadOnlyUserChildren() {
+        val input = JSONObject("""{"workspaces":[
+            {"id":"mine","path":"/fixture/mine","title":"Mine","sessionIds":["child"],"readOnly":false},
+            {"id":"friend","path":"/fixture/friend","title":"Friend","sessionIds":["private"],"readOnly":true}],
+            "sessions":[{"id":"child","title":"Child","running":false,"blank":false,"readOnly":true,"workspaceId":"mine","needsMigration":false},
+            {"id":"private","title":"Internal","running":true,"blank":false,"readOnly":true,"workspaceId":"friend","needsMigration":false}],
+            "managedWorkspaceIds":["friend"],"managedSessionIds":["private","old-chat"],"defaultWorkspaceId":"mine",
+            "pinnedSessionIds":["child","private"],"archivedSessionIds":["old-chat"],"directoryBrowsingAvailable":false}""")
+        val result = NativeWorkspaceJson.catalog(input)
+        assertEquals(listOf("mine"), result.workspaces.map { it.id })
+        assertEquals(listOf("child"), result.sessions.map { it.id })
+        assertTrue(result.sessions.single().readOnly)
+        assertEquals(setOf("friend"), result.managedWorkspaceIds)
+        assertEquals(setOf("private", "old-chat"), result.managedSessionIds)
+        assertEquals(listOf("child"), result.pinnedSessionIds)
+        assertTrue(result.archivedSessionIds.isEmpty())
+        input.put("managedSessionIds", "private")
+        try { NativeWorkspaceJson.catalog(input); fail("Expected malformed ownership metadata") }
+        catch (error: NativeApiException) { assertEquals("malformed_response", error.code) }
+    }
+
     @Test fun catalogKeepsLiteralNullNamesAndOpaqueIdentitiesDistinctFromJsonNull() {
         val input = JSONObject("""{"workspaces":[{"id":"null","path":"/fixture","title":"null","sessionIds":["child"],"readOnly":false}],
             "sessions":[{"id":"child","title":"null","running":false,"blank":false,"readOnly":false,"workspaceId":"null","needsMigration":false}],

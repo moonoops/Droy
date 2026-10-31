@@ -53,7 +53,7 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
         runtime = NativeRuntimeState(initialRuntime.ready, initialRuntime.active, initialRuntime.canStart, initialRuntime.status, initialRuntime.locale),
         selectedSessionId = preferences.getString("selectedSessionId", null),
         selectedWorkspaceId = preferences.getString("selectedWorkspaceId", null),
-        workspaceResolved = workspaceChosen,
+        workspaceResolved = false,
         draft = preferences.getString(draftKey(preferences.getString("selectedSessionId", null)), "") ?: "",
         readingPosition = readingPosition(preferences.getString("selectedSessionId", null)),
         draftId = preferences.getString("selectedSessionId", null) ?: blankId,
@@ -184,6 +184,14 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
                     }
                     val defaultWorkspace = catalog.defaultWorkspaceId
                     synchronized(draftPersistenceLock) {
+                        updateManagedOwnership(catalog.managedSessionIds, catalog.managedWorkspaceIds)
+                        recoverUserSelection(_state.value.selectedSessionId, _state.value.selectedWorkspaceId,
+                            preferences.getString("lastUserSessionId", null), preferences.getString("lastUserWorkspaceId", null),
+                            preferences.getBoolean("hasUserSelection", false), sessions, items, defaultWorkspace,
+                            _state.value.managedSessionIds, _state.value.managedWorkspaceIds)?.let { recovered ->
+                            persistDraft()
+                            switchSession(recovered.sessionId, recovered.workspaceId)
+                        }
                         val current = _state.value
                         val selected = sessions.firstOrNull { it.id == current.selectedSessionId }
                         val initial = if (!workspaceChosen && current.selectedSessionId == null) {
@@ -221,6 +229,7 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
                             draftAttachments = localAttachments(localId),
                             error = if (current.error == "native_workspace_resolving" || current.error == "workspace/session-archived" && selected?.archived == false) null else current.error,
                         )
+                        if (selected != null || current.selectedSessionId == null) rememberUserSelection(current.selectedSessionId, workspace)
                     }
                     refreshModels()
                     val selected = _state.value.selectedSessionId
@@ -235,6 +244,7 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
 
     fun selectSession(session: NativeSession) {
         if (NativeCompanionWriteBarrier.frozen) return
+        if (session.id in _state.value.managedSessionIds || session.workspaceId in _state.value.managedWorkspaceIds) return
         _state.update { it.copy(sessions = it.sessions.filterNot { row -> row.id == session.id } + session) }
         if (_state.value.selectedSessionId == session.id) _state.update { it.copy(selectedWorkspaceId = session.workspaceId) }
         else selectSession(session.id)
@@ -242,6 +252,7 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
 
     fun selectSession(id: String) {
         if (NativeCompanionWriteBarrier.frozen) return
+        if (id in _state.value.managedSessionIds) return
         if (_state.value.selectedSessionId == id) return
         persistDraft()
         val workspace = _state.value.sessions.firstOrNull { it.id == id }?.workspaceId
@@ -251,6 +262,7 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
 
     fun selectWorkspace(id: String?) {
         if (NativeCompanionWriteBarrier.frozen) return
+        if (id in _state.value.managedWorkspaceIds) return
         // A deliberate Ungrouped choice and a first launch both have a null ID.
         workspaceChosen = true
         preferences.edit().putBoolean("workspaceChosen", true).putString("selectedWorkspaceId", id).apply()
@@ -263,7 +275,7 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
     /** Return to the space's unsent draft before an explicit new-chat action can replace it. */
     fun openDraft(workspaceId: String?): Boolean {
         if (NativeCompanionWriteBarrier.frozen) return false
-        if (_state.value.workspaces.any { it.id == workspaceId && it.readOnly }) {
+        if (workspaceId in _state.value.managedWorkspaceIds || _state.value.workspaces.any { it.id == workspaceId && it.readOnly }) {
             _state.update { it.copy(error = "COMPANION_WORKSPACE_MANAGED") }; return false
         }
         persistDraft()
@@ -318,7 +330,14 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
             readingPosition = readingPosition(id),
             draftId = id ?: blankId, draftAttachments = localAttachments(id ?: blankId),
         ) }
+        if (id == null || _state.value.sessions.any { it.id == id }) rememberUserSelection(id, workspaceId)
         publishMessages()
+    }
+
+    private fun rememberUserSelection(sessionId: String?, workspaceId: String?) {
+        if (sessionId in _state.value.managedSessionIds || workspaceId in _state.value.managedWorkspaceIds) return
+        preferences.edit().putBoolean("hasUserSelection", true).putString("lastUserSessionId", sessionId)
+            .putString("lastUserWorkspaceId", workspaceId).apply()
     }
 
     fun setDraft(value: String) {
@@ -334,12 +353,14 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
             _state.update { it.copy(error = "native_workspace_resolving") }
             return null
         }
+        if (rejectManagedTarget()) return null
         return mediaTarget()
     }
 
     fun mediaTarget(): NativeWorkbenchMediaTarget {
         val value = _state.value
         if (!value.workspaceResolved) throw NativeApiException("native_workspace_resolving")
+        if (value.readOnly) throw NativeApiException(if (value.archived) "workspace/session-archived" else "native_workspace_resolving")
         return NativeWorkbenchMediaTarget(value.draftId, value.selectedSessionId ?: preferences.getString("materialized:${value.draftId}", null), value.selectedWorkspaceId)
     }
 
@@ -537,6 +558,7 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
     fun presentSession(sessionId: String?) { presentedSessionId = sessionId }
 
     private fun observeTurnBoundary(sessionId: String, boundary: JSONObject?, seq: Long, sequenced: Boolean = true, historical: Boolean = false, publishNow: Boolean = true) {
+        if (sessionId in _state.value.managedSessionIds) return
         val completed = boundary?.takeIf { it.has("lastTurn") }?.let {
             (it.getInt("lastTurn") - if (it.isNull("openTurnStartSeq")) 0 else 1).coerceAtLeast(0)
         }
@@ -555,11 +577,19 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
         val snapshot = unreadTurns.snapshot()
         if (snapshot != savedUnreadTurns) {
             val editor = preferences.edit()
+            (savedUnreadTurns.keys - snapshot.keys).forEach { editor.remove("workReadTurn:$it") }
             snapshot.forEach { (id, turn) -> if (savedUnreadTurns[id] != turn) editor.putInt("workReadTurn:$id", turn) }
             editor.apply()
             savedUnreadTurns = snapshot
         }
         _state.update { it.copy(unreadSessionIds = unreadTurns.unread()) }
+    }
+
+    private fun updateManagedOwnership(sessionIds: Set<String>, workspaceIds: Set<String> = emptySet()) {
+        _state.update { it.copy(managedSessionIds = it.managedSessionIds + sessionIds,
+            managedWorkspaceIds = it.managedWorkspaceIds + workspaceIds) }
+        unreadTurns.exclude(_state.value.managedSessionIds)
+        publishUnread()
     }
 
     private fun readingPosition(id: String?): NativeReadingPosition? = id?.let { sessionId ->
@@ -1045,6 +1075,9 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
                     // Control baselines contain attached Sessions only. Read existing cold summaries
                     // before subscribing so reconnect does not erase results or mark all history unread.
                     val catalog = api.post("list") as? JSONObject ?: throw NativeApiException("malformed_response")
+                    updateManagedOwnership(catalog.optJSONArray("managedSessionIds")?.let { ids ->
+                        (0 until ids.length()).map(ids::getString).toSet()
+                    }.orEmpty())
                     catalog.getJSONArray("items").objects().forEach { row ->
                         val block = row.optJSONObject("projections")
                         observeTurnBoundary(row.getString("sessionId"), block?.optJSONObject("values")?.optJSONObject("droyTurnBoundary"),
@@ -1239,6 +1272,10 @@ class NativeWorkbenchViewModel(application: Application) : AndroidViewModel(appl
         if (!current.readOnly) return false
         _state.update { it.copy(error = when {
             current.archived -> "workspace/session-archived"
+            current.selectedSessionId != null && current.sessions.none { row -> row.id == current.selectedSessionId }
+                && current.selectedSessionId !in current.managedSessionIds -> "native_workspace_resolving"
+            current.selectedSessionId == null && current.selectedWorkspaceId != null && current.workspaces.none { row -> row.id == current.selectedWorkspaceId }
+                && current.selectedWorkspaceId !in current.managedWorkspaceIds -> "native_workspace_resolving"
             current.selectedSessionId == null -> "COMPANION_WORKSPACE_MANAGED"
             else -> "COMPANION_SESSION_MANAGED"
         }) }

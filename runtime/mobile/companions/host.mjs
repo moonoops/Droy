@@ -69,6 +69,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
       const url=new URL(req.url,'http://127.0.0.1');
       try {path=url.pathname.slice(base.length).split('/').filter(Boolean).map(decodeURIComponent);}
       catch {fail('COMPANION_INVALID_INPUT');}
+      if(path.length===1&&path[0]==='activity'&&req.method==='GET')return send(res,200,await runtime.activity());
       if(path[0]==='events' && req.method==='GET') {
         res.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','Connection':'keep-alive','X-Accel-Buffering':'no'});
         res.write(': connected\n\n');
@@ -212,7 +213,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
       }
       if(path[1]==='messages' && path.length===2) {
         if(req.method==='GET') {
-          const page=await store.listMessages(id,{...(url.searchParams.get('before')?{before:url.searchParams.get('before')}:{})});
+          const page=await store.listVisibleMessages(id,{...(url.searchParams.get('before')?{before:url.searchParams.get('before')}:{})});
           const previewIds=page.messages.filter(message=>message.replyTo&&message.quoteReply!==false).map(message=>message.replyTo);
           const previews=await store.replyPreviews(id,previewIds);
           page.messages=page.messages.map(message=>message.replyTo&&message.quoteReply!==false
@@ -222,6 +223,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         if(req.method==='POST') {
           const input=await body(req);
           if(input.replyTo && typeof input.replyTo==='object') input.replyTo=input.replyTo.id;
+          if(input.replyTo&&!await store.getVisibleMessage(id,input.replyTo))fail('COMPANION_MESSAGE_NOT_FOUND');
           input.attachments=await Promise.all((input.attachments??[]).map(async item=>{
             const upload=await store.getUpload(id,item.id??item.attachmentId);
             if(!upload) fail('COMPANION_ATTACHMENT_SCOPE');
@@ -236,13 +238,18 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         }
         if(req.method==='DELETE')return send(res,200,await runtime.clearHistory(id));
       }
-      if(path[1]==='messages'&&path.length===4&&path[3]==='transcript'&&req.method==='PATCH')
+      if(path[1]==='messages'&&path.length===4&&path[3]==='transcript'&&req.method==='PATCH') {
+        if(!await store.getVisibleMessage(id,path[2]))fail('COMPANION_MESSAGE_NOT_FOUND');
         return send(res,200,await runtime.transcribeVoice(id,path[2],(await body(req)).text));
+      }
       if(path[1]==='messages' && path.length===3 && req.method==='DELETE') {
+        if(!await store.getVisibleMessage(id,path[2]))fail('COMPANION_MESSAGE_NOT_FOUND');
         return send(res,200,await runtime.removeMessage(id,path[2]));
       }
       if(path[1]==='read' && req.method==='POST') {
-        const input=await body(req);await runtime.markRead(id,input.messageId);return send(res,200,{ok:true});
+        const input=await body(req);
+        if(input.messageId&&!await store.getVisibleMessage(id,input.messageId))fail('COMPANION_MESSAGE_NOT_FOUND');
+        await runtime.markRead(id,input.messageId);return send(res,200,{ok:true});
       }
       if(path[1]==='cancel' && req.method==='POST') return send(res,200,await runtime.cancel(id,await body(req)));
       if(path[1]==='retry' && req.method==='POST') {await runtime.retry(id);return send(res,202,{accepted:true});}
@@ -274,7 +281,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
       const online=path.some(part=>['sticker-market','sticker-search'].includes(part));
       const locale=resolveMobileLocale(ctx),raw=online&&error.name==='TimeoutError'?'COMPANION_STICKER_ONLINE_NETWORK':error.code;
       const code=typeof raw==='string'&&(/^(?:COMPANION_[A-Z_]+)$/.test(raw)
-        ||['INVALID_IMAGE','UNSUPPORTED_IMAGE_TYPE','IMAGE_TOO_LARGE','IMAGE_TOO_MANY_PIXELS','IMAGE_DIMENSION_TOO_LARGE'].includes(raw))?raw:'COMPANION_OPERATION_FAILED';
+        ||['DROY_STOPPING','INVALID_IMAGE','UNSUPPORTED_IMAGE_TYPE','IMAGE_TOO_LARGE','IMAGE_TOO_MANY_PIXELS','IMAGE_DIMENSION_TOO_LARGE'].includes(raw))?raw:'COMPANION_OPERATION_FAILED';
       const copy=dialoguePrompts[locale];
       const generation=req.method==='POST'&&(path[1]==='messages'&&path.length===2||path[1]==='retry');
       const message=code==='COMPANION_MODEL_REQUIRED'?copy.missingModel
@@ -293,7 +300,7 @@ export function createCompanionHandler({ctx,runtime,store,assets=new URL('./asse
         :code==='COMPANION_NOTIFICATION_REMOVALS_PENDING'?copy.notificationRemovalsPending
         :generation?copy.generationFailed:copy.operationFailed;
       ctx.logger.warn('COMPANION_HTTP_FAILED: '+code);
-      return send(res,code==='COMPANION_OPERATION_FAILED'?500:code==='COMPANION_STICKER_ONLINE_NETWORK'?503:/NOT_FOUND/.test(code)?404:/CONFLICT|MANAGED|DRAFT_CLOSED/.test(code)?409:400,{
+      return send(res,code==='COMPANION_OPERATION_FAILED'?500:['DROY_STOPPING','COMPANION_STICKER_ONLINE_NETWORK'].includes(code)?503:/NOT_FOUND/.test(code)?404:/CONFLICT|MANAGED|DRAFT_CLOSED/.test(code)?409:400,{
         error:code,message});
     }
   };

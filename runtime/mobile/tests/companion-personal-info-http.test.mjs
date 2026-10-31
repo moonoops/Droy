@@ -125,6 +125,41 @@ test('quoted messages return bounded current previews outside the loaded page an
   assert.equal((await f.api('/kaka/messages')).value.messages.find(message => message.id === 'answer').replyPreview, null);
 });
 
+test('chat HTTP snapshots hide internal work and reject old task references without removing internal records', async t => {
+  const f = await fixture(t);
+  await f.store.appendMessage('kaka', { id: 'work-hidden', role: 'assistant', type: 'task', text: 'Fictional hidden work', task: { state: 'completed' } });
+  await f.store.appendMessage('kaka', { id: 'result-visible', role: 'assistant', text: 'Fictional reply', replyTo: 'work-hidden', quoteReply: false });
+  const page = await f.api('/kaka/messages');
+  assert.equal(page.status, 200);
+  assert.deepEqual(page.value.messages.map(row => row.id), ['result-visible']);
+  assert.equal(Object.hasOwn(page.value.messages[0], 'replyTo'), false);
+  assert.equal(Object.hasOwn(page.value.messages[0], 'replyPreview'), false);
+  let submitted = false;
+  f.runtime.submit = async () => { submitted = true; return {}; };
+  for (const replyTo of ['work-hidden', { id: 'work-hidden' }]) {
+    const response = await f.api('/kaka/messages', 'POST', { text: 'Fictional user text', replyTo });
+    assert.equal(response.status, 404);
+    assert.equal(response.value.error, 'COMPANION_MESSAGE_NOT_FOUND');
+  }
+  assert.equal(submitted, false);
+  for (const [path, method, body] of [
+    ['/kaka/messages/work-hidden', 'DELETE'], ['/kaka/messages/work-hidden/transcript', 'PATCH', { text: 'Fictional' }],
+    ['/kaka/read', 'POST', { messageId: 'work-hidden' }],
+  ]) assert.equal((await f.api(path, method, body)).status, 404);
+  assert.equal((await f.store.getMessage('kaka', 'work-hidden')).task.state, 'completed');
+  assert.equal((await f.store.getMessage('kaka', 'result-visible')).replyTo, 'work-hidden');
+});
+
+test('private activity observation requires authentication and precedes companion ID lookup', async t => {
+  const f = await fixture(t);
+  let busy = true;
+  f.runtime.activity = () => ({ busy });
+  assert.equal((await fetch(f.url + '/activity')).status, 401);
+  assert.deepEqual(await f.api('/activity'), { status: 200, value: { busy: true } });
+  busy = false;
+  assert.deepEqual(await f.api('/activity'), { status: 200, value: { busy: false } });
+});
+
 test('wallpaper assets and thumbnails serve WebP and unknown files are not exposed', async t => {
   const f = await fixture(t);
   const wallpapers = ['01', '02', '03', '04', '05', '06', '07', '08']

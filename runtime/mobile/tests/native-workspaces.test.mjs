@@ -108,9 +108,11 @@ test('catalog preserves real global order, pins, stable default ID and cold sess
   const f = await fixture(t);
   await f.request('/mutate', op('session.pin', { sessionId: 'work-a' }));
   const { result } = await f.request();
-  assert.deepEqual(result.items.map(row => row.workspaceId), ['space-a', 'companion-space']);
+  assert.deepEqual(result.items.map(row => row.workspaceId), ['space-a']);
   assert.equal(result.defaultWorkspaceId, 'space-a'); assert.equal(result.workspaces[0].title, 'Renamed default');
-  assert.deepEqual(result.pinnedSessionIds, ['work-a']); assert.equal(result.workspaces[1].readOnly, true);
+  assert.deepEqual(result.pinnedSessionIds, ['work-a']); assert.deepEqual(result.managedWorkspaceIds, ['companion-space']);
+  assert.deepEqual(result.managedSessionIds, ['companion-a']);
+  assert.equal(result.sessions.some(row => row.id === 'companion-a'), false);
   assert.equal(result.sessions.find(row => row.id === 'child-a').readOnly, true); assert.equal(result.directoryBrowsingAvailable, true);
 });
 test('managed sessions/workspaces, subagents and symlinked managed directories reject server-side', async t => {

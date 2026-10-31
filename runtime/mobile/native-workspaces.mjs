@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { TYPERT as WORKSPACES } from '@deepseek-ai/dsh-api-workspace-controller/typert';
 import { TYPERT as SESSIONS } from '@deepseek-ai/dsh-api-session-controller/typert';
 import { resolveMobileLocale } from './locale.mjs';
+import { assertUserDirectory } from './task-ownership.mjs';
 
 const base = '/droy/native/workspaces';
 const limit = 32 * 1024;
@@ -169,14 +170,22 @@ async function catalog(ctx, signal) {
   const [value, listed] = await Promise.all([
     baseline(ctx, signal), service(ctx, 'sessionController', 'list').list({}, signal),
   ]);
-  const rows = checked('session', 'list', listed).items;
-  const workspaces = value.items.map(row => ({ id: row.workspaceId, path: row.path, title: row.title,
-    sessionIds: row.sessionIds, readOnly: workspaceIds.has(row.workspaceId) }));
+  const allRows = checked('session', 'list', listed).items;
+  const managedSessionIds = allRows.filter(row => companions.ownsSession(row.sessionId)).map(row => row.sessionId);
+  const owned = id => companions.ownsSession(id);
+  const rows = allRows.filter(row => !owned(row.sessionId));
+  const items = value.items.filter(row => !workspaceIds.has(row.workspaceId))
+    .map(row => ({ ...row, sessionIds: row.sessionIds.filter(id => !owned(id)) }));
+  const workspaces = items.map(row => ({ id: row.workspaceId, path: row.path, title: row.title,
+    sessionIds: row.sessionIds, readOnly: false }));
   const sessions = rows.map(row => ({ id: row.sessionId, title: typeof row.projections?.values?.title === 'string' ? row.projections.values.title : null,
     running: row.running, blank: row.blank, parentSessionId: row.parentSessionId ?? null, origin: row.origin ?? null,
-    needsMigration: row.formatStatus === 'migration-required', readOnly: companions.ownsSession(row.sessionId) || row.origin === 'subagent',
+    needsMigration: row.formatStatus === 'migration-required', readOnly: row.origin === 'subagent',
     workspaceId: workspaces.find(space => space.sessionIds.includes(row.sessionId))?.id ?? null }));
-  return { ...value, managedWorkspaceIds: [...workspaceIds], defaultWorkspaceId: get(ctx, 'droyInitialization')?.defaultWorkspaceId ?? null,
+  const defaultWorkspaceId = get(ctx, 'droyInitialization')?.defaultWorkspaceId ?? null;
+  return { ...value, items, archivedSessionIds: value.archivedSessionIds.filter(id => !owned(id)),
+    pinnedSessionIds: value.pinnedSessionIds.filter(id => !owned(id)), managedSessionIds,
+    managedWorkspaceIds: [...workspaceIds], defaultWorkspaceId: workspaceIds.has(defaultWorkspaceId) ? null : defaultWorkspaceId,
     workspaces, sessions, directoryBrowsingAvailable: get(ctx, 'directoryPicker')?.capability?.()?.kind === 'browse' };
 }
 async function guard(ctx, op, signal) {
@@ -195,6 +204,11 @@ async function guard(ctx, op, signal) {
   }
   if (args.path) {
     const path = await realpath(hostPath(args.path));
+    try { await assertUserDirectory(ctx, path, companions); }
+    catch (error) {
+      if (error.code === 'COMPANION_WORKSPACE_MANAGED') throw new WorkspaceError(error.code, 409, 'managed');
+      throw error;
+    }
     const value = await baseline(ctx, signal);
     for (const row of value.items.filter(row => workspaceIds.has(row.workspaceId))) {
       const root = await realpath(row.path), part = relative(root, path);

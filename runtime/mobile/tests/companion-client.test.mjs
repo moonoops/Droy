@@ -501,17 +501,130 @@ test('queued voice gesture updates survive preparation failure, cancellation and
   }
 });
 
- test('task details use service state and summary, and the interrupted-turn action retries actual work', async () => {
+ test('internal work stays out of chat and the interrupted-turn action retries actual work', async () => {
   const f = companionUiFixture((path, options) => path === '' ? root() : options.method ? {} : {
-    messages: [], status: { phase: 'error', error: 'Connection interrupted' } });
+    messages: [row('service-task', 27, 'Fictional internal task', { type: 'task', task: { id: 'service-task', state: 'completed', summary: 'Internal service result' } })],
+    status: { phase: 'error', error: 'Connection interrupted' } });
   await f.ui.state.initialize(); f.ui.state.open('kaka'); await tick();
-  f.ui.state.showTask({ id: 'service-task', title: 'Lookup', state: 'completed', summary: 'The real service result' });
-  let tree = f.render();
-  assert.ok(treeNodes(tree).some(node => node.children.includes('The real service result')));
-  assert.equal(treeNodes(tree).some(node => node.type === 'button' && node.children.includes('Stop task')), false);
-  f.ui.state.back(); tree = f.render();
+  const tree = f.render();
+  assert.equal(treeNodes(tree).some(node => node.children.includes('Internal service result')), false);
+  assert.equal(treeNodes(tree).some(node => node.props.className === 'droy-im-task-card'), false);
+  assert.equal(f.ui.state.getSnapshot().screen, 'chat');
+  assert.equal(f.ui.state.showTask, undefined);
   await treeNodes(tree).find(node => node.type.name === 'ErrorNotice').props.reload();
   assert.equal(f.calls.find(call => call.method === 'POST').path, '/kaka/retry'); f.ui.dispose();
+});
+
+test('hidden task snapshots remove stale references while preserving text and attachments', async () => {
+  const f = fixture(path => path === '' ? root() : { messages: [
+    row('hidden-work', 27, 'Fictional internal task', { type: 'task' }),
+    row('visible-answer', 28, 'Fictional visible reply', { replyTo: 'hidden-work', quoteReply: true }),
+  ], status: { phase: 'idle' } });
+  await f.state.initialize();
+  f.state.setDraft('kaka', { text: 'Unsent fictional text', attachments: [{ id: 'kept-attachment' }], replyTo: { id: 'hidden-work', text: 'Old reference' } });
+  await f.state.refreshMessages('kaka');
+  assert.equal(f.state.getSnapshot().messages.kaka.length, 1);
+  assert.equal(f.state.getSnapshot().messages.kaka[0].id, 'visible-answer');
+  assert.equal(f.state.getSnapshot().messages.kaka[0].replyTo, undefined);
+  assert.equal(f.state.draft('kaka').text, 'Unsent fictional text');
+  assert.equal(f.state.draft('kaka').attachments[0].id, 'kept-attachment');
+  assert.equal(f.state.draft('kaka').replyTo, null);
+  assert.equal(f.state.getSnapshot().error, 'COMPANION_REFERENCE_UNAVAILABLE');
+  await assert.rejects(f.state.send('kaka', { text: 'Fictional rejected reference', replyTo: 'hidden-work' }), /COMPANION_REFERENCE_UNAVAILABLE/);
+  assert.equal(f.calls.some(call => call.method === 'POST'), false);
+  assert.equal(f.state.draft('kaka').text, 'Unsent fictional text');
+  f.state.dispose();
+});
+
+test('work-only processing has a localized stop action that waits for confirmed settlement', async () => {
+  for (const language of ['zh', 'en']) {
+    let execution = { quiescent: false, cancelRequested: false };
+    const dictionary = loaded.DROY_COMPANION_COPY[language];
+    const f = companionUiFixture((path, options) => {
+      if (path === '') return root();
+      if (path === '/kaka/cancel') { execution = { quiescent: false, cancelRequested: true }; return { cancelRequested: true }; }
+      return { messages: [], status: { phase: 'idle', chatExecution: { quiescent: true, cancelRequested: false }, execution } };
+    }, language);
+    await f.ui.state.initialize(); f.ui.state.open('kaka'); await tick();
+    f.ui.state.setDraft('kaka', { text: 'Fictional next message' });
+    const button = treeNodes(f.render()).find(node => node.props['data-droy-im-action'] === 'stop');
+    assert.equal(button.props['aria-label'], dictionary.stopProcessing);
+    await button.props.onClick();
+    const pending = treeNodes(f.render()).find(node => node.props['data-droy-im-action'] === 'stop');
+    assert.equal(pending.props.disabled, true);
+    assert.equal(pending.props['aria-label'], dictionary.stopping);
+    await assert.rejects(f.ui.state.send('kaka'), /COMPANION_STOP_PENDING/);
+    assert.equal(f.ui.state.draft('kaka').text, 'Fictional next message');
+    execution = { quiescent: true, cancelRequested: true };
+    await f.ui.state.refreshMessages('kaka');
+    assert.equal(treeNodes(f.render()).some(node => node.props['data-droy-im-action'] === 'stop'), false);
+    assert.equal(f.ui.state.getSnapshot().stopping.kaka, false);
+    assert.equal(f.calls.filter(call => call.method === 'POST').length, 1);
+    assert.equal(f.calls.find(call => call.method === 'POST').path, '/kaka/cancel');
+    f.ui.dispose();
+  }
+});
+
+test('stopping follows an already in-flight send and preserves the next draft', async () => {
+  const pending = deferred();
+  let execution = { quiescent: false, cancelRequested: false };
+  const f = fixture((path, options) => {
+    if (path === '') return root();
+    if (path === '/kaka/messages' && options.method === 'POST') return pending.promise;
+    if (path === '/kaka/cancel') { execution = { quiescent: true, cancelRequested: true }; return { cancelRequested: true }; }
+    return { messages: [], status: { phase: 'idle', execution } };
+  });
+  await f.state.initialize();
+  f.state.setDraft('kaka', { text: 'Fictional in-flight message' });
+  const sending = f.state.send('kaka');
+  f.state.setDraft('kaka', { text: 'Fictional next draft' });
+  const stopping = f.state.cancel('kaka');
+  await tick();
+  assert.equal(f.calls.some(call => call.path === '/kaka/cancel'), false);
+  await assert.rejects(f.state.send('kaka'), /COMPANION_STOP_PENDING/);
+  pending.resolve({ message: row('admitted', 28, 'Fictional in-flight message', { role: 'user', clientId: 'fixture-client-id' }) });
+  await Promise.all([sending, stopping]);
+  assert.equal(f.calls.filter(call => call.path === '/kaka/cancel').length, 1);
+  assert.equal(f.state.getSnapshot().stopping.kaka, false);
+  assert.equal(f.state.draft('kaka').text, 'Fictional next draft');
+  f.state.dispose();
+});
+
+test('a failed status refresh cannot turn an acknowledged stop into confirmed settlement', async () => {
+  let fail = true;
+  const f = fixture(path => {
+    if (path === '') return root();
+    if (path === '/kaka/cancel') return { cancelRequested: true };
+    if (fail) throw new Error('Fictional status read unavailable');
+    return { messages: [], status: { phase: 'idle', execution: { quiescent: true, cancelRequested: true } } };
+  });
+  await f.state.initialize();
+  await assert.rejects(f.state.cancel('kaka'), /Fictional status read unavailable/);
+  assert.equal(f.state.getSnapshot().stopping.kaka, true);
+  fail = false;
+  await f.state.refreshMessages('kaka');
+  assert.equal(f.state.getSnapshot().stopping.kaka, false);
+  f.state.dispose();
+});
+
+test('confirmed settlement received before the stop acknowledgement is retained if the following read fails', async () => {
+  const receipt = deferred();
+  let fail = false;
+  const f = fixture(path => {
+    if (path === '') return root();
+    if (path === '/kaka/cancel') return receipt.promise;
+    if (fail) throw new Error('Fictional later read failed');
+    return { messages: [], status: { phase: 'idle', execution: { quiescent: true, cancelRequested: true } } };
+  });
+  await f.state.initialize();
+  const stopping = f.state.cancel('kaka');
+  await tick();
+  await f.state.refreshMessages('kaka');
+  assert.equal(f.state.getSnapshot().stopping.kaka, true);
+  fail = true; receipt.resolve({ cancelRequested: true });
+  await assert.rejects(stopping, /Fictional later read failed/);
+  assert.equal(f.state.getSnapshot().stopping.kaka, false);
+  f.state.dispose();
 });
 
  test('a first empty chat response finishes loading and shows the real empty conversation in both languages', async () => {

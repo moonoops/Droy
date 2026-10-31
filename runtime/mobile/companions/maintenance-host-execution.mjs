@@ -13,7 +13,9 @@ export function createHostMaintenanceExecution(ctx) {
   for (const agent of ctx.agents.list()) observe(agent);
   return {
     inspect() {
-      const values = ctx.droyNativeUserTasks.inspect();
+      const nativeTasks=ctx.get('droyNativeUserTasks');
+      if(typeof nativeTasks?.inspect!=='function')fail('COMPANION_MAINTENANCE_OBSERVATION_FAILED');
+      const values = nativeTasks.inspect();
       const writers = [...values.writers], busy = [...values.busy], unfenced = [...values.unfenced];
       const jobs = new Map(), owners = new Set([undefined, ...ctx.sessions.list().map(session => session.id)]);
       if (typeof ctx.get('jobs')?.list !== 'function') unfenced.push({ kind: 'jobs-unavailable', count: 1 });

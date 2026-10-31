@@ -161,12 +161,15 @@ export function createNativeSchedules(ctx) {
         const method = route[1], input = req.method === 'POST' ? await body(req) : undefined;
         const request = method === 'create' ? createInput(input) : method === 'catalog' ? undefined : parse(method, input);
         signal?.throwIfAborted();
+        const runtime = service(ctx, 'droyCompanions', 'ownsSession');
+        if (request && runtime.ownsSession(request.sessionId)) throw new ScheduleError('COMPANION_SESSION_MANAGED', 409, 'managed');
         const schedule = service(ctx, 'schedule', method);
         const value = method === 'catalog' ? await schedule.catalog() : method === 'create' ? await create(ctx, request, signal)
           : descriptors.get(method).cancellation ? await schedule[method](request, signal) : await schedule[method](request);
         // Cancellation after persistence begins cannot undo a committed change.
         // Preserve a returned receipt instead of claiming that it was rolled back.
-        reply(res, 200, { ok: true, result: result(ctx, method, value) });
+        const parsed = result(ctx, method, value);
+        reply(res, 200, { ok: true, result: method === 'catalog' ? parsed.filter(row => !runtime.ownsSession(row.sessionId)) : parsed });
       } catch (error) { req.resume(); errorReply(ctx, res, error, signal); }
     },
   };

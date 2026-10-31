@@ -10,6 +10,26 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NativeWorkbenchStateTest {
+    @Test fun anUnresolvedSavedSelectionCannotBecomeWritableWhenItsCatalogRowIsMissing() {
+        val state = NativeWorkbenchState(selectedSessionId = "unknown", draftId = "unknown", workspaceResolved = true)
+        assertTrue(state.readOnly)
+        assertTrue(state.copy(selectedSessionId = null, selectedWorkspaceId = "unknown-space").readOnly)
+        assertFalse(state.copy(pendingRequestId = "accepted-local-creation").readOnly)
+        assertTrue(state.copy(pendingRequestId = "accepted-local-creation", managedSessionIds = setOf("unknown")).readOnly)
+    }
+
+    @Test fun explicitCompanionOwnershipHidesOnlyCompanionGroupsAndKeepsUserChildren() {
+        val state = NativeWorkbenchState(workspaces = listOf(NativeWorkspace("mine", "Mine", listOf("root", "child")),
+            NativeWorkspace("friend", "Friend", listOf("friend-work"), readOnly = true)),
+            sessions = listOf(NativeSession("root", "Root", workspaceId = "mine"),
+                NativeSession("child", "Child", workspaceId = "mine", readOnly = true),
+                NativeSession("friend-work", "Internal", workspaceId = "friend", readOnly = true)),
+            managedWorkspaceIds = setOf("friend"), managedSessionIds = setOf("friend-work"))
+        val groups = state.spaceGroups("Ungrouped")
+        assertEquals(listOf("mine", null), groups.map { it.id })
+        assertEquals(listOf("root", "child"), groups.first().sessions.map { it.id })
+    }
+
     @Test fun archivedSelectionKeepsItsIdentityAndDraftButCannotBeWrittenUntilRestored() {
         val session = NativeSession("history", "Saved", workspaceId = "work", archived = true)
         val state = NativeWorkbenchState(sessions = listOf(session), selectedSessionId = session.id,

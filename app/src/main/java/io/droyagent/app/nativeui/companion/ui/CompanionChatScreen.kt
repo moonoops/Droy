@@ -65,7 +65,6 @@ fun CompanionChatScreen(
     onChooseAttachments: (() -> Unit)? = null,
     onOpenAttachment: ((NativeCompanionAttachment) -> Unit)? = null,
     onPlayVoice: ((NativeCompanionVoice) -> Unit)? = null,
-    onOpenTask: ((NativeCompanionTask) -> Unit)? = null,
     onChooseImages: (() -> Unit)? = null,
     onCamera: (() -> Unit)? = null,
     onRetryVoiceTranscript: ((String) -> Unit)? = null,
@@ -90,7 +89,8 @@ fun CompanionChatScreen(
         }
         return@Box
     }
-    var replyNoticeDismissed by rememberSaveable(companion.id, state.status.error, state.status.phase, state.messages.lastOrNull()?.id) { mutableStateOf(false) }
+    val messages = remember(state.messages) { visibleCompanionMessages(state.messages) }
+    var replyNoticeDismissed by rememberSaveable(companion.id, state.status.error, state.status.phase, messages.lastOrNull()?.id) { mutableStateOf(false) }
     val list = rememberLazyListState()
     var positioned by rememberSaveable(companion.id) { mutableStateOf(false) }
     var followingTail by rememberSaveable(companion.id) { mutableStateOf(true) }
@@ -98,7 +98,6 @@ fun CompanionChatScreen(
     var transcriptText by rememberSaveable(companion.id) { mutableStateOf<String?>(null) }
     var deleteId by rememberSaveable(companion.id) { mutableStateOf<String?>(null) }
     var sheet by rememberSaveable(companion.id) { mutableStateOf<String?>(null) }
-    var taskId by rememberSaveable(companion.id) { mutableStateOf<String?>(null) }
     var imageUrl by rememberSaveable(companion.id) { mutableStateOf<String?>(null) }
     var imageLabel by rememberSaveable(companion.id) { mutableStateOf("") }
     val focus = LocalFocusManager.current
@@ -110,24 +109,24 @@ fun CompanionChatScreen(
     val scope = rememberCoroutineScope()
     val copied = stringResource(R.string.native_companion_copied)
     val copyFailed = stringResource(R.string.native_companion_copy_failed)
-    val currentMessages by rememberUpdatedState(state.messages)
+    val currentMessages by rememberUpdatedState(messages)
     val currentReady by rememberUpdatedState(state.runtime.ready)
     val currentLoading by rememberUpdatedState(state.loading)
     val lifecycleOwner = LocalLifecycleOwner.current
     val lifecycleState = lifecycleOwner.lifecycle.currentStateAsState()
     val windowInfo = LocalWindowInfo.current
     val entrances = remember(companion.id) { MessageEntranceTracker() }
-    val entering = entrances.update(state.messages.map { it.itemIdentity() } + listOfNotNull(pendingVoiceKey),
-        state.messages.filter { state.sending && it.role == "user" && it.status == "pending" }.map { it.itemIdentity() }.toSet(),
+    val entering = entrances.update(messages.map { it.itemIdentity() } + listOfNotNull(pendingVoiceKey),
+        messages.filter { state.sending && it.role == "user" && it.status == "pending" }.map { it.itemIdentity() }.toSet(),
         state.runtime.ready && !state.loading && lifecycleState.value.isAtLeast(Lifecycle.State.RESUMED))
     val notificationOwner = remember { Any() }
-    val originals = remember(state.messages) { state.messages.associateBy { it.id } }
+    val originals = remember(messages) { messages.associateBy { it.id } }
     val stickers = remember(state.stickers) { state.stickers.associateBy { it.id } }
     val enabledStickers = remember(companion.settings.stickerPackIds, state.stickers) {
         enabledCompanionStickers(companion.settings, state.stickers)
     }
     val readingCovered by rememberUpdatedState(transcriptText != null || imageUrl != null || sheet != null || deleteId != null ||
-        menuId?.let(originals::containsKey) == true || taskId?.let(originals::get)?.task != null)
+        menuId?.let(originals::containsKey) == true)
     // The notification shade can take window focus without pausing the Activity.
     val readingLatest = positioned && state.runtime.ready && !state.loading && windowInfo.isWindowFocused &&
         lifecycleState.value.isAtLeast(Lifecycle.State.RESUMED) && !readingCovered && followingTail
@@ -135,8 +134,7 @@ fun CompanionChatScreen(
         NativeRuntimeHost.presentCompanion(notificationOwner, companion.id, readingLatest)
         onDispose { NativeRuntimeHost.presentCompanion(notificationOwner, companion.id, false) }
     }
-    val active = state.status.chatExecution?.let { !it.quiescent }
-        ?: (state.status.phase in setOf("thinking", "typing", "waiting"))
+    val active = state.status.processing
     val status = companionStatusLabel(state.status, state.stopRequested)
 
     // Newest-first items with reverse layout start at the bottom before their first
@@ -155,9 +153,9 @@ fun CompanionChatScreen(
             list.scrollToItem(0)
         }
     }
-    val newest = state.messages.lastOrNull()
+    val newest = messages.lastOrNull()
     LaunchedEffect(newest?.id, newest?.text, newest?.status, followingTail) {
-        if (positioned && followingTail && state.messages.isNotEmpty()) list.scrollToItem(0)
+        if (positioned && followingTail && messages.isNotEmpty()) list.scrollToItem(0)
     }
     LaunchedEffect(list, companion.id, lifecycleOwner, windowInfo) {
         snapshotFlow {
@@ -229,13 +227,13 @@ fun CompanionChatScreen(
                                 onClick = onOpenUserProfile, label = stringResource(R.string.native_companion_my_profile))
                         }
                     }
-                    items(state.messages.asReversed(), key = { "message:${it.itemIdentity()}" }, contentType = { it.type }) { message ->
+                    items(messages.asReversed(), key = { "message:${it.itemIdentity()}" }, contentType = { it.type }) { message ->
                         val quoted = message.replyPreview ?: message.replyTo?.let(originals::get)?.let { NativeCompanionReplyPreview(it.id, it.text, it.type) }
                         CompanionMessageRow(message, companion, state.userProfile, quoted, message.stickerId?.let(stickers::get), imageLoader,
                             onProfile = { onOpenCompanionProfile(companion.id) }, onUserProfile = onOpenUserProfile,
                             onMenu = { keyboard?.hide(); menuId = it.id }, onRetry = { model.retryPending(message.id) },
                             onImage = { url, label -> keyboard?.hide(); imageUrl = url; imageLabel = label },
-                            onAttachment = onOpenAttachment, onVoice = onPlayVoice, onTask = { keyboard?.hide(); taskId = it.id },
+                            onAttachment = onOpenAttachment, onVoice = onPlayVoice,
                             onRetryVoiceTranscript = onRetryVoiceTranscript, onTapContent = { focus.clearFocus(); keyboard?.hide() },
                             sending = state.sending || state.stopRequested || !state.runtime.ready,
                             modifier = io.droyagent.app.nativeui.ui.messageEntranceModifier(message.itemIdentity() in entering))
@@ -249,14 +247,14 @@ fun CompanionChatScreen(
                     }
 
                 }
-                if (state.runtime.ready && !state.loading && state.messages.isEmpty() && pendingVoiceKey == null) Surface(
+                if (state.runtime.ready && !state.loading && messages.isEmpty() && pendingVoiceKey == null) Surface(
                     modifier = Modifier.align(Alignment.Center), shape = MaterialTheme.shapes.large,
                     color = MaterialTheme.colorScheme.surfaceContainerLow) {
                     Text(stringResource(R.string.native_companion_no_messages),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                if (positioned && !followingTail && state.messages.isNotEmpty()) SmallFloatingActionButton(onClick = {
+                if (positioned && !followingTail && messages.isNotEmpty()) SmallFloatingActionButton(onClick = {
                     followingTail = true
                     scope.launch { list.animateScrollToItem(0) }
                 }, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp), containerColor = MaterialTheme.colorScheme.secondaryContainer) {
@@ -343,13 +341,6 @@ fun CompanionChatScreen(
                 sheet = null; model.cancelChat()
             }
             TextButton(onClick = { sheet = null }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(stringResource(R.string.native_companion_cancel)) }
-        }
-    }
-    originals[taskId]?.takeIf { it.task != null }?.let { message ->
-        ModalBottomSheet(onDismissRequest = { taskId = null }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-            CompanionError(state.error, model::dismissError, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
-            CompanionTaskDetails(message, onCancel = { model.cancelTask(message.id) }, onOpenTask = onOpenTask,
-                onClose = { taskId = null }, enabled = state.runtime.ready)
         }
     }
     imageUrl?.let { CompanionImageDialog(it, imageLabel, imageLoader, onClose = { imageUrl = null }) }

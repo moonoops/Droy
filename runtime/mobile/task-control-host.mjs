@@ -26,6 +26,8 @@ export function installTaskControl(ctx, bridge, progress) {
     // Recovery publishes the fence before the service is made available to callers.
     control.recover();
     scope.provide('droyTaskControl', control);
+    // Recovery fences exist before ownership is ready; publish them once their user owner can be proven.
+    scope.inject(['droyCompanions'], () => control.refreshPresentation());
     for (const agent of scope.get('agents').list()) control.onCreated(agent);
     scope.effect(() => async () => { await control.dispose(); store.close(); });
   });

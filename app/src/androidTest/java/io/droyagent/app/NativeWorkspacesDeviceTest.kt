@@ -140,6 +140,7 @@ class NativeWorkspacesDeviceTest {
             setLanguage(locale)
             openSpaces()
             compose.onNodeWithTag("native-workspaces-add").assertIsEnabled().performClick()
+            compose.onNodeWithText(text(R.string.native_workspaces_existing_folder)).assertIsDisplayed().performClick()
             compose.waitUntil(15_000) { spaces.state.value.directoryOpen && !spaces.state.value.directoryLoading }
             // Stay inside the fixture-owned home; browse uses the same public VM action as a directory row.
             fixture.scenario.onActivity { spaces.onAction(NativeWorkspacesAction.BrowseDirectory(fixture.home.absolutePath)) }
@@ -189,12 +190,11 @@ class NativeWorkspacesDeviceTest {
             compose.waitUntil(20_000) { work.state.value.selectedSessionId == retained && !work.state.value.loading }
             assertNull(work.state.value.error)
             backToSpaces()
-            compose.waitUntil(20_000) { spaces.state.value.catalog!!.workspaces.any { it.id == managedWorkspaceId && it.readOnly } }
-            val managed = requireNotNull(spaces.state.value.catalog!!.workspaces.firstOrNull { it.id == managedWorkspaceId && it.readOnly })
-            scrollTo("native-space:${managed.id}")
-            compose.onNodeWithTag("native-workspace-menu:${managed.id}").assertDoesNotExist()
-            expectError("COMPANION_WORKSPACE_MANAGED") { mutate("workspace.rename", JSONObject().put("workspaceId", managed.id).put("title", "Forbidden fixture edit")) }
-            assertEquals(managed.title, catalog().getJSONArray("workspaces").objects().single { it.getString("id") == managed.id }.getString("title"))
+            compose.waitUntil(20_000) { managedWorkspaceId in spaces.state.value.catalog!!.managedWorkspaceIds }
+            assertTrue(spaces.state.value.catalog!!.workspaces.none { it.id == managedWorkspaceId })
+            compose.onNodeWithTag("native-space:$managedWorkspaceId").assertDoesNotExist()
+            expectError("COMPANION_WORKSPACE_MANAGED") { mutate("workspace.rename", JSONObject().put("workspaceId", managedWorkspaceId).put("title", "Forbidden fixture edit")) }
+            assertEquals(managedWorkspaceId, companions.state.value.selectedCompanion!!.workspaceId)
             pressBack()
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("native-tab-workbench").fetchSemanticsNodes(false).isNotEmpty() }
         }
@@ -488,8 +488,10 @@ class NativeWorkspacesDeviceTest {
         fixture.scenario.onActivity { companions.refresh() }
         compose.waitUntil(20_000) { companions.state.value.selectedCompanion?.workspaceId != null && !companions.state.value.loading }
         val workspaceId = requireNotNull(companions.state.value.selectedCompanion!!.workspaceId)
-        assertTrue("A real companion turn must create its managed workspace",
-            catalog().getJSONArray("workspaces").objects().any { it.getString("id") == workspaceId && it.getBoolean("readOnly") })
+        val userCatalog = catalog()
+        assertTrue("A real companion turn must retain its private workspace ownership",
+            (0 until userCatalog.getJSONArray("managedWorkspaceIds").length()).map(userCatalog.getJSONArray("managedWorkspaceIds")::getString).contains(workspaceId))
+        assertTrue(userCatalog.getJSONArray("workspaces").objects().none { it.getString("id") == workspaceId })
         assertEquals(1, companions.state.value.messages.count { it.role == "user" && it.text == marker })
         return workspaceId
     }

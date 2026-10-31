@@ -5,6 +5,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NativeUnreadTurnsTest {
+    @Test fun excludingOldCompanionCursorsRetainsTheUsersOwnUnreadResults() {
+        val state = NativeUnreadTurns(mapOf("mine" to 1, "friend" to 2))
+        state.observe("mine", 2, 20); state.observe("friend", 3, 30)
+        state.exclude(setOf("friend"))
+        assertEquals(setOf("mine"), state.unread())
+        assertEquals(mapOf("mine" to 1), state.snapshot())
+        assertNull(state.completionSeq("friend"))
+    }
+
     @Test fun oldHistoryBootstrapsWithoutMarkingEverythingUnread() {
         val state = NativeUnreadTurns()
         state.seedHistory("a", 12)

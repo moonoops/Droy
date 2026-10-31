@@ -196,7 +196,7 @@ test('packaged companions run isolated Planner and Replyer conversations without
   assert.deepEqual(await companions.cancel('kaka'),{cancelRequested:true});
   assert.equal(companions.chatExecution('kaka').cancelRequested,true);
   await kakaAgent.whenIdle();
-  await eventually(()=>companions.chatExecution('kaka').quiescent,'chat cancellation confirms real Agent and runtime settlement');
+  await eventually(()=>companions.execution('kaka').quiescent,'partner cancellation confirms real Agent and runtime settlement');
   assert.deepEqual((await api('/kaka/messages')).value.status.chatExecution,{quiescent:true,cancelRequested:true});
   assert.deepEqual((await api()).value.companions.find(profile=>profile.id==='kaka').status.chatExecution,{quiescent:true,cancelRequested:true});
   await eventually(()=>kakaAgent.status!=='running','wait cancellation reaches real DSH loop');
@@ -205,6 +205,8 @@ test('packaged companions run isolated Planner and Replyer conversations without
   assert.equal((await companions.store.getState('kaka')).waitingUntil,null);
   assert.equal(companions.state('kaka').error,undefined);
 
+  const previousBatchDelay=companions.options.debounceMs;companions.options.debounceMs=50;
+  await companions.submit('kaka',{clientId:'post-stop-work-request',text:'A new fictional request for delegated work.'});
   const task=await companions.startWork('kaka',{title:'Fictional delegated result',goal:'Return a fictional result for contract validation.'});
   scripts.set(kakaAgent.id,[{name:'companion_reply',args:{msg_id:task.taskId,reply_reference:'FIXTURE_TASK_CARD: Report the completed result.'}},
     {name:'companion_quiet'}]);
@@ -212,6 +214,7 @@ test('packaged companions run isolated Planner and Replyer conversations without
   assert.equal((await companions.store.getMessage('kaka',task.taskId)).task.summary,'Fictional work completed with its verified result.');
   assert.equal(actions.filter(action=>action.sessionId===task.sessionId).length,1);
   await eventually(()=>scripts.get(kakaAgent.id).length===0&&kakaAgent.status!=='running'&&!companions.state('kaka').pending.length,'work result chat followup');
+  companions.options.debounceMs=previousBatchDelay;
   assert.ok((await companions.store.listMessages('kaka')).messages.some(message=>message.role==='assistant'&&message.type==='text'&&message.replyTo===task.taskId),
     'The completed task card is a valid reply target in the real Planner/Replyer loop');
   const assertModelRound=async({agent,id,model,reference})=>{
@@ -256,4 +259,11 @@ test('packaged companions run isolated Planner and Replyer conversations without
       calls:calls.map(({provider,model,sessionId,system,messages,tools})=>({provider,model,sessionId,system,messages,tools})),
       kaka:await companions.store.listMessages('kaka'),maimai:await companions.store.listMessages('maimai')},null,2));
   }
+  await eventually(()=>!companions.activity().busy&&ctx.agents.list().every(agent=>agent.status==='idle'),'real profile execution idle before conditional exit');
+  await new Promise(resolve=>setImmediate(resolve));
+  const idleShutdown=await fetch('http://127.0.0.1:'+port+'/droy/shutdown',{
+    method:'POST',headers:{cookie:'droy_session='+token,'content-type':'application/json'},body:'{"ifIdle":true}'});
+  const idleResult=await idleShutdown.json();
+  assert.equal(idleShutdown.status,200,JSON.stringify(idleResult));assert.deepEqual(idleResult,{ok:true,code:'DROY_SHUTDOWN_READY'});
+  await running.shutdown.shutdown(0);
 });

@@ -40,6 +40,7 @@ internal class NativeUnreadTurns(saved: Map<String, Int> = emptyMap()) {
     internal fun forget(session: String) {
         read.remove(session); completed.remove(session); completionSeqs.remove(session); historicalWithoutBoundary.remove(session)
     }
+    internal fun exclude(sessions: Set<String>) { sessions.forEach(::forget) }
     fun completionSeq(session: String): Long? = completionSeqs[session]?.takeIf { it.first == completed[session] }?.second
     fun markRead(session: String) { completed[session]?.let { read[session] = maxOf(read[session] ?: 0, it) } }
     fun unread(): Set<String> = completed.filter { (id, turn) -> turn > (read[id] ?: turn) }.keys

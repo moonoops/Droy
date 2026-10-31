@@ -72,7 +72,8 @@ object NativeExternalNavigationJson {
     fun resolved(row: JSONObject): NativeExternalResolvedTarget = when (row.getString("kind")) {
         "engine-session" -> NativeExternalResolvedTarget.EngineSession(session(row.getJSONObject("session")), row.optional("petRequestId"))
         "companion-task" -> NativeExternalResolvedTarget.CompanionTask(session(row.getJSONObject("session")), row.optional("petRequestId"))
-        "companion-chat" -> NativeExternalResolvedTarget.CompanionChat(row.getString("companionId"), row.optional("chatSessionId"))
+        "companion-chat" -> NativeExternalResolvedTarget.CompanionChat(row.getString("companionId"), row.optional("chatSessionId"),
+            row.optional("sourceSessionId"), row.optional("sourceTaskId"), row.optional("petRequestId"))
         else -> throw NativeApiException("malformed_response")
     }
     private fun session(row: JSONObject): NativeExternalVerifiedSession {

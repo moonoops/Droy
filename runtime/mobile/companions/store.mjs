@@ -54,6 +54,9 @@ const CONTEXT_FIELDS = ['contextSourceIds', 'contextRange', 'contextExcluded'];
 const MESSAGE_FIELDS = ['id', 'clientId', 'role', 'type', 'text', 'createdAt', 'status', 'attachments', 'replyTo', 'quoteReply', 'task', 'voice', 'stickerId', 'transcript', 'error', ...CONTEXT_FIELDS];
 const MUTABLE_MESSAGE_FIELDS = ['text', 'status', 'attachments', 'task', 'voice', 'transcript', 'error', ...CONTEXT_FIELDS];
 const RECEIVED_INPUT_SQL = "json_extract(data,'$.status')='received' AND COALESCE(json_extract(data,'$.contextExcluded'),0)=0 AND (json_extract(data,'$.role')='user' OR (json_extract(data,'$.role')='assistant' AND json_extract(data,'$.type')='task' AND json_extract(data,'$.task.state') IN ('completed','failed','cancelled')))";
+const CHAT_MESSAGE_SQL = "json_extract(data,'$.role') IN ('user','assistant') AND COALESCE(json_extract(data,'$.type'),'text')!='task'";
+const UNREAD_MESSAGE_SQL = "json_extract(data,'$.role')='assistant' AND COALESCE(json_extract(data,'$.type'),'text')!='task'";
+const isChatMessage = message => !!message && ['user','assistant'].includes(message.role) && message.type !== 'task';
 const fail = code => { throw Object.assign(new Error(code), { code }); };
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const clone = value => structuredClone(value);
@@ -550,9 +553,9 @@ export class CompanionStore {
     this.#ready();
     return this.#db.prepare('SELECT data FROM profiles ORDER BY rowid').all().map(row => {
       const profile = JSON.parse(row.data), companionId = profile.id;
-      const last = this.#db.prepare("SELECT data FROM messages WHERE companion_id=? AND json_extract(data,'$.role') IN ('user','assistant') ORDER BY seq DESC LIMIT 1").get(companionId);
-      const unread = this.#db.prepare("SELECT COUNT(*) count FROM messages WHERE companion_id=? AND seq>(SELECT seq FROM read_positions WHERE companion_id=?) AND json_extract(data,'$.role')='assistant'").get(companionId, companionId);
-      const conversation = this.#conversation(companionId), lastMessage = last ? companionVisibleMessage(JSON.parse(last.data)) : null;
+      const last = this.#db.prepare(`SELECT data FROM messages WHERE companion_id=? AND ${CHAT_MESSAGE_SQL} ORDER BY seq DESC LIMIT 1`).get(companionId);
+      const unread = this.#db.prepare(`SELECT COUNT(*) count FROM messages WHERE companion_id=? AND seq>(SELECT seq FROM read_positions WHERE companion_id=?) AND ${UNREAD_MESSAGE_SQL}`).get(companionId, companionId);
+      const conversation = this.#conversation(companionId), lastMessage = last ? this.#chatMessage(companionId, JSON.parse(last.data)) : null;
       return { ...profile, lastMessage, lastActivityAt: lastMessage?.createdAt ?? null, ...conversation, unreadCount: unread.count };
     });
   }
@@ -576,7 +579,7 @@ export class CompanionStore {
       }
       this.#db.prepare('INSERT INTO conversation_state VALUES(?,?,?) ON CONFLICT(companion_id) DO UPDATE SET pinned=excluded.pinned,hidden=excluded.hidden')
         .run(companionId, Number(next.pinned), Number(next.hidden));
-      const unread = this.#db.prepare("SELECT COUNT(*) count FROM messages WHERE companion_id=? AND seq>(SELECT seq FROM read_positions WHERE companion_id=?) AND json_extract(data,'$.role')='assistant'").get(companionId, companionId);
+      const unread = this.#db.prepare(`SELECT COUNT(*) count FROM messages WHERE companion_id=? AND seq>(SELECT seq FROM read_positions WHERE companion_id=?) AND ${UNREAD_MESSAGE_SQL}`).get(companionId, companionId);
       return { ...next, unreadCount: unread.count };
     });
   }
@@ -743,6 +746,18 @@ export class CompanionStore {
     return row ? JSON.parse(row.data) : null;
   }
   async getMessage(companionId, messageId) { return companionVisibleMessage(this.#message(companionId, messageId)); }
+  #chatMessage(companionId, value) {
+    const message = companionVisibleMessage(value);
+    if (!message.replyTo) return message;
+    const source = this.#message(companionId, message.replyTo);
+    if (!source || isChatMessage(source)) return message;
+    const { replyTo, quoteReply, replyPreview, ...visible } = message;
+    return visible;
+  }
+  async getVisibleMessage(companionId, messageId) {
+    const message = this.#message(companionId, messageId);
+    return isChatMessage(message) ? this.#chatMessage(companionId, message) : null;
+  }
   async replyPreviews(companionId, messageIds) {
     this.#profile(companionId);
     if (!Array.isArray(messageIds) || messageIds.length > 200) fail('COMPANION_INVALID_INPUT');
@@ -804,10 +819,16 @@ export class CompanionStore {
       return {completedIds};
     });
   }
-  async listMessages(companionId, { before, after, limit = 50 } = {}) {
+  async listMessages(companionId, options = {}) { return this.#listMessages(companionId, options); }
+  async listVisibleMessages(companionId, options = {}) { return this.#listMessages(companionId, options, true); }
+  #listMessages(companionId, { before, after, limit = 50 } = {}, visible = false) {
     this.#profile(companionId);
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) fail('COMPANION_INVALID_INPUT');
     if (before != null && after != null) fail('COMPANION_INVALID_INPUT');
+    // Filter before applying the page limit so internal work never creates empty
+    // chat pages or consumes a visible message's place in history.
+    const filter = visible ? ` AND ${CHAT_MESSAGE_SQL}` : '';
+    const project = row => visible ? this.#chatMessage(companionId, JSON.parse(row.data)) : companionVisibleMessage(JSON.parse(row.data));
     if (after !== undefined && after !== null) {
       id(after);
       let sequence;
@@ -818,9 +839,9 @@ export class CompanionStore {
         sequence = row.seq;
       }
       if (!Number.isSafeInteger(sequence) || sequence < 0) fail('COMPANION_INVALID_INPUT');
-      const rows = this.#db.prepare('SELECT seq,data FROM messages WHERE companion_id=? AND seq>? ORDER BY seq LIMIT ?').all(companionId, sequence, limit + 1);
+      const rows = this.#db.prepare(`SELECT seq,data FROM messages WHERE companion_id=? AND seq>?${filter} ORDER BY seq LIMIT ?`).all(companionId, sequence, limit + 1);
       const selected = rows.slice(0, limit);
-      return { messages: selected.map(row => companionVisibleMessage(JSON.parse(row.data))), hasMore: rows.length > limit,
+      return { messages: selected.map(project), hasMore: rows.length > limit,
         nextBefore: null, nextAfter: `seq:${selected.at(-1)?.seq ?? sequence}` };
     }
     let sequence = Number.MAX_SAFE_INTEGER;
@@ -835,9 +856,9 @@ export class CompanionStore {
         sequence = row.seq;
       }
     }
-    const rows = this.#db.prepare('SELECT seq,data FROM messages WHERE companion_id=? AND seq<? ORDER BY seq DESC LIMIT ?').all(companionId, sequence, limit + 1);
+    const rows = this.#db.prepare(`SELECT seq,data FROM messages WHERE companion_id=? AND seq<?${filter} ORDER BY seq DESC LIMIT ?`).all(companionId, sequence, limit + 1);
     const hasMore = rows.length > limit;
-    const messages = rows.slice(0, limit).map(row => companionVisibleMessage(JSON.parse(row.data))).reverse();
+    const messages = rows.slice(0, limit).map(project).reverse();
     return { messages, hasMore, nextBefore: hasMore ? `seq:${rows[Math.min(limit, rows.length) - 1].seq}` : null,
       nextAfter: `seq:${rows[0]?.seq ?? 0}` };
   }
@@ -865,7 +886,7 @@ export class CompanionStore {
     }
     this.#transaction(() => {
       this.#db.prepare('INSERT INTO messages(companion_id,message_id,client_id,fingerprint,data) VALUES(?,?,?,?,?)').run(companionId, messageId, value.clientId ?? null, fingerprint, JSON.stringify(value));
-      if (value.role === 'user' || value.role === 'assistant')
+      if (isChatMessage(value))
         this.#db.prepare('UPDATE conversation_state SET hidden=0 WHERE companion_id=?').run(companionId);
       // The message and its notification identity commit together, including
       // when a process stops before the publisher can observe the append.
@@ -971,7 +992,7 @@ export class CompanionStore {
   }
   #notificationReadState(companionId) {
     const throughSequence=this.#db.prepare('SELECT seq FROM read_positions WHERE companion_id=?').get(companionId)?.seq??0;
-    const unreadCount=this.#db.prepare("SELECT COUNT(*) count FROM messages WHERE companion_id=? AND seq>? AND json_extract(data,'$.role')='assistant'").get(companionId,throughSequence).count;
+    const unreadCount=this.#db.prepare(`SELECT COUNT(*) count FROM messages WHERE companion_id=? AND seq>? AND ${UNREAD_MESSAGE_SQL}`).get(companionId,throughSequence).count;
     return {throughSequence,unreadCount};
   }
   async notificationReadState(companionId) {

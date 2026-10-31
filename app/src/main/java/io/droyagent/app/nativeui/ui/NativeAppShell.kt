@@ -219,6 +219,13 @@ fun NativeAppShell(
         }
     }
     fun openCompanion(id: String) { companionModel.selectCompanion(id); open("chat/${Uri.encode(id)}") }
+    fun revealCompanion(id: String): Boolean {
+        if (companions.companions.none { it.id == id }) { companionModel.refresh(); return false }
+        if (route == "chat/{id}" && entry?.arguments?.getString("id") == id) {
+            if (companions.selectedCompanionId != id) companionModel.selectCompanion(id)
+        } else openCompanion(id)
+        return true
+    }
     LaunchedEffect(companionDeletion.phase(), companionDeletion.companionId(), entry) {
         // A recovered completion can arrive before NavHost restores its first destination.
         if (entry == null) return@LaunchedEffect
@@ -403,7 +410,9 @@ fun NativeAppShell(
         when (val target = external.resolved ?: return@LaunchedEffect) {
             is NativeExternalResolvedTarget.EngineSession -> {
                 val row = target.session
-                if (row.owner == NativeExternalSessionOwner.SUBAGENT) {
+                if (row.owner == NativeExternalSessionOwner.COMPANION) {
+                    if (!revealCompanion(row.companionId!!)) return@LaunchedEffect
+                } else if (row.owner == NativeExternalSessionOwner.SUBAGENT) {
                     transcriptModel.open(row.parentSessionId!!, row.id, null)
                     open("transcript/${Uri.encode(row.parentSessionId)}/${Uri.encode(row.id)}")
                 } else {
@@ -413,14 +422,10 @@ fun NativeAppShell(
                 }
             }
             is NativeExternalResolvedTarget.CompanionTask -> {
-                val row = target.session
-                workModel.selectSession(NativeSession(row.id, work.sessions.firstOrNull { it.id == row.id }?.title.orEmpty(),
-                    false, row.workspaceId, true, row.archived))
-                open("work-session/${Uri.encode(row.id)}")
+                if (!revealCompanion(target.session.companionId!!)) return@LaunchedEffect
             }
             is NativeExternalResolvedTarget.CompanionChat -> {
-                if (companions.companions.none { it.id == target.companionId }) { companionModel.refresh(); return@LaunchedEffect }
-                openCompanion(target.companionId)
+                if (!revealCompanion(target.companionId)) return@LaunchedEffect
             }
             is NativeExternalResolvedTarget.BrowserTab -> { toolsModel.selectBrowser(target.browserSessionId); toolsModel.open(NativeToolsPage.BROWSER); open("tools") }
             NativeExternalResolvedTarget.NotificationManagement -> open("product/notifications")
@@ -451,11 +456,15 @@ fun NativeAppShell(
         val target = external.resolved ?: return@LaunchedEffect
         if (external.phase != NativeExternalNavigationPhase.READY || !pageResumed) return@LaunchedEffect
         val ready = when (target) {
-            is NativeExternalResolvedTarget.EngineSession -> if (target.session.owner == NativeExternalSessionOwner.SUBAGENT)
+            is NativeExternalResolvedTarget.EngineSession -> if (target.session.owner == NativeExternalSessionOwner.COMPANION)
+                route == "chat/{id}" && entry?.arguments?.getString("id") == target.session.companionId
+                    && companions.selectedCompanionId == target.session.companionId && !companions.loading
+                else if (target.session.owner == NativeExternalSessionOwner.SUBAGENT)
                 route == "transcript/{parent}/{child}" && transcript.address?.parentSessionId == target.session.parentSessionId
                     && transcript.address?.childSessionId == target.session.id && transcript.baselineReady && transcript.live
                 else route == "work-session/{id}" && entry?.arguments?.getString("id") == target.session.id && work.sessionBaselineId == target.session.id
-            is NativeExternalResolvedTarget.CompanionTask -> route == "work-session/{id}" && entry?.arguments?.getString("id") == target.session.id && work.sessionBaselineId == target.session.id
+            is NativeExternalResolvedTarget.CompanionTask -> route == "chat/{id}" && entry?.arguments?.getString("id") == target.session.companionId
+                && companions.selectedCompanionId == target.session.companionId && !companions.loading
             is NativeExternalResolvedTarget.CompanionChat -> route == "chat/{id}" && entry?.arguments?.getString("id") == target.companionId
                 && companions.selectedCompanionId == target.companionId && companions.selectedCompanion != null && !companions.loading && companions.error == null
             is NativeExternalResolvedTarget.BrowserTab -> route == "tools" && tools.page == NativeToolsPage.BROWSER && tools.browser?.id == target.browserSessionId && tools.browser?.open == true
@@ -864,11 +873,7 @@ fun NativeAppShell(
                         pendingVoiceKey = voiceInput.operationId?.takeIf { operation ->
                             voiceInput.target?.companionId == id && voiceInput.showPendingBubble && companions.messages.none { it.clientId == operation }
                         }, pendingVoiceBubble = pendingVoiceBubble,
-                        onRetryVoiceTranscript = companionModel::retryVoiceTranscript,
-                        onOpenTask = { task ->
-                            val taskId = task.id; val sessionId = task.sessionId
-                            if (taskId != null && sessionId != null) externalNavigation.accept(NativeExternalNavigationTarget.CompanionTask(id, taskId, sessionId))
-                        })
+                        onRetryVoiceTranscript = companionModel::retryVoiceTranscript)
                 }
             }
             composable("profile/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { current ->
@@ -884,7 +889,10 @@ fun NativeAppShell(
             composable("work-session/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { current ->
                 val id = current.arguments!!.getString("id")!!
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-                    LaunchedEffect(id) { if (work.selectedSessionId != id) { workModel.selectSession(id); workModel.refresh() } }
+                    LaunchedEffect(id, work.managedSessionIds, work.workspaceResolved) {
+                        if (id in work.managedSessionIds) externalNavigation.accept(NativeExternalNavigationTarget.EngineSession(id))
+                        else if (work.workspaceResolved && work.selectedSessionId != id) { workModel.selectSession(id); workModel.refresh() }
+                    }
                     if (work.selectedSessionId == id) WorkbenchScreen(work, workModel, onConfigureModels = { open("settings-models") }, onSchedules = { open("schedules") }, onBack = ::back,
                         onChooseAttachments = onChooseWorkbenchAttachments,
                         onStandardVoice = { open("standard-voice") },

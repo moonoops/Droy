@@ -198,12 +198,10 @@ export function createNativeNavigationService(ctx) {
   }
   const result = (verified, request) => {
     const { session, profile, binding } = verified;
-    if (binding?.kind === 'work') return { kind: 'companion-task', session,
+    // Old task links remain useful without selecting internal work in the user's Tasks state.
+    if (binding) return { kind: 'companion-chat', companionId: binding.companionId, chatSessionId: profile.chatSessionId,
+      sourceSessionId: session.id, ...(binding.kind === 'work' ? { sourceTaskId: binding.taskId } : {}),
       ...(request.petRequestId === undefined ? {} : { petRequestId: request.petRequestId }) };
-    // An archived or superseded chat must keep its exact read-only Session.
-    // A pet correlator also retains that Session instead of becoming a decision ID.
-    if (binding?.kind === 'chat' && profile.chatSessionId === session.id && !session.archived && request.petRequestId === undefined)
-      return { kind: 'companion-chat', companionId: binding.companionId, chatSessionId: session.id };
     return { kind: 'engine-session', session, ...(request.petRequestId === undefined ? {} : { petRequestId: request.petRequestId }) };
   };
   return Object.freeze({

@@ -101,6 +101,8 @@ After setup, try:
 
 Background running uses one silent status notification with current task and stop controls. Companion messages appear separately by conversation, with unread history and a mark-as-read action. During quiet hours, received messages remain silently in the notification shade; proactive contact still follows the companion's quiet-hours setting. Enable message notifications and Android notification permission in settings.
 
+Tasks shows your own tasks and spaces. Each chat companion keeps its background work in its own space; that work appears only through normal chat replies and does not trigger the pet, change your task selection, or return to the app on completion. **Stop processing** in a companion chat stops that companion's current chat and unfinished background work while other companions and your tasks continue.
+
 Notification organization applies only to apps you select. By default it keeps their existing notification settings, removes advertising, and reminds once after an important notification remains uncleared for 5 or 10 minutes. Optional silent takeover requires explicit confirmation and Root access. If classification fails, Droy keeps the original notification and restores settings it owns; settings show failures and any restoration still required. Android force-stop or loss of Root can prevent immediate restoration.
 
 ### A companion on your screen

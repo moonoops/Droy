@@ -3,6 +3,7 @@ import { scopeTarget } from '@deepseek-ai/dsh-scope';
 import { requireMobileSession } from './auth.mjs';
 import { petText } from './pet-text.mjs';
 import { resolveMobileLocale } from './locale.mjs';
+import { isUserSession } from './task-ownership.mjs';
 
 const text = (locale, zh, en) => locale === 'zh' ? zh : en;
 
@@ -91,7 +92,8 @@ export function installPetInteractions(ctx, progress) {
   }
 
   async function present(kind, request, next) {
-    if (disposed || relayed.has(request) || !request.agent || request.signal?.aborted) return next();
+    if (disposed || relayed.has(request) || !request.agent || request.signal?.aborted
+      || !isUserSession(ctx, request.agent.id)) return next();
     const agent = request.agent;
     const taskId = String(agent.id), requestId = randomUUID();
     const locale = resolveMobileLocale(ctx);
@@ -147,6 +149,8 @@ export function installPetInteractions(ctx, progress) {
 
   function act(data) {
     const locale = resolveMobileLocale(ctx);
+    if (!isUserSession(ctx, data.taskId)) return { status: 409, code: 'COMPANION_SESSION_MANAGED',
+      message: text(locale, '请在伙伴对话中停止处理', 'Stop this work from its companion conversation.') };
     const control = ctx.get('droyTaskControl');
     if (['pause', 'resume', 'stop'].includes(data.action)) {
       if (typeof control?.command !== 'function') return { status: 503, code: 'TASK_CONTROL_UNAVAILABLE',

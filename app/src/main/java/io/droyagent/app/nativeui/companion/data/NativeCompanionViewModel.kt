@@ -238,7 +238,7 @@ class NativeCompanionViewModel(application: Application) : AndroidViewModel(appl
     suspend fun submitExternalShare(companionId: String, clientId: String, content: NativeCompanionDraft): NativeCompanionMessage = withContext(Dispatchers.Main.immediate) {
         require(java.util.UUID.fromString(clientId).toString() == clientId && content.canSend)
         if (sendJobs[companionId]?.isActive == true || companionId in invalidPending) throw NativeApiException("pending_send_conflict")
-        if (companionId in stops || statuses[companionId]?.chatExecution?.let { it.cancelRequested && !it.quiescent } == true)
+        if (companionId in stops || statuses[companionId]?.execution?.let { it.cancelRequested && !it.quiescent } == true)
             throw NativeApiException("companion_stop_pending")
         if (_state.value.companions.none { it.id == companionId }) throw NativeApiException("COMPANION_NOT_FOUND")
         pending(companionId)?.takeIf { it.clientId != clientId }?.let(::archiveFailed)
@@ -646,11 +646,11 @@ class NativeCompanionViewModel(application: Application) : AndroidViewModel(appl
             else record.copy(uncertain = record.uncertain || !sending).optimistic()
         }
         val status = id?.let(statuses::get) ?: _state.value.companions.firstOrNull { it.id == id }?.status ?: NativeCompanionStatus()
-        val execution = status.chatExecution
+        val execution = status.execution
         if (id != null && execution?.quiescent == true && execution.cancelRequested && stops[id] == true) stops.remove(id)
         val localStop = id?.let(stops::get)
         val stopPending = companionStopPending(localStop, execution)
-        _state.update { it.copy(messages = if (optimistic == null) rows else (rows.filterNot { it.id == optimistic.id } + optimistic).sortedBy { it.createdAt },
+        _state.update { it.copy(messages = visibleCompanionMessages(if (optimistic == null) rows else (rows.filterNot { it.id == optimistic.id } + optimistic).sortedBy { it.createdAt }),
             draft = id?.let(::draft) ?: NativeCompanionDraft(), status = status, hasMore = id?.let { histories[it]?.hasMore } == true,
             sending = sending, stopRequested = stopPending,
             stopAcknowledged = localStop == true || execution?.cancelRequested == true,
@@ -662,11 +662,12 @@ class NativeCompanionViewModel(application: Application) : AndroidViewModel(appl
     private fun history(id: String) = histories.getOrPut(id, ::NativeCompanionHistory)
     private fun draft(id: String): NativeCompanionDraft = drafts.getOrPut(id) {
         val raw = preferences.getString("draft:$id", null)
-        try { raw?.let { NativeCompanionJson.draft(JSONObject(it)) } ?: NativeCompanionDraft() }
+        try { editableCompanionDraft(raw?.let { NativeCompanionJson.draft(JSONObject(it)) } ?: NativeCompanionDraft()) }
         catch (_: org.json.JSONException) { restoreError = "storage_error"; NativeCompanionDraft() }
         catch (_: IllegalArgumentException) { restoreError = "storage_error"; NativeCompanionDraft() }
     }
-    private fun setDraft(id: String, value: NativeCompanionDraft) {
+    private fun setDraft(id: String, draft: NativeCompanionDraft) {
+        val value = editableCompanionDraft(draft)
         drafts[id] = value
         preferences.edit().putString("draft:$id", NativeCompanionJson.draft(value).toString()).apply()
         _state.update { it.copy(draft = if (it.selectedCompanionId == id) value else it.draft, draftsByCompanion = drafts.toMap()) }

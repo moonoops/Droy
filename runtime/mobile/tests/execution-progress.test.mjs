@@ -395,3 +395,48 @@ test('only an actual model retry marks an error and pending input keeps priority
     progress.dispose();
   }
 });
+
+test('companion-owned work never publishes task progress through any event or recovery entry', async () => {
+  const sent = [], timers = [];
+  const managed = new Set(['companion-chat', 'companion-work']);
+  const progress = createExecutionProgress(async row => sent.push(row), () => assert.fail(),
+    { setTimeout(callback) { timers.push(callback); return timers.length; }, clearTimeout() {} }, () => 'en', id => !managed.has(id));
+  for (const id of managed) {
+    const session = { id };
+    progress.bind(id, { taskId: id, phase: 'paused', active: true, controlRevision: 1 });
+    progress.control(id, { taskId: id, phase: 'paused', active: true, controlRevision: 1 });
+    progress.status(session, 'running');
+    for (const [type, data] of [
+      ['turn/start', {}], ['step/start', {}], ['llm/retry', {}],
+      ['tool/call', { name: 'companion_reply' }], ['tool/result', { message: { isError: true } }],
+      ['turn/end', { reason: { kind: 'completed' } }],
+    ]) progress.sessionEvent(session, { type, data });
+    progress.publicSummary(id, 'Fictional internal work.', 'thinking');
+    progress.waiting(id, { requestId: 'private-question', message: 'Private question', options: [] });
+    progress.toolFailure(id, 'private-tool', new Error('private'));
+    progress.status(session, 'idle'); progress.removed(session);
+  }
+  await settle();
+  assert.deepEqual(sent, []);
+  assert.deepEqual(timers, []);
+  progress.status({ id: 'user-task' }, 'running'); await settle();
+  assert.equal(sent.length, 1); assert.equal(sent[0].taskId, 'user-task');
+  progress.dispose();
+});
+
+test('late ownership resolution clears queued progress and slow-response callbacks', async () => {
+  const sent = [], callbacks = []; let publicTask = true, release;
+  const progress = createExecutionProgress(row => { sent.push(row); return new Promise(resolve => { release = resolve; }); },
+    () => assert.fail(), { setTimeout(callback) { callbacks.push(callback); return callbacks.length; }, clearTimeout() {} },
+    () => 'en', () => publicTask);
+  const session = { id: 'resolved-companion' };
+  progress.status(session, 'running');
+  progress.sessionEvent(session, { type: 'step/start', data: {} });
+  publicTask = false;
+  callbacks[0]();
+  release(); await settle();
+  assert.equal(sent.length, 1, 'Already sent progress cannot be recalled; no queued stage or timer may follow');
+  progress.control(session.id, { taskId: session.id, phase: 'completed', active: false, controlRevision: 2 });
+  await settle(); assert.equal(sent.length, 1);
+  progress.dispose();
+});

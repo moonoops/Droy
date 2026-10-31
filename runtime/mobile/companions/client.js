@@ -1,6 +1,7 @@
 const EMPTY_COMPANION_MESSAGES = Object.freeze([]);
 const EMPTY_COMPANION_DRAFT = Object.freeze({ text: '', attachments: EMPTY_COMPANION_MESSAGES, replyTo: null, retainedRecording: null });
 const DEFAULT_USER_PROFILE = Object.freeze({ name: '', avatarUrl: '/droy/companions/assets/user-default.png' });
+const isCompanionChatMessage = message => ['user', 'assistant'].includes(message.role) && message.type !== 'task';
 
 function companionConversations(companions) {
   const activity = item => {
@@ -29,12 +30,15 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
     catch { target.console?.warn('COMPANION_RETAINED_VOICE_STORAGE_UNAVAILABLE'); }
   }
   let snapshot = { companions: [], defaultWorkspaceId: null, userProfile: DEFAULT_USER_PROFILE, settings: { defaultMode: 'messages' }, stickers: [], models: [],
-    screen: 'list', direction: 'forward', companionId: null, task: null, messages: {}, statuses: {}, hasMore: {}, drafts: restoreRetainedVoices(),
-    loading: false, error: null, revision: 0 };
+    screen: 'list', direction: 'forward', companionId: null, messages: {}, statuses: {}, hasMore: {}, drafts: restoreRetainedVoices(),
+    loading: false, error: null, stopping: {}, revision: 0 };
   let disposed = false, rootRequest = 0, rootPending, events;
   let viewSnapshot = snapshot;
   const eventReads = new Map();
   const messageRequests = new Map(), statusEpochs = new Map(), scrollPositions = new Map(), readThrough = new Map(), historyEpoch = new Map(), retryRequests = new Map();
+  const internalMessageIds = new Map();
+  const cancelRequests = new Map();
+  const sendAdmissions = new Map();
   let listScroll = 0;
   const api = suppliedApi || (async (path, options = {}) => {
     const response = await target.fetch('/droy/companions' + path, {
@@ -67,20 +71,39 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
   function profile(id) { return snapshot.companions.find(item => item.id === id); }
   function draft(id) { return snapshot.drafts[id] || EMPTY_COMPANION_DRAFT; }
   function setDraft(id, patch) {
-    publish({ drafts: { ...snapshot.drafts, [id]: { ...draft(id), ...patch } } });
+    const source = patch.replyTo, reference = typeof source === 'string' ? source : source?.id;
+    const invalid = source?.type === 'task' || source?.role === 'system' || internalMessageIds.get(id)?.has(reference);
+    publish({ drafts: { ...snapshot.drafts, [id]: { ...draft(id), ...patch, ...(invalid ? { replyTo: null } : {}) } },
+      ...(invalid ? { error: 'COMPANION_REFERENCE_UNAVAILABLE' } : {}) });
     if (Object.hasOwn(patch, 'retainedRecording')) persistRetainedVoices();
   }
   function replaceMessages(id, rows, { prepend = false } = {}) {
     const previous = snapshot.messages[id] || [];
+    const internal = internalMessageIds.get(id) || new Set();
+    for (const row of [...previous, ...rows]) if (!isCompanionChatMessage(row)) internal.add(row.id);
+    internalMessageIds.set(id, internal);
+    const project = row => {
+      const reference = typeof row.replyTo === 'string' ? row.replyTo : row.replyTo?.id;
+      if (!internal.has(reference)) return row;
+      const { replyTo, quoteReply, replyPreview, ...message } = row;
+      return message;
+    };
+    rows = rows.filter(isCompanionChatMessage).map(project);
     const incomingIds = new Set(rows.flatMap(row => [row.id, row.clientId].filter(Boolean)));
     const firstTime = rows.length ? Date.parse(rows[0].createdAt) : 0;
-    const retained = previous.filter(row => prepend || rows.length > 0 && Date.parse(row.createdAt) < firstTime
-      || (row.status === 'pending' || row.status === 'failed') && !incomingIds.has(row.id) && !incomingIds.has(row.clientId));
+    const retained = previous.filter(row => isCompanionChatMessage(row) && (prepend || rows.length > 0 && Date.parse(row.createdAt) < firstTime
+      || (row.status === 'pending' || row.status === 'failed') && !incomingIds.has(row.id) && !incomingIds.has(row.clientId))).map(project);
     const previousById = new Map(previous.map(row => [row.id, row]));
     const merged = new Map([...rows.map(row => stable(previousById.get(row.id), row)), ...retained].map(row => [row.id, row]));
     const next = [...merged.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || (a.sequence || 0) - (b.sequence || 0));
     if (!Object.hasOwn(snapshot.messages, id) || previous.length !== next.length || next.some((row, index) => row !== previous[index]))
       publish({ messages: { ...snapshot.messages, [id]: next } });
+    const source = draft(id).replyTo, reference = typeof source === 'string' ? source : source?.id;
+    if (source && (source.type === 'task' || source.role === 'system' || internal.has(reference))) {
+      setDraft(id, { replyTo: null });
+      return true;
+    }
+    return false;
   }
   function refreshRoot() {
     const generation = ++rootRequest;
@@ -111,15 +134,18 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
     const result = await api('/' + encodeURIComponent(id) + '/messages' + (before ? '?before=' + encodeURIComponent(before) : ''));
     if (disposed || generation !== messageRequests.get(requestKey)) return;
     const alreadyLoaded = snapshot.hasMore[id] !== undefined;
-    replaceMessages(id, result.messages || [], { prepend: Boolean(before) });
+    const invalidReference = replaceMessages(id, result.messages || [], { prepend: Boolean(before) });
     // A completion/error event can arrive while this older history read is in flight.
     const keepStatus = before && snapshot.statuses[id] || statusEpoch !== (statusEpochs.get(id) || 0);
     const status = stable(snapshot.statuses[id], keepStatus ? snapshot.statuses[id] : result.status || { phase: 'idle' });
     const hasMore = before || !alreadyLoaded ? result.hasMore === true : snapshot.hasMore[id];
-    const last = result.messages?.at(-1);
+    const last = result.messages?.filter(isCompanionChatMessage).at(-1);
     const companions = last && !before ? stableRows(snapshot.companions, snapshot.companions.map(item => item.id === id ? { ...item, lastMessage: last } : item)) : snapshot.companions;
-    if (status !== snapshot.statuses[id] || hasMore !== snapshot.hasMore[id] || companions !== snapshot.companions || snapshot.error)
-      publish({ statuses: { ...snapshot.statuses, [id]: status }, hasMore: { ...snapshot.hasMore, [id]: hasMore }, companions, error: null });
+    const stopped = cancelRequests.get(id) === true && status.execution?.cancelRequested === true && status.execution.quiescent;
+    if (stopped) cancelRequests.delete(id);
+    if (status !== snapshot.statuses[id] || hasMore !== snapshot.hasMore[id] || companions !== snapshot.companions || snapshot.error || invalidReference || stopped)
+      publish({ statuses: { ...snapshot.statuses, [id]: status }, hasMore: { ...snapshot.hasMore, [id]: hasMore }, companions,
+        ...(stopped ? { stopping: { ...snapshot.stopping, [id]: false } } : {}), error: invalidReference ? 'COMPANION_REFERENCE_UNAVAILABLE' : null });
     return result;
   }
   function markRead(id, messageId) {
@@ -165,7 +191,10 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
           const id = data.companionId;
           if (data.kind === 'status' && id && data.status) {
             statusEpochs.set(id, (statusEpochs.get(id) || 0) + 1);
-            if (JSON.stringify(snapshot.statuses[id]) !== JSON.stringify(data.status)) publish({ statuses: { ...snapshot.statuses, [id]: data.status } });
+            const stopped = cancelRequests.get(id) === true && data.status.execution?.cancelRequested === true && data.status.execution.quiescent;
+            if (stopped) cancelRequests.delete(id);
+            if (JSON.stringify(snapshot.statuses[id]) !== JSON.stringify(data.status) || stopped)
+              publish({ statuses: { ...snapshot.statuses, [id]: data.status }, ...(stopped ? { stopping: { ...snapshot.stopping, [id]: false } } : {}) });
             return;
           }
           if (data.kind === 'read') { scheduleEventRead('root', refreshRoot); return; }
@@ -181,13 +210,13 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
   }
   function open(id) {
     if (id && !profile(id)) return;
-    publish({ screen: id ? 'chat' : 'list', direction: id ? 'forward' : 'back', companionId: id || null, task: null, error: null });
+    publish({ screen: id ? 'chat' : 'list', direction: id ? 'forward' : 'back', companionId: id || null, error: null });
     if (id) {
       refreshMessages(id).catch(report);
     }
   }
   function back() {
-    if (snapshot.screen === 'task' || snapshot.screen === 'profile') publish({ screen: 'chat', direction: 'back', task: null, error: null });
+    if (snapshot.screen === 'profile') publish({ screen: 'chat', direction: 'back', error: null });
     else open();
   }
   function setMessage(id, message) {
@@ -197,9 +226,16 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
     publish({ messages: { ...snapshot.messages, [id]: rows } });
   }
   async function send(id, input = {}) {
+    if (snapshot.stopping[id] || snapshot.statuses[id]?.execution?.cancelRequested && !snapshot.statuses[id].execution.quiescent) {
+      const error = new Error('COMPANION_STOP_PENDING'); report(error); throw error;
+    }
     const epoch = historyEpoch.get(id);
     const current = draft(id);
     const quoted = input.replyTo ?? current.replyTo;
+    const reference = typeof quoted === 'string' ? quoted : quoted?.id;
+    if (quoted?.type === 'task' || quoted?.role === 'system' || internalMessageIds.get(id)?.has(reference)) {
+      const error = new Error('COMPANION_REFERENCE_UNAVAILABLE'); report(error); throw error;
+    }
     const clientId = input.clientId || target.crypto?.randomUUID?.() || ('message-' + Date.now() + '-' + Math.random().toString(16).slice(2));
     const payload = { text: input.text ?? current.text, attachments: input.attachments ?? current.attachments,
       ...(input.voice ? { voice: input.voice } : {}), ...(input.stickerId ? { stickerId: input.stickerId } : {}),
@@ -211,9 +247,12 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
     setMessage(id, optimistic);
     if (!input.clientId && input.text === undefined && input.attachments === undefined && !input.voice && !input.stickerId)
       setDraft(id, { ...emptyDraft(), retainedRecording: current.retainedRecording });
-    let message;
+    let message, admission;
     try {
-      const result = await api('/' + encodeURIComponent(id) + '/messages', { method: 'POST', body: payload });
+      admission = api('/' + encodeURIComponent(id) + '/messages', { method: 'POST', body: payload });
+      if (!sendAdmissions.has(id)) sendAdmissions.set(id, new Set());
+      sendAdmissions.get(id).add(admission);
+      const result = await admission;
       message = result.message || result.userMessage || (result.id ? result : null);
       if (historyEpoch.get(id) !== epoch) return message;
       if (message) setMessage(id, { ...message, clientId: message.clientId || clientId });
@@ -221,7 +260,7 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
       if (historyEpoch.get(id) !== epoch) return;
       setMessage(id, { ...optimistic, status: 'failed', error: error.message });
       report(error); throw error;
-    }
+    } finally { if (admission) { const pending = sendAdmissions.get(id); pending?.delete(admission); if (!pending?.size) sendAdmissions.delete(id); } }
     // A failed refresh cannot undo an acknowledged send or trigger a duplicate retry.
     await refreshMessages(id).catch(report);
     refreshRoot().catch(report);
@@ -250,6 +289,26 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
       .then(() => refreshMessages(id)).finally(() => retryRequests.delete(id));
     retryRequests.set(id, operation); return operation;
   }
+  async function cancel(id) {
+    if (cancelRequests.has(id)) return;
+    cancelRequests.set(id, false); publish({ stopping: { ...snapshot.stopping, [id]: true } });
+    try {
+      // A stop must follow admitted sends so an earlier delayed HTTP request
+      // cannot arrive after cancellation and silently start another batch.
+      await Promise.allSettled([...(sendAdmissions.get(id) || [])]);
+      const receipt = await api('/' + encodeURIComponent(id) + '/cancel', { method: 'POST', body: {} });
+      if (receipt.cancelRequested !== true) throw new Error('COMPANION_STOP_UNCONFIRMED');
+      cancelRequests.set(id, true);
+      const execution = snapshot.statuses[id]?.execution;
+      if (execution?.cancelRequested && execution.quiescent) {
+        cancelRequests.delete(id); publish({ stopping: { ...snapshot.stopping, [id]: false } });
+      }
+      await refreshMessages(id);
+    } catch (error) {
+      if (cancelRequests.get(id) !== true) { cancelRequests.delete(id); publish({ stopping: { ...snapshot.stopping, [id]: false } }); }
+      report(error); throw error;
+    }
+  }
   async function clearChat(id) {
     await api('/' + encodeURIComponent(id) + '/messages', { method: 'DELETE' });
     historyEpoch.set(id, (historyEpoch.get(id) || 0) + 1);
@@ -259,7 +318,7 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
     scrollPositions.delete(id); readThrough.delete(id);
     setDraft(id, emptyDraft());
     publish({ messages: { ...snapshot.messages, [id]: [] }, statuses: { ...snapshot.statuses, [id]: { phase: 'idle' } },
-      hasMore: { ...snapshot.hasMore, [id]: false }, ...(snapshot.companionId === id ? { task: null } : {}), error: null });
+      hasMore: { ...snapshot.hasMore, [id]: false }, error: null });
     await refreshRoot();
   }
   return {
@@ -269,11 +328,10 @@ function createCompanionClientState({ target = window, api: suppliedApi } = {}) 
     initialize, refresh, refreshRoot, refreshMessages, api, profile, draft, setDraft, send, updateProfile, updateSettings, removeMessage,
     retryTurn, clearChat, updateUserProfile, conversationAction, markRead,
     open, back, report, showProfile: () => publish({ screen: 'profile', direction: 'forward', error: null }),
-    showTask: task => publish({ screen: 'task', direction: 'forward', task, error: null }),
-    cancel: id => api('/' + encodeURIComponent(id) + '/cancel', { method: 'POST', body: {} }).then(() => refreshMessages(id)),
+    cancel,
     saveScroll(id, value) { scrollPositions.set(id, value); }, scrollFor: id => scrollPositions.get(id),
     saveListScroll(value) { listScroll = value; }, listScrollFor: () => listScroll,
-    dispose() { disposed = true; events?.close(); listeners.clear(); viewListeners.clear(); draftListeners.clear(); messageRequests.clear(); statusEpochs.clear(); },
+    dispose() { disposed = true; events?.close(); listeners.clear(); viewListeners.clear(); draftListeners.clear(); messageRequests.clear(); statusEpochs.clear(); internalMessageIds.clear(); cancelRequests.clear(); sendAdmissions.clear(); },
   };
 }
 
@@ -430,7 +488,8 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
   const backgroundUrl = background => background?.type === 'preset' && /^0[1-8]$/.test(background.id)
     ? presetBackgroundUrl(background.id) : background?.type === 'upload' ? background.url : undefined;
   function ErrorNotice({ error, reload }) {
-    const text = typeof error === 'string' && !/^[A-Z][A-Z0-9_:. -]*$/.test(error) ? error : t('requestFailed');
+    const text = error === 'COMPANION_REFERENCE_UNAVAILABLE' ? t('quotedUnavailable') : error === 'COMPANION_STOP_PENDING' ? t('stopping')
+      : typeof error === 'string' && !/^[A-Z][A-Z0-9_:. -]*$/.test(error) ? error : t('requestFailed');
     return error ? h('div', { className: 'droy-im-error', role: 'alert' }, h('span', null, text),
       reload ? h('button', { type: 'button', onClick: reload }, t('retry')) : null) : null;
   }
@@ -593,13 +652,6 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
         } }, t('retryRecognition')) : null) : null,
       error ? h('span', { className: 'droy-im-voice-error', role: 'status' }, t('audioUnavailable')) : null);
   }
-  function TaskCard({ task }) {
-    const status = { queued: 'taskQueued', running: 'taskRunning', completed: 'taskCompleted', failed: 'taskFailed', cancelled: 'taskCancelled', needs_input: 'taskNeedsInput', cancelling: 'taskCancelling' }[task.state || task.status || task.phase] || 'task';
-    const result = typeof task.result === 'string' ? task.result : task.result?.text || task.result?.summary || task.summary || '';
-    return h('button', { type: 'button', className: 'droy-im-task-card', onClick: () => state.showTask(task) },
-      h('span', { className: 'droy-im-task-kind' }, t('task')), h('strong', null, task.title || task.summary || t('task')),
-      h('span', { className: 'droy-im-task-status' }, t(status)), result ? h('span', { className: 'droy-im-task-result' }, result) : null);
-  }
   function Message({ message, companion, onMenu, onUserProfile, userProfile, original, sticker, animate = false, grouped = false }) {
     const hold = React.useRef(null), pointer = React.useRef(null);
     const [entering, setEntering] = React.useState(animate);
@@ -616,7 +668,6 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
       message.role !== 'user' ? h('button', { type: 'button', className: 'droy-im-companion-avatar', 'aria-label': t('profileOf', { name: companion.name }), 'data-droy-im-action': 'companion-profile',
         onPointerDown: event => event.stopPropagation(), onClick: event => { event.stopPropagation(); state.showProfile(); } }, h(Avatar, { companion, small: true })) : null,
       h('div', { className: 'droy-im-message-content' },
-        message.type === 'task' && message.task ? h('div', { className: 'droy-im-media-message' }, h(TaskCard, { task: message.task }), time) :
           message.type === 'voice' ? h('div', { className: 'droy-im-bubble' }, quoted ? h('div', { className: 'droy-im-message-quote' }, original?.text || (original === null ? t('quotedUnavailable') : t('attachment'))) : null, h(VoiceBubble, { message, companionId: companion.id }), time) :
             message.type === 'sticker' ? h('div', { className: 'droy-im-media-message is-sticker' },
               quoted ? h('div', { className: 'droy-im-message-quote' }, original?.text || (original === null ? t('quotedUnavailable') : t('attachment'))) : null,
@@ -637,10 +688,11 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
   }
   const MemoMessage = React.memo(Message);
   function MessageRows({ messages, companion, userProfile, stickers, onMenu, onUserProfile, incoming, language }) {
-    const originals = new Map(messages.map(message => [message.id, message]));
+    const visible = messages.filter(isCompanionChatMessage);
+    const originals = new Map(visible.map(message => [message.id, message]));
     const stickerMap = new Map(stickers.map(sticker => [sticker.id, sticker]));
-    return messages.map((message, index) => {
-      const previous = messages[index - 1];
+    return visible.map((message, index) => {
+      const previous = visible[index - 1];
       const newDay = !previous || new Date(message.createdAt).toDateString() !== new Date(previous.createdAt).toDateString();
       return h(React.Fragment, { key: message.id }, newDay ? h('time', { className: 'droy-im-timestamp', dateTime: message.createdAt }, dateLabel(message.createdAt, true)) : null,
         h(MemoMessage, { message, companion, userProfile, onMenu, onUserProfile, language,
@@ -649,7 +701,7 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
     });
   }
   const MemoMessageRows = React.memo(MessageRows);
-  function Composer({ companion, stickers, panel, setPanel }) {
+  function Composer({ companion, stickers, panel, setPanel, stopping = false }) {
     const draft = useDraft(companion.id), input = React.useRef(null), handle = React.useRef(null), gesture = React.useRef(null), operation = React.useRef(0);
     const quote = draft.replyTo;
     const lastPanel = React.useRef(panel); if (panel) lastPanel.current = panel;
@@ -773,7 +825,7 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
             onFocus: () => setPanel(null), onChange: event => state.setDraft(companion.id, { text: event.target.value }),
             onKeyDown: event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent?.isComposing && !event.isComposing && (event.ctrlKey || event.metaKey)) { event.preventDefault(); state.send(companion.id).catch(() => {}); } } }),
         iconButton('smile', 'stickers', () => togglePanel('stickers'), { 'aria-expanded': panel === 'stickers', 'aria-pressed': panel === 'stickers' }),
-        canSend ? h('button', { type: 'button', className: 'droy-im-send', 'aria-label': t('send'), onClick: () => state.send(companion.id).catch(() => {}) }, h(Icon, { name: 'send', size: 20 })) :
+        canSend ? h('button', { type: 'button', className: 'droy-im-send', disabled: stopping, 'aria-label': t('send'), onClick: () => state.send(companion.id).catch(() => {}) }, h(Icon, { name: 'send', size: 20 })) :
           iconButton(panel === 'attachments' ? 'close' : 'plus', 'attachments', () => togglePanel('attachments'), { 'aria-expanded': panel === 'attachments' })),
       h('div', { className: 'droy-im-input-panel' + (panel ? ' is-open' : ''), 'aria-hidden': !panel, inert: !panel ? '' : undefined },
         panelContent === 'stickers' ? h('div', { className: 'droy-im-sticker-grid', role: 'group', 'aria-label': t('stickers') }, ...stickers.map(sticker =>
@@ -793,6 +845,8 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
     const list = React.useRef(null), nearBottom = React.useRef(true), previousId = React.useRef(null), prepend = React.useRef(null), seenMessages = React.useRef(null);
     const [panel, setPanel] = React.useState(null), [menu, setMenu] = React.useState(null), [newMessages, setNewMessages] = React.useState(false), [loadingEarlier, setLoadingEarlier] = React.useState(false), [image, setImage] = React.useState(null), [userProfileOpen, setUserProfileOpen] = React.useState(false);
     const messages = snapshot.messages[companion.id] || EMPTY_COMPANION_MESSAGES, status = snapshot.statuses[companion.id] || {};
+    const stopping = snapshot.stopping[companion.id] || status.execution?.cancelRequested && !status.execution.quiescent;
+    const active = status.execution ? !status.execution.quiescent : ['thinking', 'typing', 'working', 'waiting'].includes(status.phase);
     const incoming = React.useMemo(() => {
       const added = new Set();
       if (seenMessages.current && !prepend.current) for (const message of messages)
@@ -845,6 +899,8 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
       h('header', { className: 'droy-im-header' }, iconButton('back', 'back', handleBack),
         h('button', { type: 'button', className: 'droy-im-chat-title', 'aria-label': t('profileOf', { name: companion.name }), onClick: state.showProfile },
           h('strong', null, companion.name), h('span', { role: 'status', 'aria-live': 'polite' }, phaseText(status.phase) ? t(phaseText(status.phase)) : '\u00a0')),
+        active || stopping ? iconButton('stop', stopping ? 'stopping' : 'stopProcessing', () => state.cancel(companion.id).catch(() => {}),
+          { disabled: Boolean(stopping), 'data-droy-im-action': 'stop' }) : null,
         iconButton('more', 'profile', state.showProfile)),
       h('div', { className: 'droy-im-messages' + (backgroundUrl(companion.chatBackground) ? ' has-wallpaper' : ''), ref: list, role: 'log', 'aria-label': companion.name, 'aria-live': 'polite',
         style: backgroundUrl(companion.chatBackground) ? { backgroundImage: 'url(' + JSON.stringify(backgroundUrl(companion.chatBackground)) + ')', backgroundPosition: (companion.chatBackground.position?.x ?? 50) + '% ' + (companion.chatBackground.position?.y ?? 50) + '%' } : undefined,
@@ -858,7 +914,7 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
       newMessages ? h('button', { className: 'droy-im-new-messages', type: 'button', onClick: toBottom }, t('newMessages'), h(Icon, { name: 'down', size: 16 })) : null,
       h(ErrorNotice, { error: snapshot.error || (status.phase === 'error' ? status.error || t('partialError') : null),
         reload: () => (status.phase === 'error' ? state.retryTurn(companion.id) : state.refreshMessages(companion.id)).catch(state.report) }),
-      h(MemoComposer, { companion, stickers: snapshot.stickers, panel, setPanel, language: locale() }),
+      h(MemoComposer, { companion, stickers: snapshot.stickers, panel, setPanel, stopping: Boolean(stopping), language: locale() }),
       userProfileOpen ? h(UserProfileDialog, { profile: snapshot.userProfile, onClose: closeUserProfile, onPending: setUserProfileBusy }) : null,
       menu ? h('div', { className: 'droy-im-modal-shade', onClick: () => setMenu(null) }, h('div', { className: 'droy-im-message-menu', role: 'dialog', 'aria-modal': true, 'aria-label': t('menu'), onClick: event => event.stopPropagation() },
         menu.text ? h('p', { className: 'droy-im-menu-preview' }, menu.text) : null,
@@ -1047,26 +1103,12 @@ function createCompanionUi({ React, ctx, target = window, nativeBridge, api, med
             else await discardBackground(); setModal(null);
           }) }, t(pending ? 'loading' : 'apply')))), closeModal, modalElement, 'droy-im-background-dialog') : null);
   }
-  function TaskDetails({ task, companion, snapshot }) {
-    const ended = ['completed', 'failed', 'cancelled'].includes(task.state || task.status || task.phase);
-    const text = value => typeof value === 'string' ? value : value?.summary || value?.text || '';
-    return h('section', { className: 'droy-im-screen droy-im-task-screen', 'data-droy-im-screen': 'task' },
-      h('header', { className: 'droy-im-header' }, iconButton('back', 'back', state.back), h('strong', { className: 'droy-im-page-title' }, t('taskDetails')), h('span', { className: 'droy-im-header-spacer' })),
-      h('div', { className: 'droy-im-profile-scroll' }, h('h2', null, task.title || t('task')), h('p', { className: 'droy-im-muted' }, companion.name),
-        text(task.description) ? h('p', { className: 'droy-im-task-body' }, text(task.description)) : null,
-        text(task.result || task.summary) ? h('p', { className: 'droy-im-task-body' }, text(task.result || task.summary)) : null,
-        text(task.error) ? h('p', { className: 'droy-im-error' }, text(task.error)) : null,
-        !ended ? h('button', { type: 'button', className: 'droy-im-primary', onClick: () => state.api('/' + companion.id + '/cancel', { method: 'POST', body: { taskId: task.id } }).then(() => state.refreshMessages(companion.id)).catch(state.report) }, t('stopTask')) : null,
-        h('p', { className: 'droy-im-muted' }, t('taskDetailHint')), h(ErrorNotice, { error: snapshot.error })));
-  }
   function Panel() {
     const snapshot = useSnapshot();
     React.useEffect(() => { boot(); }, []);
     const companion = state.profile(snapshot.companionId);
-    const task = snapshot.messages[companion?.id]?.find(message => message.task?.id === snapshot.task?.id)?.task || snapshot.task;
     return h('main', { className: 'droy-im', 'data-droy-im': true, 'data-direction': snapshot.direction }, snapshot.screen === 'list' || !companion ? h(Messages, { snapshot }) :
-      snapshot.screen === 'profile' ? h(Profile, { key: companion.id, companion, snapshot }) :
-        snapshot.screen === 'task' ? h(TaskDetails, { task, companion, snapshot }) : h(Chat, { key: companion.id, companion, snapshot }));
+      snapshot.screen === 'profile' ? h(Profile, { key: companion.id, companion, snapshot }) : h(Chat, { key: companion.id, companion, snapshot }));
   }
   function DefaultModeSetting() {
     const snapshot = useSnapshot();

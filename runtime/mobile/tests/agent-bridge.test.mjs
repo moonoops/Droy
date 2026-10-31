@@ -98,6 +98,7 @@ async function harness(script,implementation,options={}){
   await ctx.plugin(UserQuestions);await ctx.plugin(UserApproval,{policy:options.approvalPolicy??'ask'});
   await ctx.plugin(pluginPolicy);
   if (options.privacy) ctx.provide('droyPrivacy', options.privacy);
+  ctx.provide('droyCompanions', { ownsSession: () => false, identityForAgent: async () => null });
   await ctx.plugin(mobile);
   const adapter=new ScriptedMockModel(script);ctx.llm.registerAdapter(['mock-android-contract'],adapter);
   const errors=[];ctx.on('agent/error',event=>errors.push(event.error));

@@ -342,3 +342,16 @@ test('completed controlled tasks keep an inactive tombstone across storage recov
   assert.equal(f.control.get('task-a').phase, 'running');
   assert.ok(f.control.revision('task-a') > revision);
 });
+
+test('ownership becoming ready republishes durable user presentation without restarting recovery', async t => {
+  const f = await fixture(t);
+  f.pause(); await f.control.settled('task-a');
+  const revision = f.control.revision('task-a'), calls = f.calls.length;
+  f.changes.length = 0;
+  f.control.refreshPresentation();
+  assert.equal(f.changes.length, 1);
+  assert.equal(f.changes[0].phase, 'paused');
+  assert.equal(f.changes[0].controlRevision, revision);
+  assert.equal(f.control.revision('task-a'), revision);
+  assert.equal(f.calls.length, calls);
+});

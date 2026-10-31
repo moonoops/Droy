@@ -18,6 +18,8 @@ const loadSdk = name => import(pathToFileURL(installed.resolve(name)).href);
 const privateFailure = code => Object.assign(new Error('fictional-private-path-and-provider-key'), { code });
 const code = expected => error => error instanceof NativeNavigationError && error.code === 'NATIVE_NAVIGATION_' + expected;
 const engine = (sessionId = 'ordinary', extra = {}) => ({ kind: 'engine-session', sessionId, ...extra });
+const companion = (sourceSessionId = 'chat', extra = {}) => ({ kind: 'companion-chat', companionId: 'companion-one',
+  chatSessionId: 'chat', sourceSessionId, ...extra });
 
 function fixture() {
   const calls = [], headers = new Map(), summaries = new Map(), owners = new Map(), messages = new Map(), profiles = new Map();
@@ -132,7 +134,7 @@ test('companion chat can remain truly empty, and resolving an existing chat neve
     { kind: 'companion-chat', companionId: 'empty', chatSessionId: null });
   assert.deepEqual(f.calls, [['profile', 'empty']]); f.calls.length = 0;
   assert.deepEqual(await f.service.resolve({ kind: 'companion-chat', companionId: 'companion-one' }),
-    { kind: 'companion-chat', companionId: 'companion-one', chatSessionId: 'chat' });
+    companion());
   assert.equal(f.workspaceCloses, 1);
   await assert.rejects(f.service.resolve({ kind: 'companion-chat', companionId: 'missing' }), code('NOT_FOUND'));
 });
@@ -141,7 +143,7 @@ test('private companion chat opens without work workspace membership and retains
   const f = fixture();
   assert.ok(f.spaces.every(space => !space.sessionIds.includes('chat')));
   assert.deepEqual(await f.service.resolve(engine('chat')),
-    { kind: 'companion-chat', companionId: 'companion-one', chatSessionId: 'chat' });
+    companion());
   for (const mutate of [
     f => { f.headers.get('chat').cwd = '/fixture/companions/another/chat'; f.summaries.get('chat').cwd = f.headers.get('chat').cwd; },
     f => { f.headers.get('chat').cwd = '/fixture/companions/companion-one/work'; f.summaries.get('chat').cwd = f.headers.get('chat').cwd; },
@@ -160,9 +162,7 @@ test('actual companion tasks are resolved from ownership and the task message, i
   const f = fixture();
   const target = { kind: 'companion-task', companionId: 'companion-one', taskId: 'task-one', sessionId: 'work' };
   const resolved = await f.service.resolve(target);
-  assert.equal(resolved.kind, 'companion-task');
-  assert.deepEqual(resolved.session, { id: 'work', workspaceId: 'space-companion', owner: 'companion', readOnly: true, archived: false,
-    address: { kind: 'session', sessionId: 'work' }, companionId: 'companion-one', taskId: 'task-one' });
+  assert.deepEqual(resolved, companion('work', { sourceTaskId: 'task-one' }));
   assert.deepEqual(await f.service.resolve(engine('work')), resolved);
   for (const input of [{ ...target, companionId: 'another' }, { ...target, taskId: 'another' }, { ...target, sessionId: 'ordinary' }, { ...target, sessionId: 'chat' }])
     await assert.rejects(f.service.resolve(input), code('TARGET_MISMATCH'));
@@ -172,23 +172,24 @@ test('actual companion tasks are resolved from ownership and the task message, i
 
 test('pet request correlators stay on exact verified targets and never become native decisions', async () => {
   const f = fixture(), petRequestId = 'pet-request-one';
-  for (const sessionId of ['ordinary', 'child', 'chat', 'work']) {
+  for (const sessionId of ['ordinary', 'child']) {
     const resolved = await f.service.resolve(engine(sessionId, { petRequestId }));
     assert.equal(resolved.petRequestId, petRequestId); assert.equal(resolved.session.id, sessionId);
     assert.equal(Object.hasOwn(resolved, 'decisionId'), false);
   }
   const chat = await f.service.resolve(engine('chat', { petRequestId }));
-  assert.equal(chat.kind, 'engine-session'); assert.equal(chat.session.owner, 'companion'); assert.equal(chat.session.readOnly, true);
+  assert.deepEqual(chat, companion('chat', { petRequestId }));
+  assert.deepEqual(await f.service.resolve(engine('work', { petRequestId })), companion('work', { sourceTaskId: 'task-one', petRequestId }));
 });
 
-test('archived and superseded companion chat bindings preserve the addressed history', async () => {
+test('archived and superseded companion links return to the companion without selecting private history in Tasks', async () => {
   const f = fixture(); f.bind('old-chat', 'chat');
   f.profiles.get('companion-one').chatSessionId = 'chat';
   const old = await f.service.resolve(engine('old-chat'));
-  assert.equal(old.kind, 'engine-session'); assert.equal(old.session.id, 'old-chat'); assert.equal(old.session.readOnly, true);
+  assert.deepEqual(old, companion('old-chat'));
   f.archive('chat');
   const archived = await f.service.resolve({ kind: 'companion-chat', companionId: 'companion-one' });
-  assert.equal(archived.kind, 'engine-session'); assert.equal(archived.session.archived, true); assert.equal(archived.session.readOnly, true);
+  assert.deepEqual(archived, companion());
 });
 
 test('managed workspace membership alone cannot create an ordinary writable entry', async () => {
@@ -383,7 +384,7 @@ test('real private chat accepts a canonical base alias and rejects a symlink esc
   await f.save('private-chat-alias', { meta: { cwd: await realpath(chat) }, attach: false });
   await f.store.bindSession(profile.id, { sessionId: 'private-chat-alias', kind: 'chat', workspaceId: f.workspace.workspaceId });
   assert.deepEqual(await f.adapter.resolve({ kind: 'companion-chat', companionId: profile.id }),
-    { kind: 'companion-chat', companionId: profile.id, chatSessionId: 'private-chat-alias' });
+    { kind: 'companion-chat', companionId: profile.id, chatSessionId: 'private-chat-alias', sourceSessionId: 'private-chat-alias' });
   const outside = join(f.home, 'another-chat');
   await mkdir(outside); await rm(chat, { recursive: true }); await symlink(outside, chat, 'dir');
   await assert.rejects(f.adapter.resolve({ kind: 'companion-chat', companionId: profile.id }), code('TARGET_MISMATCH'));
@@ -400,9 +401,9 @@ test('a real live chat and its normalized JSONL header identify the same ordinar
   const detach = f.ctx.sessions.enter(live);
   try {
     assert.deepEqual(await f.adapter.resolve({ kind: 'companion-chat', companionId: profile.id }),
-      { kind: 'companion-chat', companionId: profile.id, chatSessionId: live.id });
+      { kind: 'companion-chat', companionId: profile.id, chatSessionId: live.id, sourceSessionId: live.id });
     assert.deepEqual(await f.adapter.resolve(engine(live.id)),
-      { kind: 'companion-chat', companionId: profile.id, chatSessionId: live.id });
+      { kind: 'companion-chat', companionId: profile.id, chatSessionId: live.id, sourceSessionId: live.id });
     assert.equal(f.ctx.sessions.get(live.id), live);
   } finally { detach(); }
 });
@@ -419,11 +420,11 @@ test('real SQLite companion bindings and task messages resolve without changing 
   const before = { profiles: await f.store.profiles(), messages: await f.store.listMessages(profile.id), sessions: await f.store.listSessions(profile.id) };
   const persistedBefore = await tree(join(f.home, 'sessions'));
   const chat = await f.adapter.resolve({ kind: 'companion-chat', companionId: profile.id });
-  assert.deepEqual(chat, { kind: 'companion-chat', companionId: profile.id, chatSessionId: 'companion-chat' });
+  assert.deepEqual(chat, { kind: 'companion-chat', companionId: profile.id, chatSessionId: 'companion-chat', sourceSessionId: 'companion-chat' });
   const task = await f.adapter.resolve({ kind: 'companion-task', companionId: profile.id, taskId: 'real-task', sessionId: 'companion-work' });
-  assert.equal(task.session.owner, 'companion'); assert.equal(task.session.readOnly, true);
+  assert.deepEqual(task, { ...chat, sourceSessionId: 'companion-work', sourceTaskId: 'real-task' });
   await f.ctx.workspaceController.archiveSession({ sessionId: 'companion-work' });
-  assert.equal((await f.adapter.resolve(engine('companion-work'))).session.archived, true);
+  assert.deepEqual(await f.adapter.resolve(engine('companion-work')), task);
   assert.deepEqual({ profiles: await f.store.profiles(), messages: await f.store.listMessages(profile.id), sessions: await f.store.listSessions(profile.id) }, before);
   assert.deepEqual(await tree(join(f.home, 'sessions')), persistedBefore);
   assert.deepEqual(f.ctx.sessions.list(), []);

@@ -43,12 +43,19 @@ internal object NativeWorkspaceJson {
         val array = value.getJSONArray(key); return (0 until array.length()).map { parse(array.getJSONObject(it)) }
     }
     fun catalog(value: JSONObject): NativeWorkspacesCatalog = decode {
+        val managedWorkspaceIds = if (value.has("managedWorkspaceIds")) strings(value.getJSONArray("managedWorkspaceIds")).toSet() else emptySet()
+        val managedSessionIds = if (value.has("managedSessionIds")) strings(value.getJSONArray("managedSessionIds")).toSet() else emptySet()
         val spaces = rows(value, "workspaces") { NativeWorkspaceRow(string(it, "id"), string(it, "path"), string(it, "title"), strings(it.getJSONArray("sessionIds")), bool(it, "readOnly")) }
         val sessions = rows(value, "sessions") { NativeWorkspaceSession(string(it, "id"), optional(it, "title"), bool(it, "running"), bool(it, "blank"),
             bool(it, "readOnly"), optional(it, "workspaceId"), optional(it, "parentSessionId"), optional(it, "origin"), bool(it, "needsMigration")) }
         if (spaces.map { it.id }.distinct().size != spaces.size || sessions.map { it.id }.distinct().size != sessions.size) malformed()
-        NativeWorkspacesCatalog(spaces, sessions, optional(value, "defaultWorkspaceId"), strings(value.getJSONArray("pinnedSessionIds")),
-            strings(value.getJSONArray("archivedSessionIds")), bool(value, "directoryBrowsingAvailable"))
+        NativeWorkspacesCatalog(spaces.filterNot { it.id in managedWorkspaceIds }.map { space ->
+            space.copy(sessionIds = space.sessionIds.filterNot { it in managedSessionIds })
+        }, sessions.filterNot { it.id in managedSessionIds || it.workspaceId in managedWorkspaceIds },
+            optional(value, "defaultWorkspaceId")?.takeUnless { it in managedWorkspaceIds },
+            strings(value.getJSONArray("pinnedSessionIds")).filterNot { it in managedSessionIds },
+            strings(value.getJSONArray("archivedSessionIds")).filterNot { it in managedSessionIds }, bool(value, "directoryBrowsingAvailable"),
+            managedWorkspaceIds, managedSessionIds)
     }
     private fun entry(value: JSONObject) = NativeWorkspaceDirectoryEntry(string(value, "name"), string(value, "path"), bool(value, "hidden"))
     fun directory(value: JSONObject): NativeWorkspaceDirectory = decode { NativeWorkspaceDirectory(string(value, "path"), string(value, "home"),

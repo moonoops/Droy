@@ -121,9 +121,9 @@ test('catalog preserves original bindings, inactive tasks and receipts without a
   assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
   const result = response.value.result;
   contract('catalog', [], result);
-  assert.equal(result.length, 3);
-  assert.deepEqual(result.map(row => row.id), [ended.id, record.id, managed.id]);
-  assert.equal(result[0].status, 'inactive'); assert.equal(result[2].sessionId, 'managed-session');
+  assert.equal(result.length, 2);
+  assert.deepEqual(result.map(row => row.id), [ended.id, record.id]);
+  assert.equal(result[0].status, 'inactive');
   assert.equal(result[1].lastDelivery.messageId, 'delivery-3');
   assert.deepEqual(f.calls.map(call => call.kind), ['catalog']);
 });
@@ -229,17 +229,20 @@ test('concurrent edits compare the entire observed record inside the original FI
   assert.equal(moved.value.result.code, 'schedule_conflict');
 });
 
-test('existing companion tasks stay manageable and changes cannot move their original Session binding', async t => {
+test('legacy companion schedules stay internal and ordinary management cannot edit, inspect or delete them', async t => {
   const f = await fixture(t);
-  f.ctx.droyCompanions.ownsSession = () => { assert.fail('Existing schedule management does not impose a new companion policy'); };
-  const update = await f.request('/update', { sessionId: 'managed-session', id: managed.id, expected: managed, title: 'New companion task name' });
-  assert.equal(update.value.result.updated, true); assert.equal(f.rows.get(managed.id).sessionId, 'managed-session');
-  const wrong = await f.request('/update', { sessionId: 'work-a', id: managed.id, expected: update.value.result.record, title: 'Wrong owner' });
+  const before = structuredClone(f.rows.get(managed.id));
+  for (const [path, request] of [
+    ['/update', { sessionId: 'managed-session', id: managed.id, expected: managed, title: 'New companion task name' }],
+    ['/history', { sessionId: 'managed-session', id: managed.id, limit: 1 }],
+    ['/delete', { sessionId: 'managed-session', id: managed.id }],
+  ]) {
+    const rejected = await f.request(path, request);
+    assert.equal(rejected.status, 409); assert.equal(rejected.value.error.code, 'COMPANION_SESSION_MANAGED');
+  }
+  const wrong = await f.request('/update', { sessionId: 'work-a', id: managed.id, expected: managed, title: 'Wrong owner' });
   assert.deepEqual(wrong.value.result, { id: managed.id, updated: false, code: 'schedule_not_found' });
-  const history = await f.request('/history', { sessionId: 'managed-session', id: managed.id, limit: 1 });
-  assert.equal(history.value.result.records[0].messageId, 'delivery-3');
-  const deleted = await f.request('/delete', { sessionId: 'managed-session', id: managed.id });
-  assert.deepEqual(deleted.value.result, { id: managed.id, deleted: true });
+  assert.deepEqual(f.rows.get(managed.id), before);
   assert.equal(f.calls.some(call => call.kind === 'stat'), false);
 });
 

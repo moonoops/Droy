@@ -5,6 +5,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NativeExternalNavigationJsonTest {
+    @Test fun aLegacyWorkLinkKeepsItsSourceCorrelatorsWhileOpeningTheCompanionChat() {
+        val row = JSONObject().put("kind", "companion-chat").put("companionId", "kaka")
+            .put("chatSessionId", "current-chat").put("sourceSessionId", "internal-work")
+            .put("sourceTaskId", "internal-task").put("petRequestId", "old-question")
+        val result = NativeExternalNavigationJson.resolved(row) as NativeExternalResolvedTarget.CompanionChat
+        assertEquals("current-chat", result.chatSessionId)
+        assertEquals("internal-work", result.sourceSessionId)
+        assertEquals("internal-task", result.sourceTaskId)
+        assertEquals("old-question", result.petRequestId)
+        assertEquals(NativeExternalNavigationTarget.CompanionChat("kaka"), result.surface)
+    }
+
     private fun session(owner: String = "workbench") = JSONObject().put("kind", "engine-session").put("session", JSONObject()
         .put("id", "child").put("workspaceId", JSONObject.NULL).put("owner", owner).put("readOnly", owner != "workbench")
         .put("archived", false).put("address", JSONObject().put("kind", "session").put("sessionId", "child")))

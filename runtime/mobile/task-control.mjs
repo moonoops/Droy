@@ -368,6 +368,9 @@ export function createTaskControl({ store, engine, native, isManaged = () => fal
         || live.some(member => member.status === 'running' || member.inbox?.hasPending || engine.goalSnapshot(member)?.activation === 'armed')) return;
       save(current, { finished: true });
     },
+    refreshPresentation() {
+      for (const state of states.values()) publish(state);
+    },
     recover() {
       // Process-local continuation authority never survives a process boundary.
       for (const scope of scopes.values()) if (!scope.ended && !states.has(scope.rootId))

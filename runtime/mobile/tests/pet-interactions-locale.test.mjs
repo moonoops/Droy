@@ -16,7 +16,7 @@ function fixture(options = {}) {
   const agent = { id: 'fictional-task', status: 'running' };
   const ctx = {
     get: name => name === 'droyTaskControl' ? options.control
-      : name === 'droyCompanions' ? { ownsSession: () => false }
+      : name === 'droyCompanions' ? { ownsSession: () => options.managed === true }
         : ({ describe: () => [{ ns: 'locale', value: { preference: locale } }] }),
     agents: { get: id => id === agent.id ? agent : null },
     webServer: { register(value) { route = value; } },
@@ -103,5 +103,22 @@ test('pause/resume/stop require an explicit safe revision and report accepted st
     assert.equal(stale.value.error.message, locale === 'zh' ? '任务状态已更新，请按最新状态操作' : 'The task state has changed. Use the latest controls.');
   }
   assert.equal(calls.length, 4, 'Malformed revision requests never reach product control');
+  f.dispose();
+});
+
+test('companion questions and approvals retain their original provider without creating pet progress', async () => {
+  const f = fixture({ managed: true });
+  assert.equal(await f.question({ questions: [{ id: 'private', question: 'Fictional question', options: [] }] }), null);
+  assert.equal(await f.approval({ reason: 'Fictional approval' }), null);
+  assert.equal(f.view(), undefined);
+  for (const locale of ['zh', 'en']) {
+    f.setLocale(locale);
+    for (const action of ['cancel', 'pause', 'resume', 'stop', 'answer']) {
+      const result = await f.action({ taskId: f.agent.id, action, expectedRevision: 0, requestId: 'old', optionId: 'allow' });
+      assert.equal(result.status, 409);
+      assert.equal(result.value.error.code, 'COMPANION_SESSION_MANAGED');
+      assert.equal(result.value.error.message, locale === 'zh' ? '请在伙伴对话中停止处理' : 'Stop this work from its companion conversation.');
+    }
+  }
   f.dispose();
 });

@@ -226,6 +226,27 @@ class NativeExternalNavigationTest {
         try { NativeExternalVerifiedSession("engine", null, NativeExternalSessionOwner.COMPANION, false, false, "kaka", "task"); fail("writable_companion") }
         catch (_: IllegalArgumentException) { }
     }
+    @Test fun oldCompanionTaskLinksOpenOnlyTheirVerifiedCompanionWithoutSelectingUserWork() = runBlocking {
+        for (source in listOf<NativeExternalNavigationTarget>(NativeExternalNavigationTarget.EngineSession("old-work", "old-question"),
+            NativeExternalNavigationTarget.CompanionTask("kaka", "internal-task", "old-work", "old-question"))) {
+            val resolved = NativeExternalResolvedTarget.CompanionChat("kaka", "current-chat", "old-work", "internal-task", "old-question")
+            val gateway = Gateway(); gateway.answer = { NativeExternalNavigationResolution.Ready(resolved) }
+            val store = Store(); val model = NativeExternalNavigationCoordinator(gateway, store, this)
+            model.updateConditions(ready); val request = model.accept(source); yield()
+            assertEquals(NativeExternalNavigationPhase.READY, model.state.value.phase)
+            assertTrue(model.ackOpened(request.id, NativeExternalNavigationOpened(resolved.surface, true, true)))
+        }
+        for (wrong in listOf(
+            NativeExternalResolvedTarget.CompanionChat("other", "current-chat", "old-work", "internal-task", "old-question"),
+            NativeExternalResolvedTarget.CompanionChat("kaka", "current-chat", "different-work", "internal-task", "old-question"),
+            NativeExternalResolvedTarget.CompanionChat("kaka", "current-chat", "old-work", "different-task", "old-question"),
+            NativeExternalResolvedTarget.CompanionChat("kaka", "current-chat", "old-work", "internal-task", "different-question"))) {
+            val gateway = Gateway(); gateway.answer = { NativeExternalNavigationResolution.Ready(wrong) }
+            val model = NativeExternalNavigationCoordinator(gateway, Store(), this)
+            model.updateConditions(ready); model.accept(NativeExternalNavigationTarget.CompanionTask("kaka", "internal-task", "old-work", "old-question")); yield()
+            assertEquals(NativeExternalNavigationFailure.INVALID_RESOLUTION, model.state.value.failure)
+        }
+    }
     @Test fun importedBOpensProvenFifoHeadAWithoutRequiringBToJumpAhead() = runBlocking {
         val gateway = Gateway(); gateway.answer = { NativeExternalNavigationResolution.Ready(NativeExternalResolvedTarget.ImportedMedia(importedB, importedA)) }
         val store = Store(); val model = NativeExternalNavigationCoordinator(gateway, store, this)

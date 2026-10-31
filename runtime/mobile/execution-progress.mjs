@@ -14,11 +14,19 @@ const workingPhases = new Set(['thinking', 'executing', 'verifying']);
 const waitingTools = new Set(['bash', 'job_output', 'android_wait_for', 'droy_browser_wait']);
 
 /** Project engine facts and intentional public copy, never raw model reasoning. */
-export function createExecutionProgress(send, reportError, timers = { setTimeout, clearTimeout }, getLocale = () => 'zh') {
+export function createExecutionProgress(send, reportError, timers = { setTimeout, clearTimeout }, getLocale = () => 'zh', isPublicTask = () => true) {
   const tasks = new Map();
   const controls = new Map();
   let disposed = false;
   const copy = text => translateBackendText(text, getLocale());
+  function accepts(taskId) {
+    taskId = String(taskId);
+    if (isPublicTask(taskId)) return true;
+    const task = tasks.get(taskId);
+    if (task) { clearRequest(task); task.queued = undefined; tasks.delete(taskId); }
+    controls.delete(taskId);
+    return false;
+  }
   function taskFor(taskId) {
     taskId = String(taskId);
     let task = tasks.get(taskId);
@@ -38,7 +46,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
     if (control && control.phase !== 'running') return;
     const generation = task.requestGeneration;
     task.requestTimer = timers.setTimeout(() => {
-      if (disposed || generation !== task.requestGeneration || !task.active || task.waiting || task.recovery) return;
+      if (disposed || !accepts(taskId) || generation !== task.requestGeneration || !task.active || task.waiting || task.recovery) return;
       task.requestTimer = undefined;
       task.slow = true;
       task.publicSummary = undefined; task.publicPhase = undefined; task.recovery = undefined;
@@ -47,7 +55,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
     task.requestTimer?.unref?.();
   }
   function report(taskId, phase, active) {
-    if (disposed || !taskId) return;
+    if (disposed || !taskId || !accepts(taskId)) return;
     taskId = String(taskId);
     const task = taskFor(taskId);
     const control = controls.get(taskId);
@@ -83,6 +91,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
     task.sending = true;
     void (async () => {
       while (task.queued && !disposed) {
+        if (!accepts(taskId)) break;
         const payload = task.queued;
         task.queued = undefined;
         try { await send(payload); }
@@ -94,13 +103,13 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
   }
   return {
     bind(taskId, state) {
-      if (disposed || !Number.isSafeInteger(state.controlRevision) || state.controlRevision < 0) return;
+      if (disposed || !accepts(taskId) || !Number.isSafeInteger(state.controlRevision) || state.controlRevision < 0) return;
       const previous = controls.get(String(taskId));
       if (previous?.taskId === state.taskId && previous.controlRevision > state.controlRevision) return;
       controls.set(String(taskId), state);
     },
     control(taskId, state) {
-      if (disposed) return;
+      if (disposed || !accepts(taskId)) return;
       taskId = String(taskId);
       const previous = controls.get(taskId);
       if (!Number.isSafeInteger(state.controlRevision) || state.controlRevision < 0
@@ -110,6 +119,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
       report(taskId, state.phase === 'running' ? 'thinking' : state.phase, state.active);
     },
     publicSummary(taskId, summary, phase) {
+      if (disposed || !accepts(taskId)) return;
       const text = petText(summary, 120);
       if (!text || !['thinking', 'executing', 'verifying', 'waiting', 'blocked'].includes(phase))
         throw new Error(copy('进展需为不含敏感信息的简短描述（最多120字），阶段须与实际执行一致。'));
@@ -118,7 +128,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
       report(taskId, phase, true);
     },
     toolFailure(taskId, callId, error) {
-      if (disposed) return;
+      if (disposed || !accepts(taskId)) return;
       // Only use the native error contract; never summarize an error body or screen text.
       const failure = error?.details?.outcomeUnknown === true
         ? { phase: 'verifying', summary: '正在确认刚才的操作是否生效' }
@@ -127,7 +137,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
       (task.failures ??= new Map()).set(callId, failure);
     },
     waiting(taskId, pending) {
-      if (disposed) return;
+      if (disposed || !accepts(taskId)) return;
       const task = tasks.get(String(taskId)) ?? (pending ? taskFor(taskId) : null);
       if (!task) return;
       task.waiting = pending;
@@ -136,7 +146,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
       if (pending || task.active) report(taskId, pending ? 'waiting_input' : 'thinking', true);
     },
     sessionEvent(session, event) {
-      if (disposed) return;
+      if (disposed || !accepts(session.id)) return;
       switch (event.type) {
         case 'turn/start':
           clearRequest(taskFor(session.id));
@@ -191,6 +201,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
       }
     },
     status(agent, status) {
+      if (disposed || !accepts(agent.id)) return;
       if (status === 'running') {
         if (!tasks.get(String(agent.id))?.active) taskFor(agent.id).activityKind = 'started';
         report(agent.id, 'thinking', true);
@@ -198,6 +209,7 @@ export function createExecutionProgress(send, reportError, timers = { setTimeout
       else if (status === 'idle' && tasks.get(String(agent.id))?.active) report(agent.id, 'interrupted', false);
     },
     removed(agent) {
+      if (disposed || !accepts(agent.id)) return;
       if (tasks.get(String(agent.id))?.active) report(agent.id, 'interrupted', false);
     },
     dispose() { disposed = true; for (const task of tasks.values()) clearRequest(task); tasks.clear(); controls.clear(); },

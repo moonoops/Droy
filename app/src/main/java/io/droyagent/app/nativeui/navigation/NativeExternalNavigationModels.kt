@@ -100,8 +100,13 @@ sealed interface NativeExternalResolvedTarget {
     data class EngineSession(val session: NativeExternalVerifiedSession, val petRequestId: String? = null) : NativeExternalResolvedTarget {
         override val surface = NativeExternalNavigationTarget.EngineSession(session.id, petRequestId)
     }
-    data class CompanionChat(val companionId: String, val chatSessionId: String? = null) : NativeExternalResolvedTarget {
-        init { chatSessionId?.let(::externalIdentity) }
+    data class CompanionChat(val companionId: String, val chatSessionId: String? = null,
+        val sourceSessionId: String? = null, val sourceTaskId: String? = null, val petRequestId: String? = null) : NativeExternalResolvedTarget {
+        init {
+            chatSessionId?.let(::externalIdentity); sourceSessionId?.let(::externalIdentity)
+            sourceTaskId?.let(::externalIdentity); petRequestId?.let(::externalIdentity)
+            require(sourceTaskId == null || sourceSessionId != null)
+        }
         override val surface = NativeExternalNavigationTarget.CompanionChat(companionId)
     }
     data class CompanionTask(val session: NativeExternalVerifiedSession, val petRequestId: String? = null) : NativeExternalResolvedTarget {

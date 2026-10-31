@@ -18,10 +18,10 @@ hooks.deregister();
 
 function fixture() {
   const callbacks = new Map(), rows = [], jobs = [], terminals = [];
-  const services = { jobs: { list: () => jobs }, terminalController: { list: () => terminals } };
-  const ctx = { on(event, callback) { callbacks.set(event, callback); return () => callbacks.delete(event); },
-    agents: { list: () => rows }, sessions: { list: () => [{ id: 'synthetic' }] }, get: name => services[name],
+  const services = { jobs: { list: () => jobs }, terminalController: { list: () => terminals },
     droyNativeUserTasks: { inspect: () => ({ writers: [], busy: [], unfenced: [] }) } };
+  const ctx = { on(event, callback) { callbacks.set(event, callback); return () => callbacks.delete(event); },
+    agents: { list: () => rows }, sessions: { list: () => [{ id: 'synthetic' }] }, get: name => services[name] };
   return { callbacks, rows, jobs, terminals, services, inspector: createHostMaintenanceExecution(ctx) };
 }
 test('agent idle promises and queued input are authoritative even when no UI task is visible', async () => {

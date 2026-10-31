@@ -90,11 +90,17 @@ data class NativeWorkbenchState(
     val pendingCreationUnconfirmed: Boolean = false,
     val unreadSessionIds: Set<String> = emptySet(),
     val historyCursor: Long = -1,
+    val managedSessionIds: Set<String> = emptySet(),
+    val managedWorkspaceIds: Set<String> = emptySet(),
 ) {
     val readOnly: Boolean
-        get() = sessions.firstOrNull { it.id == selectedSessionId }?.let { it.readOnly || it.archived }
-            ?: workspaces.firstOrNull { it.id == selectedWorkspaceId }?.readOnly
-            ?: false
+        get() = when {
+            selectedSessionId in managedSessionIds || selectedWorkspaceId in managedWorkspaceIds -> true
+            selectedSessionId != null -> sessions.firstOrNull { it.id == selectedSessionId }?.let { it.readOnly || it.archived }
+                ?: !(selectedSessionId == draftId && pendingRequestId != null)
+            selectedWorkspaceId != null -> workspaces.firstOrNull { it.id == selectedWorkspaceId }?.readOnly ?: true
+            else -> false
+        }
     val archived: Boolean
         get() = sessions.firstOrNull { it.id == selectedSessionId }?.archived == true
 }
@@ -102,14 +108,16 @@ data class NativeWorkbenchState(
 data class NativeSpaceGroup(val id: String?, val title: String, val sessions: List<NativeSession>, val readOnly: Boolean = false)
 
 fun NativeWorkbenchState.spaceGroups(ungroupedTitle: String): List<NativeSpaceGroup> {
-    val groupedIds = workspaces.flatMap { it.sessionIds }.toSet()
-    val ordinary = workspaces.filterNot { it.readOnly }
+    val userWorkspaces = workspaces.filterNot { it.id in managedWorkspaceIds }
+    val userSessions = sessions.filterNot { it.id in managedSessionIds || it.workspaceId in managedWorkspaceIds }
+    val groupedIds = userWorkspaces.flatMap { it.sessionIds }.toSet()
+    val ordinary = userWorkspaces.filterNot { it.readOnly }
     fun group(space: NativeWorkspace) = NativeSpaceGroup(space.id, space.title,
-        sessions.filter { it.id in space.sessionIds || it.workspaceId == space.id }, space.readOnly)
+        userSessions.filter { it.id in space.sessionIds || it.workspaceId == space.id }, space.readOnly)
     return ordinary.filter { it.id != defaultWorkspaceId }.map(::group) +
         ordinary.filter { it.id == defaultWorkspaceId }.map(::group) +
-        NativeSpaceGroup(null, ungroupedTitle, sessions.filter { it.id !in groupedIds && it.workspaceId == null }) +
-        workspaces.filter { it.readOnly }.map(::group)
+        NativeSpaceGroup(null, ungroupedTitle, userSessions.filter { it.id !in groupedIds && it.workspaceId == null }) +
+        userWorkspaces.filter { it.readOnly }.map(::group)
 }
 
 data class NativeDecision(

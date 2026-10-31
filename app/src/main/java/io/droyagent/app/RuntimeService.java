@@ -34,6 +34,9 @@ public final class RuntimeService extends Service {
     private volatile boolean stopping;
     private volatile boolean starting;
     private volatile boolean idleStopping;
+    private volatile boolean idleExitPending;
+    private boolean companionIdleCheckRunning;
+    private volatile boolean companionActivityUnavailable;
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable stopWhenIdle = this::stopIfBackgroundIdle;
     private volatile String terminalStatus;
@@ -129,14 +132,43 @@ public final class RuntimeService extends Service {
         main.postDelayed(stopWhenIdle, 1000);
     }
 
-    private void stopIfBackgroundIdle() {
-        if (stopping || NativeRuntimeHost.companionMaintenanceActive() || BackgroundRuntime.visible() || BackgroundRuntime.keepRunning(this)
+    private boolean backgroundRuntimeNeeded() {
+        return stopping || NativeRuntimeHost.companionMaintenanceActive() || BackgroundRuntime.visible() || BackgroundRuntime.keepRunning(this)
                 || NativeRuntimeHost.hasMediaRuntimeWork()
                 || MemoryRuntime.get(this).requiresBackgroundRuntime()
                 || ToolProgress.current(this).optBoolean("active") || AudioTranscription.get(this).hasActiveJobs()
-                || VoiceRuntime.active(this)) return;
-        idleStopping = true;
-        stopGracefully();
+                || VoiceRuntime.active(this);
+    }
+
+    private void stopIfBackgroundIdle() {
+        if (backgroundRuntimeNeeded() || !ready || companionIdleCheckRunning) return;
+        companionIdleCheckRunning = true;
+        final Process expectedProcess = process;
+        final String expectedIdentity = runtimeIdentity, token = webToken;
+        final int port = webPort;
+        // The Host claims idle and closes new work atomically; a snapshot cannot authorize a later forced stop.
+        new Thread(() -> {
+            Boolean accepted = null;
+            try {
+                if (!backgroundRuntimeNeeded()) {
+                    idleExitPending = true;
+                    accepted = CompanionRuntimeActivity.requestIdleShutdown(port, token);
+                }
+                else accepted = false;
+            }
+            catch (IOException | org.json.JSONException unavailable) {
+                if (!companionActivityUnavailable) android.util.Log.w("Droy", "COMPANION_ACTIVITY_UNAVAILABLE");
+            }
+            if (Boolean.FALSE.equals(accepted)) idleExitPending = false;
+            final Boolean observed = accepted;
+            main.post(() -> {
+                companionIdleCheckRunning = false;
+                if (instance != this || stopping || expectedProcess != process || !expectedIdentity.equals(runtimeIdentity)) return;
+                companionActivityUnavailable = observed == null;
+                if (Boolean.TRUE.equals(observed)) idleStopping = true;
+                else scheduleBackgroundCheck();
+            });
+        }, "droy-companion-idle").start();
     }
 
     static String notificationTitle(boolean ready, boolean active, String phase) {
@@ -661,7 +693,9 @@ public final class RuntimeService extends Service {
         PetOverlay.runtimeStopped();
         AutomationScreenOverlay.runtimeStopped();
         super.onDestroy();
-        if (idleStopping && BackgroundRuntime.visible() && !BackgroundRuntime.explicitlyStopped(this))
+        // The Host can exit before its HTTP acknowledgement reaches the main thread.
+        if ((idleStopping || idleExitPending) && !BackgroundRuntime.explicitlyStopped(this)
+                && (BackgroundRuntime.visible() || BackgroundRuntime.keepRunning(this)))
             startForegroundService(new Intent(this, RuntimeService.class).setAction(REFRESH));
     }
 

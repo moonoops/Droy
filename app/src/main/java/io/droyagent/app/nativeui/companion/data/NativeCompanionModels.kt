@@ -9,7 +9,19 @@ data class NativeCompanionExecution(val quiescent: Boolean, val cancelRequested:
 data class NativeCompanionStatus(
     val phase: String = "idle", val error: String? = null,
     val chatExecution: NativeCompanionExecution? = null,
-)
+    val execution: NativeCompanionExecution? = null,
+) {
+    val processing: Boolean get() = (execution ?: chatExecution)?.let { !it.quiescent }
+        ?: (phase in setOf("thinking", "typing", "waiting"))
+}
+
+internal fun visibleCompanionMessages(messages: List<NativeCompanionMessage>): List<NativeCompanionMessage> {
+    val internalIds = messages.filter { it.type == "task" }.map { it.id }.toSet()
+    return messages.filterNot { it.type == "task" }.map { message ->
+        if (message.replyPreview?.type == "task" || message.replyTo in internalIds)
+            message.copy(replyTo = null, replyPreview = null, quoteReply = false) else message
+    }
+}
 
 data class NativeCompanionAttachment(
     val id: String, val name: String, val mediaType: String, val bytes: Long,
@@ -81,6 +93,9 @@ data class NativeCompanionDraft(
 ) {
     val canSend: Boolean get() = text.isNotBlank() || attachments.isNotEmpty() || localAttachments.isNotEmpty() || voice != null || stickerId != null
 }
+
+internal fun editableCompanionDraft(draft: NativeCompanionDraft): NativeCompanionDraft =
+    if (draft.replyTo?.type == "task") draft.copy(replyTo = null) else draft
 
 data class NativeCompanionProfilePatch(
     val name: String? = null, val avatarUrl: String? = null,

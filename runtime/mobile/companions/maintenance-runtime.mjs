@@ -10,11 +10,11 @@ export function installCompanionMaintenance(runtime) {
   if (installed.has(runtime)) fail('COMPANION_MAINTENANCE_INVALID');
   const active = new Set(), proactive = new Map(), recoveries = new Map();
   let revision = 0, owner, stopped = false;
-  const changed = () => { revision++; };
+  const changed = () => { revision++; runtime.activityChanged?.(); };
   const begin = (kind,companionId) => {
     const done = Promise.withResolvers(), entry = { kind, companionId, done: done.promise };
     active.add(entry); changed(); let finished = false;
-    return () => { if (!finished) { finished = true; active.delete(entry); changed(); done.resolve(); } };
+    return () => { if (!finished) { finished = true; active.delete(entry); changed(); done.resolve(); runtime.executionChanged?.(companionId); } };
   };
   const run = (kind, operation, companionId) => {
     const finish = begin(kind,companionId);
@@ -26,13 +26,15 @@ export function installCompanionMaintenance(runtime) {
     return result;
   };
   const held = () => !!owner && !['ready','released'].includes(owner.phase) && !stopped;
+  const exiting = () => runtime.ctx.get('droyLifecycle')?.stopping===true;
   const arm = (map, key, entry) => {
     entry.timer = setTimeout(() => {
       if (map.get(key) !== entry || stopped) return;
+      if(exiting()){map.delete(key);changed();return;}
       entry.timer = undefined;
       if (held() && (map === proactive || entry.deferred)) return;
       map.delete(key); changed();
-      run(entry.kind, entry.callback);
+      run(entry.kind, entry.callback, entry.companionId);
     }, Math.max(0, entry.at - Date.now()));
     if (entry.unref) entry.timer.unref?.();
     return entry.timer;
@@ -42,9 +44,12 @@ export function installCompanionMaintenance(runtime) {
     if (entry) { clearTimeout(entry.timer); map.delete(key); changed(); }
   };
   const schedule = (map, key, at, callback, unref) => {
+    if(exiting())fail('DROY_STOPPING');
     cancel(map, key);
     if (stopped || runtime.closed) return;
-    const entry = { at, callback, unref, kind: map === proactive ? 'proactive' : 'recovery', deferred: held() };
+    const companionId=map===proactive?key:key.startsWith('work:')?runtime.owners.get(key.slice(5))?.companionId
+      :key.startsWith('chat:')||key.startsWith('wait:')?key.slice(5):undefined;
+    const entry = { at, callback, unref, companionId, kind: map === proactive ? 'proactive' : 'recovery', deferred: held() };
     map.set(key, entry); changed();
     if (!held()) return arm(map, key, entry);
   };
@@ -172,6 +177,14 @@ export function installCompanionMaintenance(runtime) {
   };
   const control = Object.freeze({
     begin, run, changed, acquire,
+    active(id, excluded = []) { return [...active].filter(entry => (id === undefined || entry.companionId === id) && !excluded.includes(entry.kind)); },
+    async drainCompanion(id, excluded = []) {
+      for (;;) {
+        const pending = [...active].filter(entry => entry.companionId === id && !excluded.includes(entry.kind));
+        if (!pending.length) return;
+        await Promise.all(pending.map(entry => entry.done));
+      }
+    },
     async drainMemorySpace(id) {
       for(;;) {
         const pending=[...active].filter(entry=>entry.companionId===id);
@@ -180,6 +193,7 @@ export function installCompanionMaintenance(runtime) {
       }
     },
     proactive(id, at, callback) { return schedule(proactive, id, at, callback, true); },
+    cancelProactive(id) { cancel(proactive,id); },
     recovery(key, at, callback, { unref = false } = {}) { return schedule(recoveries, key, at, callback, unref); },
     cancelRecovery(key) { cancel(recoveries, key); },
     close() {
@@ -191,10 +205,12 @@ export function installCompanionMaintenance(runtime) {
     },
   });
   const memoryProducers=new Set(['submit','enqueue','startWork','context','generate','agent','reply','sendEmoji','publish','recoverReply','learn','considerProactive','wake','wait']);
+  const exitAdmissions=new Set([...memoryProducers,'initialize','start','startInstance','prepareWorkspace','resumeWork','flush','retry','transcribeVoice','refreshProactiveSchedule']);
   for (const key of writers) {
     const original = runtime[key];
     runtime[key] = function (...args) {
       const id=typeof args[0]==='string'?args[0]:args[0]?.companionId??args[0]?.id;
+      if(exitAdmissions.has(key)&&exiting())return Promise.reject(Object.assign(new Error('DROY_STOPPING'),{code:'DROY_STOPPING'}));
       if(memoryProducers.has(key)&&this.memoryManagement?.has(id))return Promise.reject(Object.assign(new Error('COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS'),{code:'COMPANION_MEMORY_MANAGEMENT_IN_PROGRESS'}));
       return run(key, () => Reflect.apply(original, this, args),id);
     };

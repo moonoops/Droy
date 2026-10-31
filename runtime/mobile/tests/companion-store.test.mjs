@@ -238,6 +238,70 @@ test('history pagination keeps order when new messages arrive and an anchor is d
   await assert.rejects(store.listMessages('maimai', { before: 'item-4' }), code('COMPANION_MESSAGE_NOT_FOUND'));
 });
 
+test('internal work stays durable without changing chat previews, unread counts or hidden conversations', async t => {
+  const f = await fixture(t);
+  const question = await f.store.appendMessage('kaka', message('visible-question', 'Fictional question', { createdAt: '2026-10-01T00:00:00Z' }));
+  await f.store.updateConversation('kaka', { action: 'hide' });
+  await f.store.appendMessage('kaka', { id: 'internal-work', role: 'assistant', type: 'task', text: 'Fictional internal work',
+    task: { sessionId: 'internal-work-session', state: 'running' }, createdAt: '2026-10-02T00:00:00Z' }, { notification: true });
+  await f.store.appendMessage('kaka', { id: 'internal-note', role: 'system', type: 'text', text: 'Fictional internal note' });
+  await f.reopen();
+  const hidden = (await f.store.profiles()).find(row => row.id === 'kaka');
+  assert.equal(hidden.hidden, true);
+  assert.equal(hidden.lastMessage.id, question.id);
+  assert.equal(hidden.lastActivityAt, question.createdAt);
+  assert.equal(hidden.unreadCount, 0);
+  assert.equal((await f.store.notificationReadState('kaka')).unreadCount, 0);
+  assert.deepEqual(await f.store.pendingNotifications('kaka'), []);
+  assert.equal((await f.store.getMessage('kaka', 'internal-work')).task.state, 'running');
+  assert.equal(await f.store.getVisibleMessage('kaka', 'internal-work'), null);
+  assert.equal((await f.store.listMessages('kaka')).messages.length, 3);
+  assert.deepEqual((await f.store.listVisibleMessages('kaka')).messages.map(row => row.id), [question.id]);
+
+  await f.store.updateMessage('kaka', 'internal-work', { task: { sessionId: 'internal-work-session', state: 'completed', summary: 'Fictional result' } });
+  await f.store.appendMessage('kaka', message('visible-result', 'Fictional final reply', {
+    role: 'assistant', replyTo: 'internal-work', quoteReply: false, createdAt: '2026-10-03T00:00:00Z',
+  }), { notification: true });
+  const visible = (await f.store.profiles()).find(row => row.id === 'kaka');
+  assert.equal(visible.hidden, false);
+  assert.equal(visible.unreadCount, 1);
+  assert.equal(visible.lastMessage.id, 'visible-result');
+  assert.equal(Object.hasOwn(visible.lastMessage, 'replyTo'), false);
+  assert.equal((await f.store.notificationReadState('kaka')).unreadCount, 1);
+  assert.equal((await f.store.pendingNotifications('kaka')).length, 1);
+  assert.equal((await f.store.getMessage('kaka', 'visible-result')).replyTo, 'internal-work');
+  assert.equal(Object.hasOwn(await f.store.getVisibleMessage('kaka', 'visible-result'), 'replyTo'), false);
+});
+
+test('visible chat pagination crosses internal work records without gaps or empty intermediate pages', async t => {
+  const f = await fixture(t);
+  for (let index = 0; index < 7; index++) {
+    await f.store.appendMessage('kaka', message('visible-' + index, 'Fictional message ' + index));
+    for (let item = 0; item < 5; item++) await f.store.appendMessage('kaka', {
+      id: 'internal-' + index + '-' + item, role: 'assistant', type: 'task', text: 'Fictional internal work',
+      task: { state: 'completed' },
+    });
+  }
+  const first = await f.store.listVisibleMessages('kaka', { limit: 3 });
+  assert.deepEqual(first.messages.map(row => row.id), ['visible-4', 'visible-5', 'visible-6']);
+  await f.store.removeMessage('kaka', 'visible-4');
+  const second = await f.store.listVisibleMessages('kaka', { before: first.nextBefore, limit: 3 });
+  assert.deepEqual(second.messages.map(row => row.id), ['visible-1', 'visible-2', 'visible-3']);
+  const third = await f.store.listVisibleMessages('kaka', { before: second.nextBefore, limit: 3 });
+  assert.deepEqual(third.messages.map(row => row.id), ['visible-0']);
+  assert.equal(third.hasMore, false);
+  await f.reopen();
+  const forward = await f.store.listVisibleMessages('kaka', { after: 'seq:0', limit: 3 });
+  assert.deepEqual(forward.messages.map(row => row.id), ['visible-0', 'visible-1', 'visible-2']);
+  const following = await f.store.listVisibleMessages('kaka', { after: forward.nextAfter, limit: 3 });
+  assert.deepEqual(following.messages.map(row => row.id), ['visible-3', 'visible-5', 'visible-6']);
+  assert.equal(following.hasMore, false);
+  assert.equal((await f.store.listMessages('kaka', { after: following.nextAfter })).messages.length, 5);
+  assert.deepEqual((await f.store.listVisibleMessages('kaka', { after: following.nextAfter })).messages, []);
+  await f.store.appendMessage('maimai', { id: 'only-internal', role: 'assistant', type: 'task', text: 'Fictional internal-only work' });
+  assert.deepEqual(await f.store.listVisibleMessages('maimai'), { messages: [], hasMore: false, nextBefore: null, nextAfter: 'seq:0' });
+});
+
 test('session binding is durable and cannot be reassigned to another companion or kind', async t => {
   const f = await fixture(t), binding = { sessionId: 'chat-one', workspaceId: 'space-one', kind: 'chat' };
   const saved = await f.store.bindSession('kaka', binding);

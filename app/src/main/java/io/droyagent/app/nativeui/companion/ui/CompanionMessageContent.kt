@@ -2,9 +2,6 @@ package io.droyagent.app.nativeui.companion.ui
 
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -45,12 +42,12 @@ internal fun CompanionMessageRow(
     onImage: (String, String) -> Unit,
     onAttachment: ((NativeCompanionAttachment) -> Unit)?,
     onVoice: ((NativeCompanionVoice) -> Unit)?,
-    onTask: (NativeCompanionMessage) -> Unit,
     sending: Boolean,
     onRetryVoiceTranscript: ((String) -> Unit)? = null,
     onTapContent: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    if (message.type == "task") return
     val user = message.role == "user"
     val haptics = LocalHapticFeedback.current
     val currentMenu by rememberUpdatedState(onMenu)
@@ -101,21 +98,6 @@ internal fun CompanionMessageRow(
                                     }
                                 }
                             } else Text(stringResource(R.string.native_companion_stickers))
-                        }
-                        "task" -> {
-                            val task = message.task
-                            FilledTonalButton(onClick = { onTask(message) }, enabled = task != null,
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = MaterialTheme.shapes.medium,
-                                contentPadding = PaddingValues(12.dp)) {
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(task?.title ?: stringResource(R.string.native_companion_task), style = MaterialTheme.typography.titleMedium)
-                                    Text(companionTaskState(task?.state ?: ""), style = MaterialTheme.typography.labelMedium)
-                                    task?.summary?.takeIf { it.isNotBlank() }?.let {
-                                        Text(it, maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                                    }
-                                }
-                                DroyIcon(R.drawable.native_companion_chevron_right, null)
-                            }
                         }
                         "text", "image", "file" -> if (message.text.isNotEmpty()) {
                             if (inlineTime) Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -229,42 +211,6 @@ internal fun CompanionImageDialog(url: String, label: String, loader: CompanionI
                 DroyIconAction(R.drawable.native_ui_close, stringResource(R.string.native_companion_close), onClose,
                     Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(16.dp))
             }
-        }
-    }
-}
-
-@Composable
-internal fun CompanionTaskDetails(
-    message: NativeCompanionMessage,
-    onCancel: () -> Unit,
-    onOpenTask: ((NativeCompanionTask) -> Unit)?,
-    onClose: () -> Unit,
-    enabled: Boolean,
-) {
-    val task = message.task ?: return
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text(task.title ?: stringResource(R.string.native_companion_task_details), style = MaterialTheme.typography.headlineSmall)
-        Text(companionTaskState(task.state), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        task.goal?.takeIf { it.isNotBlank() }?.let {
-            Text(stringResource(R.string.native_companion_goal), style = MaterialTheme.typography.titleMedium)
-            SelectionContainer { Text(it) }
-        }
-        task.summary?.takeIf { it.isNotBlank() }?.let {
-            Text(stringResource(R.string.native_companion_result), style = MaterialTheme.typography.titleMedium)
-            SelectionContainer { Text(it) }
-        }
-        task.error?.takeIf { it.isNotBlank() }?.let { SelectionContainer { Text(it, color = MaterialTheme.colorScheme.error) } }
-        if (task.state in setOf("queued", "running", "needs_input", "cancelling")) {
-            OutlinedButton(onClick = onCancel, enabled = enabled && task.state != "cancelling",
-                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag("native-companion-cancel-task")) {
-                Text(stringResource(if (task.state == "cancelling") R.string.native_companion_task_cancelling else R.string.native_companion_cancel_task))
-            }
-        }
-        if (onOpenTask != null && task.sessionId != null) Button(onClick = { onOpenTask(task) },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text(stringResource(R.string.native_companion_open_workbench)) }
-        TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)) {
-            Text(stringResource(R.string.native_companion_close))
         }
     }
 }

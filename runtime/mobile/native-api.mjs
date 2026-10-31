@@ -18,6 +18,7 @@ import { createNativeTools } from './native-tools.mjs';
 import { createNativeEngine } from './native-engine.mjs';
 import { createNativeWorkspaces } from './native-workspaces.mjs';
 import { createNativeNavigationService, NativeNavigationError } from './native-navigation.mjs';
+import { assertUserCreate, assertUserSession, userControlFrames, userSessionList } from './task-ownership.mjs';
 
 const base = '/droy/native';
 const maxBodyBytes = 32 * 1024 * 1024;
@@ -39,6 +40,11 @@ class NativeApiError extends Error {
   constructor(code, status, text) { super(code); this.code = code; this.status = status; this.text = text; }
 }
 const badRequest = () => new NativeApiError('NATIVE_BAD_REQUEST', 400, 'invalid');
+
+function userTarget(ctx, request) {
+  for (const id of [request.sessionId, request.address?.sessionId, request.address?.parentSessionId,
+    request.address?.childSessionId].filter(Boolean)) assertUserSession(ctx, id);
+}
 
 function errorBody(ctx, error) {
   if (error instanceof NativeNavigationError)
@@ -229,6 +235,8 @@ export function createNativeApi(ctx, { decisions } = {}) {
       const closed = () => { if (!res.writableEnded) cancellation.abort(); };
       req.once('aborted', aborted); res.once('close', closed); active.add(cancellation);
       try {
+        if ((ctx.get?.('droyLifecycle') ?? ctx.droyLifecycle)?.stopping)
+          throw new NativeApiError('NATIVE_SERVICE_NOT_READY', 503, 'unavailable');
         if (!req.url?.startsWith('/') || req.url.startsWith('//')) throw badRequest();
         const url = new URL(req.url, `http://${req.headers.host}`);
         const path = url.pathname;
@@ -295,6 +303,7 @@ export function createNativeApi(ctx, { decisions } = {}) {
           const parentSessionId = url.searchParams.get('parentSessionId'), childSessionId = url.searchParams.get('childSessionId');
           const validId = value => typeof value === 'string' && value.length <= 256 && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u.test(value);
           if (!validId(parentSessionId) || !validId(childSessionId) || parentSessionId === childSessionId) throw badRequest();
+          userTarget(ctx, { address: { parentSessionId, childSessionId } });
           const limit = url.searchParams.get('maxMessages');
           if (limit !== null && !/^[1-9][0-9]*$/.test(limit)) throw badRequest();
           const input = parse('follow', { address: { kind: 'subagent', parentSessionId, childSessionId, mode: 'unknown' },
@@ -314,8 +323,8 @@ export function createNativeApi(ctx, { decisions } = {}) {
             return;
           }
           const input = parse(command, body);
-          if (command === 'cancel' && runtime.ownsSession(input.sessionId))
-            throw new NativeApiError('COMPANION_SESSION_MANAGED', 409, 'managed');
+          if (command === 'create') await assertUserCreate(ctx, input, runtime);
+          else if (command !== 'list') userTarget(ctx, input);
           const method = methods.get(command);
           const taskControl = ctx.get?.('droyTaskControl') ?? ctx.droyTaskControl;
           const controllerId = command === 'cancel' && typeof taskControl?.get === 'function'
@@ -324,7 +333,7 @@ export function createNativeApi(ctx, { decisions } = {}) {
             ? taskControl.command({ taskId: controllerId, action: 'stop', expectedRevision: taskControl.revision(controllerId) })
             : method.cancellation ? await controller[command](input, cancellation.signal) : await controller[command](input);
           const value = command === 'list'
-            ? { ...result, managedSessionIds: result.items.filter(item => runtime.ownsSession(item.sessionId)).map(item => item.sessionId) }
+            ? userSessionList(ctx, result)
             : result;
           json(res, 200, { ok: true, result: value });
           return;
@@ -335,7 +344,8 @@ export function createNativeApi(ctx, { decisions } = {}) {
         if (req.method !== 'GET') throw new NativeApiError('NATIVE_METHOD_NOT_ALLOWED', 405, 'method');
         if (url.search && !followsSession) throw badRequest();
         if (path === `${base}/session/control`) {
-          await stream(res, controller.control(cancellation.signal), cancellation.signal, ctx);
+          companions(ctx);
+          await stream(res, userControlFrames(ctx, controller.control(cancellation.signal)), cancellation.signal, ctx);
         } else if (path === `${base}/models`) {
           const catalog = await controller.modelCatalog();
           // Upstream failures carry raw provider exception messages, which may include headers.
@@ -347,6 +357,7 @@ export function createNativeApi(ctx, { decisions } = {}) {
           let sessionId;
           try { sessionId = decodeURIComponent(raw); } catch { throw badRequest(); }
           if (!sessionId || raw.includes('/') || sessionId.length > 1024 || /[\u0000-\u001f\u007f]/.test(sessionId)) throw badRequest();
+          assertUserSession(ctx, sessionId);
           if ([...url.searchParams.keys()].some(key => key !== 'maxMessages') || url.searchParams.getAll('maxMessages').length > 1) throw badRequest();
           const limit = url.searchParams.get('maxMessages');
           if (limit !== null && !/^[1-9][0-9]*$/.test(limit)) throw badRequest();

@@ -153,7 +153,7 @@ test('native commands preserve the DSH request and receipt, including stable pro
     assert.equal(body.ok, true);
     assert.deepEqual(f.calls.at(-1).request, request);
     TYPERT.invocations.find(entry => entry.namespace === 'session' && entry.method === method).result.create().parse(results[method]);
-    assert.deepEqual(body.result, method === 'list' ? { ...results.list, managedSessionIds: ['managed-companion-session'] } : results[method]);
+    assert.deepEqual(body.result, method === 'list' ? { items: results.list.items.slice(0, 1), managedSessionIds: ['managed-companion-session'] } : results[method]);
   }
   assert.equal(f.calls.find(call => call.method === 'prompt').signal instanceof AbortSignal, true);
   assert.equal(f.calls.find(call => call.method === 'create').signal, undefined);
@@ -176,6 +176,41 @@ test('legacy native cancel stops the real root controller for owned children wit
   assert.ok(!f.calls.some(call => call.method === 'cancel'));
   const owned = await f.post('cancel', { sessionId: 'managed-companion-session' });
   assert.equal(owned.status, 409); assert.equal(controls.length, 2);
+});
+
+test('all direct user Session reads and creation targets reject companion identities before engine access', async t => {
+  const f = await fixture(t), sessionId = 'managed-companion-session';
+  for (const [method, request] of [
+    ['create', { sessionId }], ['create', { workspaceId: 'managed-companion-workspace' }],
+    ['page', { address: { kind: 'session', sessionId }, throughSeq: 2, maxMessages: 10 }],
+    ['projections', { sessionId }],
+    ['prompt', { sessionId, requestId: 'fictional-request', mode: 'queue', content: [{ type: 'text', text: 'Fictional input' }] }],
+  ]) {
+    const response = await f.post(method, request);
+    assert.equal(response.status, 409, method);
+    assert.match((await response.json()).error.code, /^COMPANION_(?:SESSION|WORKSPACE)_MANAGED$/);
+  }
+  for (const path of [`session/${sessionId}/follow`, `transcript/follow?parentSessionId=${sessionId}&childSessionId=child`]) {
+    const response = await f.get(path); assert.equal(response.status, 409); await response.text();
+  }
+  assert.deepEqual(f.calls, []);
+});
+
+test('ordinary control excludes companion baselines and increments while retaining user child watermarks', async t => {
+  const f = await fixture(t);
+  f.ctx.sessionController.control = async function* () {
+    yield { type: 'baseline', value: { projections: {
+      'fixture-session': { asOfSeq: 12, values: {} }, 'managed-companion-session': { asOfSeq: 50, values: {} },
+    } } };
+    yield { type: 'projection', sessionId: 'managed-companion-session', key: 'droyTurnBoundary', value: { completed: 51 }, seq: 51 };
+    yield { type: 'projection', sessionId: 'user-child', key: 'droyTurnBoundary', value: { completed: 8 }, seq: 8 };
+  };
+  const response = await f.get('session/control'), frames = (await response.text()).trim().split('\n\n').map(text => JSON.parse(text.slice(6)));
+  assert.equal(response.status, 200);
+  assert.deepEqual(frames, [
+    { type: 'baseline', value: { projections: { 'fixture-session': { asOfSeq: 12, values: {} } } } },
+    { type: 'projection', sessionId: 'user-child', key: 'droyTurnBoundary', value: { completed: 8 }, seq: 8 },
+  ]);
 });
 
 test('all native operations require the existing loopback cookie and origin checks before service access', async t => {
@@ -233,17 +268,17 @@ test('HTTP methods, unknown routes, malformed identifiers and unsupported stream
   assert.equal(f.calls.length, 0);
 });
 
-test('workspace baseline preserves all workspaces, exposes their managed identities and closes its observation', async t => {
+test('workspace baseline contains user work only, retains migration identities and closes its observation', async t => {
   const f = await fixture(t);
   const closed = once(f.events, 'workspace-closed');
   const response = await f.get('workspaces');
   const { ok, result } = await response.json();
   assert.equal(ok, true);
   const { workspaces, sessions, directoryBrowsingAvailable, ...baseline } = result;
-  assert.deepEqual(baseline, { ...workspaceBaseline,
-    defaultWorkspaceId: 'fixture-workspace', managedWorkspaceIds: ['managed-companion-workspace'] });
-  assert.equal(workspaces[1].readOnly, true);
-  assert.equal(sessions[1].readOnly, true);
+  assert.deepEqual(baseline, { ...workspaceBaseline, items: workspaceBaseline.items.slice(0, 1),
+    defaultWorkspaceId: 'fixture-workspace', managedWorkspaceIds: ['managed-companion-workspace'], managedSessionIds: ['managed-companion-session'] });
+  assert.equal(workspaces.length, 1); assert.equal(workspaces[0].readOnly, false);
+  assert.equal(sessions.length, 1); assert.equal(sessions[0].readOnly, false);
   assert.equal(directoryBrowsingAvailable, false);
   await closed;
   assert.deepEqual(await (await f.get('models')).json(), { ok: true, result: modelCatalog });
@@ -254,14 +289,15 @@ test('managed metadata follows the Store and actual returned Session identities 
   const f = await fixture(t), checked = [];
   f.ctx.droyCompanions.ownsSession = id => { checked.push(id); return id === 'fixture-session' || id === 'not-in-this-list'; };
   const list = await (await f.post('list', {})).json();
-  assert.deepEqual(list, { ok: true, result: { ...results.list, managedSessionIds: ['fixture-session'] } });
+  assert.deepEqual(list, { ok: true, result: { items: results.list.items.slice(1), managedSessionIds: ['fixture-session'] } });
   assert.deepEqual(checked, results.list.items.map(item => item.sessionId));
   f.ctx.droyCompanions.store.profiles = async () => [
     { id: 'kaka', workspaceId: 'fixture-workspace' }, { id: 'maimai', workspaceId: 'fixture-workspace' },
   ];
   const workspaces = await (await f.get('workspaces')).json();
   assert.deepEqual(workspaces.result.managedWorkspaceIds, ['fixture-workspace']);
-  for (const key of Object.keys(workspaceBaseline)) assert.deepEqual(workspaces.result[key], workspaceBaseline[key]);
+  assert.deepEqual(workspaces.result.items, workspaceBaseline.items.slice(1));
+  assert.equal(workspaces.result.defaultWorkspaceId, null);
   f.ctx.droyCompanions.store.profiles = async () => [{ id: 'kaka', workspaceId: null }, { id: 'maimai' }];
   assert.deepEqual((await (await f.get('workspaces')).json()).result.managedWorkspaceIds, []);
 });
@@ -512,4 +548,14 @@ test('native API publishes actual compact and install handles after their HTTP r
   await rows[0].done; assert.equal(f.api.userTasks.inspect().writers[0].done, rows[1].done);
   install.resolve({ changed: true, application: 'applied', stage: 'install', target: '@fixture/plugin' });
   await waiting; assert.deepEqual(f.api.userTasks.inspect(), { writers: [], busy: [], unfenced: [] });
+});
+
+test('a claimed idle shutdown rejects native user requests before engine admission', async t => {
+  const f = await fixture(t);
+  f.ctx.droyLifecycle = { stopping: true };
+  const created = await f.post('create', {});
+  assert.equal(created.status, 503);
+  assert.equal((await created.json()).error.code, 'NATIVE_SERVICE_NOT_READY');
+  assert.equal((await f.get('workspaces')).status, 503);
+  assert.deepEqual(f.calls, []);
 });

@@ -23,6 +23,8 @@ import { installCompanions } from './companions/host.mjs';
 import { installNativeApi } from './native-api.mjs';
 import { installCompanionMaintenanceHost } from './companions/maintenance-host.mjs';
 import { installTaskControl } from './task-control-host.mjs';
+import { assertUserSession, isUserSession } from './task-ownership.mjs';
+import { installUserRemoteOwnership } from './user-remote-ownership.mjs';
 
 export const name = 'droy-android-use';
 export const inject = ['tools', 'llm', 'attachments', 'webServer', 'settings', 'agents', 'userQuestions', 'systemPrompt', 'droyPluginPolicy'];
@@ -36,6 +38,7 @@ export function apply(ctx) {
     getScope: input => ctx.get('droyTaskControl')?.admitNative(input),
     currentScope: taskId => ctx.get('droyTaskControl')?.currentScope(taskId) });
   installCompanions(ctx,bridge);
+  installUserRemoteOwnership(ctx);
   installNativeApi(ctx);
   installCompanionMaintenanceHost(ctx);
   installSetupServices(ctx, bridge);
@@ -43,10 +46,10 @@ export function apply(ctx) {
   installCompanionIdentity(ctx, bridge);
   const verification = createVerificationWorkflow(ctx, bridge);
   const progress = createExecutionProgress(payload => bridge.progress(payload),
-    () => ctx.logger.warn('DROY_PROGRESS_REPORT_FAILED'), undefined, getLocale);
+    () => ctx.logger.warn('DROY_PROGRESS_REPORT_FAILED'), undefined, getLocale, id => isUserSession(ctx, id));
   ctx.on('session/event', (session, event) => {
     progress.sessionEvent(session, event);
-    if (event.type === 'turn/end' && event.data.reason?.kind === 'completed')
+    if (isUserSession(ctx, session.id) && event.type === 'turn/end' && event.data.reason?.kind === 'completed')
       void ctx.get('droyTaskControl')?.completed(String(session.id)).catch(() => ctx.logger.warn('TASK_CONTROL_COMPLETION_UNCONFIRMED'));
   });
   ctx.effect(() => () => progress.dispose());
@@ -63,6 +66,7 @@ export function apply(ctx) {
     output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }] },
     async execute(args, exec) {
       if (!exec.agent?.id) throw new BridgeError('IDENTITY_REQUIRED', message('工具调用缺少引擎身份'));
+      assertUserSession(ctx, exec.agent.id);
       progress.publicSummary(exec.agent.id, args.summary, args.phase);
       return { updated: true };
     },

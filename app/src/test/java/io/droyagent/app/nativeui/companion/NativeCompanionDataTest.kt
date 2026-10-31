@@ -11,6 +11,41 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NativeCompanionDataTest {
+    @Test fun aWorkOnlyCompanionRemainsStoppableUntilTheWholeExecutionSettles() {
+        val wire = JSONObject().put("phase", "idle")
+            .put("chatExecution", JSONObject().put("quiescent", true).put("cancelRequested", true))
+            .put("execution", JSONObject().put("quiescent", false).put("cancelRequested", true))
+        val processing = NativeCompanionJson.status(wire)
+        assertTrue(processing.processing)
+        assertTrue(companionStopPending(true, processing.execution))
+        assertFalse(processing.chatExecution!!.let { !it.quiescent })
+        wire.getJSONObject("execution").put("quiescent", true)
+        val stopped = NativeCompanionJson.status(wire)
+        assertFalse(stopped.processing)
+        assertFalse(companionStopPending(true, stopped.execution))
+        wire.remove("execution")
+        assertTrue(companionStopPending(true, NativeCompanionJson.status(wire).execution))
+    }
+
+    @Test fun cachedInternalTasksAndTheirQuotePreviewsStayOutOfTheChatFeed() {
+        val task = NativeCompanionJson.message(wireMessage("internal").put("type", "task"))
+        val reply = NativeCompanionJson.message(wireMessage("answer").put("replyTo", "internal").put("quoteReply", true))
+        val user = NativeCompanionJson.message(wireMessage("user").put("role", "user"))
+        val visible = visibleCompanionMessages(listOf(user, task, reply))
+        assertEquals(listOf("user", "answer"), visible.map { it.id })
+        assertNull(visible.last().replyTo)
+        assertFalse(visible.last().quoteReply)
+        val draft = editableCompanionDraft(NativeCompanionJson.draft(JSONObject().put("text", "Keep this draft")
+            .put("replyTo", JSONObject().put("id", "internal").put("type", "task").put("text", "Internal work"))))
+        assertEquals("Keep this draft", draft.text)
+        assertNull(draft.replyTo)
+        val oldSubmission = NativeCompanionSubmission.prepare("kaka", NativeCompanionDraft("Keep submitted content",
+            replyTo = NativeCompanionReplyPreview("internal", "Internal work", "task")), "2026-10-31T00:00:00Z")
+        val restored = NativeCompanionSubmission.restore(oldSubmission.json())
+        assertEquals(oldSubmission.payload, restored.payload)
+        assertEquals("internal", restored.draft.replyTo!!.id)
+    }
+
     @Test fun consumedDraftSurvivesOutboxRestoreSoCompletionCannotClearNewIdenticalText() {
         val prepared = NativeCompanionSubmission.prepare("kaka", NativeCompanionDraft("Hello"), "2026-10-30T00:00:00Z")
         val consumed = prepared.copy(draftConsumed = true)

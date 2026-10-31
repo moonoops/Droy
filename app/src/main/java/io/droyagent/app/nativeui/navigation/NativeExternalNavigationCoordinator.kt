@@ -156,8 +156,15 @@ class NativeExternalNavigationCoordinator(
             is NativeExternalNavigationTarget.EngineSession -> when (resolved) {
                 is NativeExternalResolvedTarget.EngineSession -> resolved.session.id == request.sessionId && resolved.petRequestId == request.petRequestId
                 is NativeExternalResolvedTarget.CompanionTask -> resolved.session.id == request.sessionId && resolved.petRequestId == request.petRequestId
-                is NativeExternalResolvedTarget.CompanionChat -> request.petRequestId == null && resolved.chatSessionId == request.sessionId
+                is NativeExternalResolvedTarget.CompanionChat -> (resolved.sourceSessionId ?: resolved.chatSessionId) == request.sessionId
+                    && resolved.petRequestId == request.petRequestId
                 else -> false
+            }
+            is NativeExternalNavigationTarget.CompanionTask -> when (resolved) {
+                is NativeExternalResolvedTarget.CompanionChat -> resolved.companionId == request.companionId
+                    && resolved.sourceSessionId == request.sessionId && resolved.sourceTaskId == request.taskId
+                    && resolved.petRequestId == request.petRequestId
+                else -> resolved.surface == request
             }
             is NativeExternalNavigationTarget.ImportedMedia -> resolved is NativeExternalResolvedTarget.ImportedMedia && resolved.requestedImportId == request.importId
             else -> resolved.surface == request

@@ -53,7 +53,7 @@ class NativeCompanionVoiceGeometryDeviceTest {
                             CompanionMessageRow(message, NativeCompanion("friend", "Friend", "fixture-avatar"), profile,
                                 quoted = null, sticker = null, loader = { byteArrayOf() }, onProfile = {}, onUserProfile = {},
                                 onMenu = { menu.set(it) }, onRetry = {}, onImage = { _, _ -> }, onAttachment = null,
-                                onVoice = {}, onTask = {}, sending = stage.intValue == 1)
+                                onVoice = {}, sending = stage.intValue == 1)
                         }
                     }
                 }

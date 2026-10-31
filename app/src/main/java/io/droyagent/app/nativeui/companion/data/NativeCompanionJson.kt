@@ -9,6 +9,9 @@ internal object NativeCompanionJson {
         value.getString("phase"), value.stringOrNull("error"), value.optJSONObject("chatExecution")?.let {
             NativeCompanionExecution(it.getBoolean("quiescent"), it.getBoolean("cancelRequested"))
         },
+        value.optJSONObject("execution")?.let {
+            NativeCompanionExecution(it.getBoolean("quiescent"), it.getBoolean("cancelRequested"))
+        },
     )
 
     fun attachment(value: JSONObject): NativeCompanionAttachment = NativeCompanionAttachment(

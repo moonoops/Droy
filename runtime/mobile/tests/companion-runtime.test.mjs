@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRequire, registerHooks } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CompanionStore } from '../companions/store.mjs';
@@ -434,10 +434,10 @@ test('same-template instances keep Planner, Replyer, memory, media, work, notifi
   assert.equal((await f.store.sessionOwner(bTask.sessionId)).companionId, beta.id);
   const bDeliveries = b.deliveries.length;
   await f.runtime.cancel(alpha.id);
-  await eventually(() => f.runtime.chatExecution(alpha.id).quiescent, 'Alpha chat stopped');
+  await eventually(() => f.runtime.execution(alpha.id).quiescent, 'Alpha chat and work stopped');
   assert.equal(f.runtime.chatExecution(beta.id).quiescent, false);
   assert.equal(b.status, 'running'); assert.equal(b.deliveries.length, bDeliveries);
-  assert.equal(f.ctx.agents.get(aTask.sessionId).status, 'running');
+  assert.equal(f.ctx.agents.get(aTask.sessionId).status, 'idle');
   assert.equal(f.ctx.agents.get(bTask.sessionId).status, 'running');
   await f.runtime.wake(alpha.id, { kind: 'proactive' });
   assert.equal(a.deliveries.length, 2); assert.equal(b.deliveries.length, bDeliveries);
@@ -835,7 +835,7 @@ test('chat cancellation confirms a pure queue and a scheduled wait without creat
   assert.equal(f.runtime.chatExecution('kaka').cancelRequested,false);
 });
 
-test('a send still persisting at cancellation prevents an unsupported quiescent observation',async t=>{
+test('a send still persisting at cancellation settles visibly without reactivating the stopped batch',async t=>{
   const started=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
   const f=await fixture(t),append=f.store.appendMessage.bind(f.store);
   f.store.appendMessage=async(id,input)=>{started.resolve();await release.promise;return append(id,input);};
@@ -843,9 +843,9 @@ test('a send still persisting at cancellation prevents an unsupported quiescent 
   await started.promise;await f.runtime.cancel('kaka');
   assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:false,cancelRequested:true});
   release.resolve();await sending;
-  assert.equal(f.runtime.chatExecution('kaka').quiescent,false);
-  await f.runtime.cancel('kaka');
+  await eventually(()=>f.runtime.execution('kaka').quiescent,'accepted send settles into cancelled batch');
   assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:true,cancelRequested:true});
+  assert.equal((await f.store.getMessage('kaka','persisting-send-source')).status,'sent');
   assert.equal(f.calls.agents.length,0);
 });
 
@@ -945,14 +945,119 @@ test('a rejected late opening cannot put a cancelled batch back into the pending
   assert.deepEqual(f.runtime.state('kaka').pending,[]);
 });
 
-test('chat stop confirmation does not claim that an independent work task has stopped',async t=>{
+test('partner stop cancels its independent work while preserving the chat-only observation scope',async t=>{
   const f=await fixture(t),task=await f.runtime.startWork('kaka',{title:'Independent fictional work',goal:'Continue independent work'});
   const worker=f.ctx.agents.get(task.sessionId);
   assert.equal(worker.status,'running');
   await f.runtime.cancel('kaka');
   assert.deepEqual(f.runtime.chatExecution('kaka'),{quiescent:true,cancelRequested:true});
-  assert.equal(worker.status,'running');
-  assert.equal((await f.store.getMessage('kaka',task.taskId)).task.state,'running');
+  await eventually(()=>f.runtime.execution('kaka').quiescent,'partner work truly stopped');
+  assert.equal(worker.status,'idle');
+  assert.equal((await f.store.getMessage('kaka',task.taskId)).task.state,'cancelled');
+});
+
+test('partner stop waits for owned work retirement without cancelling another partner or user agent',async t=>{
+  const f=await fixture(t),a=await f.runtime.startWork('kaka',{title:'First fictional work',goal:'Complete first work'}),
+    b=await f.runtime.startWork('maimai',{title:'Other fictional work',goal:'Complete other work'});
+  const worker=f.agents.get(a.sessionId),other=f.agents.get(b.sessionId),gate=Promise.withResolvers();t.after(()=>gate.resolve());
+  const user={id:'user-owned-fixture',status:'running',cancel(){assert.fail('Partner stop reached a user task');}};f.agents.set(user.id,user);
+  worker.whenIdle=()=>gate.promise;
+  await f.runtime.cancel('kaka');
+  assert.deepEqual(f.runtime.execution('kaka'),{quiescent:false,cancelRequested:true});
+  assert.equal(f.runtime.activity().busy,true);assert.equal(other.status,'running');assert.equal(user.status,'running');
+  gate.resolve();await eventually(()=>f.runtime.execution('kaka').quiescent,'owned work retirement');
+  assert.equal(other.status,'running');assert.equal(user.status,'running');
+  f.runtime.state('kaka').workResults=new Map([[a.sessionId,'A late fictional result']]);
+  await f.runtime.finishTurn(await f.store.sessionOwner(a.sessionId),{data:{reason:{kind:'completed'}}});
+  assert.equal(f.runtime.state('kaka').pending.length,0);
+  assert.equal((await f.store.getMessage('kaka',a.taskId)).task.state,'cancelled');
+});
+
+test('work opening after partner cancellation never receives a goal and keeps private activity busy until settled',async t=>{
+  const f=await fixture(t),started=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  const create=f.ctx.agents.create.bind(f.ctx.agents),activities=[];
+  const unsubscribe=f.runtime.subscribeActivity(value=>activities.push(value.busy));t.after(unsubscribe);
+  f.ctx.agents.create=async input=>{if(input.meta.cwd.endsWith('/work')){started.resolve();await release.promise;}return create(input);};
+  const opening=f.runtime.startWork('kaka',{title:'Delayed fictional work',goal:'This cancelled goal must not run'}).then(value=>({value}),error=>({error}));
+  await started.promise;assert.equal(f.runtime.activity().busy,true);
+  await f.runtime.cancel('kaka');assert.equal(f.runtime.execution('kaka').quiescent,false);
+  release.resolve();assert.equal((await opening).error.code,'COMPANION_CANCELLED');
+  await eventually(()=>f.runtime.execution('kaka').quiescent,'late work opening retired');
+  assert.deepEqual(f.calls.agents.find(row=>row.input.meta.cwd.endsWith('/work')).agent.deliveries,[]);
+  const task=(await f.store.listMessages('kaka')).messages.find(row=>row.type==='task');
+  assert.equal(task.task.state,'cancelled');assert.equal(task.task.cancelRequested,true);
+  assert.equal(f.runtime.activity().busy,false);assert.ok(activities.includes(true));
+  f.runtime.scheduleProactive('kaka',new Date(Date.now()+3600000).toISOString());
+  assert.equal(f.runtime.activity().busy,false,'A future proactive plan is not current work');
+});
+
+test('a completed work result waiting on storage cannot reopen a partner after stop',async t=>{
+  const f=await fixture(t),task=await f.runtime.startWork('kaka',{title:'Result race fixture',goal:'Produce a fictional result'}),
+    owner=await f.store.sessionOwner(task.sessionId),started=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  f.runtime.state('kaka').workResults=new Map([[task.sessionId,'Fictional result that arrives late']]);
+  const get=f.store.getMessage.bind(f.store);let blocked=false;
+  f.store.getMessage=async(id,messageId)=>{const saved=await get(id,messageId);if(messageId===task.taskId&&!blocked){blocked=true;started.resolve();await release.promise;}return saved;};
+  const finishing=f.runtime.finishTurn(owner,{data:{reason:{kind:'completed'}}});
+  await started.promise;await f.runtime.cancel('kaka');release.resolve();await finishing;
+  await eventually(()=>f.runtime.execution('kaka').quiescent,'late result callback drained');
+  assert.deepEqual(f.runtime.state('kaka').pending,[]);
+  assert.equal((await get('kaka',task.taskId)).task.state,'cancelled');
+  assert.equal((await f.store.getState('kaka')).pendingMessageIds.length,0);
+});
+
+test('partner cancellation is durable across restart and does not recreate cancelled work',async t=>{
+  const f=await fixture(t),task=await f.runtime.startWork('kaka',{title:'Restart stop fixture',goal:'Do not recover after cancellation'});
+  await f.runtime.cancel('kaka');await eventually(()=>f.runtime.execution('kaka').quiescent,'stop persisted before restart');
+  await f.runtime.close();const count=f.calls.agents.length;
+  const restored=f.ownRuntime(new CompanionRuntime({ctx:f.ctx,store:f.store,directory:f.directory,options:{debounceMs:0}}));
+  await restored.initialize();await restored.start();await delay(15);
+  assert.equal(f.calls.agents.length,count);assert.equal(restored.state('kaka').pending.length,0);
+  assert.equal((await f.store.getMessage('kaka',task.taskId)).task.state,'cancelled');
+  assert.equal(restored.activity().busy,false);
+});
+
+test('a legacy cancelled work result is not admitted as new chat input on startup',async t=>{
+  const f=await fixture(t);
+  await f.store.appendMessage('kaka',{id:'old-cancelled-work',role:'assistant',type:'task',text:'Historical internal cancelled work',
+    status:'received',task:{state:'cancelled',sessionId:'historical-work-session'}});
+  await f.store.updateState('kaka',{pendingMessageIds:['old-cancelled-work']});
+  await f.runtime.start();await delay(15);
+  assert.equal(f.calls.agents.length,0);assert.equal(f.runtime.state('kaka').pending.length,0);
+  assert.equal(f.runtime.activity().busy,false);
+});
+
+test('partner stop aborts an in-flight work reply and waits for its real response iterator',async t=>{
+  const started=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  let signal;
+  const f=await fixture(t,{stream:async function*(call){signal=call.input.signal;started.resolve();await release.promise;
+    yield {type:'text-delta',text:'A cancelled fictional work answer'};yield {type:'finish',reason:{kind:'stop'}};}});
+  const task=await f.runtime.startWork('kaka',{title:'Work reply stop',goal:'A fictional goal'}),owner=await f.store.sessionOwner(task.sessionId);
+  const reply=f.runtime.reply(owner,{reply_reference:'Fictional result'}).then(value=>({value}),error=>({error}));
+  await started.promise;await f.runtime.cancel('kaka');
+  assert.equal(signal.aborted,true);assert.equal(f.runtime.execution('kaka').quiescent,false);
+  release.resolve();assert.ok((await reply).error);
+  await eventually(()=>f.runtime.execution('kaka').quiescent,'work iterator truly drained');
+  assert.equal(f.runtime.state('kaka').workResults?.size??0,0);
+  assert.equal((await f.store.getMessage('kaka',task.taskId)).task.state,'cancelled');
+});
+
+test('partner stop aborts its current learning while preserving another partner and proactive settings',async t=>{
+  const started=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  let signal;
+  const f=await fixture(t,{learningMessages:1,stream:async function*(call){signal=call.input.signal;started.resolve();await release.promise;
+    yield {type:'text-delta',text:'[]'};yield {type:'finish',reason:{kind:'stop'}};}});
+  await f.store.updateProfile('kaka',{settings:{proactiveEnabled:true}});
+  await f.store.appendMessage('kaka',{id:'learning-stop-source',role:'user',text:'Fictional learning stop source'});
+  const other=await f.runtime.startWork('maimai',{title:'Other work',goal:'Continue other work'});
+  const learning=f.runtime.learn('kaka').then(value=>({value}),error=>({error}));
+  await started.promise;await f.runtime.cancel('kaka');
+  assert.equal(signal.aborted,true);assert.equal(f.runtime.execution('kaka').quiescent,false);
+  assert.equal(f.ctx.agents.get(other.sessionId).status,'running');
+  release.resolve();await learning;
+  await eventually(()=>f.runtime.execution('kaka').quiescent,'learning settles after stop');
+  assert.equal((await f.store.getProfile('kaka')).settings.proactiveEnabled,true);
+  assert.deepEqual((await f.store.getState('kaka')).impressions??[],[]);
+  assert.equal(f.ctx.agents.get(other.sessionId).status,'running');
 });
 
 test('authenticated list, message snapshots and SSE distinguish cancellation acknowledgement from quiescence',{timeout:8000},async t=>{
@@ -999,6 +1104,83 @@ test('authenticated list, message snapshots and SSE distinguish cancellation ack
   assert.deepEqual((await nextStatus(true)).chatExecution,{quiescent:true,cancelRequested:true});
   assert.deepEqual((await api('/kaka/messages')).status.chatExecution,{quiescent:true,cancelRequested:true});
   abort.abort();
+});
+
+test('SSE publishes whole-partner idle after normal work, reply and background learning truly finish',{timeout:8000},async t=>{
+  const f=await fixture(t),learning=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  f.runtime.learner.maintain=async()=>{learning.resolve();await release.promise;return {hasMore:false};};
+  const token='fictional-companion-whole-idle-token',previousToken=process.env.DROY_WEB_TOKEN;process.env.DROY_WEB_TOKEN=token;
+  const handler=createCompanionHandler({ctx:f.ctx,runtime:f.runtime,store:f.store}),abort=new AbortController(),
+    server=createServer((req,res)=>handler(req,res));
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{abort.abort();release.resolve();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
+    if(previousToken===undefined)delete process.env.DROY_WEB_TOKEN;else process.env.DROY_WEB_TOKEN=previousToken;});
+  const base='http://127.0.0.1:'+server.address().port+'/droy/companions';
+  const response=await fetch(base+'/events',{headers:{cookie:'droy_session='+token},signal:AbortSignal.any([abort.signal,AbortSignal.timeout(5000)])}),
+    reader=response.body.getReader(),decoder=new TextDecoder();await reader.read();
+  let buffered='';
+  const nextStatus=async quiescent=>{
+    for(;;) {
+      let end;
+      while((end=buffered.indexOf('\n\n'))>=0) {
+        const frame=buffered.slice(0,end);buffered=buffered.slice(end+2);
+        if(frame.startsWith('data: ')){const event=JSON.parse(frame.slice(6));
+          if(event.companionId==='kaka'&&event.status?.execution.quiescent===quiescent)return event;}
+      }
+      const part=await reader.read();assert.equal(part.done,false);buffered+=decoder.decode(part.value,{stream:true});
+    }
+  };
+  const task=await f.runtime.startWork('kaka',{title:'Whole idle fixture',goal:'Fictional completed work'});
+  f.runtime.state('kaka').workResults=new Map([[task.sessionId,'Fictional completed work result']]);
+  f.agents.get(task.sessionId).status='idle';
+  await f.runtime.finishTurn(await f.store.sessionOwner(task.sessionId),{data:{reason:{kind:'completed'}}});
+  await f.runtime.flush('kaka');const chat=await f.runtime.agent('kaka'),owner=await f.store.sessionOwner(chat.id);
+  await f.runtime.reply(owner,{msg_id:task.taskId,reply_reference:'Report the fictional finished work'});
+  chat.status='idle';await f.runtime.finishTurn(owner,{data:{reason:{kind:'completed'}}});await learning.promise;
+  assert.equal((await nextStatus(false)).status.execution.quiescent,false);
+  release.resolve();const settled=await nextStatus(true);
+  assert.equal(settled.kind,'status');assert.equal(settled.status.execution.cancelRequested,false);
+  const events=[],unsubscribe=f.runtime.subscribe(event=>events.push(event));
+  await f.runtime.markRead('kaka');unsubscribe();
+  assert.equal(events.filter(event=>event.kind==='status').length,0,'Read receipts do not start an execution/status refresh loop');
+  assert.equal(events.every(event=>event.status.execution.quiescent),true);
+  abort.abort();
+});
+
+test('an accepted HTTP message body cannot admit partner work after the lifecycle exit fence',async t=>{
+  const f=await fixture(t),started=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  let stopping=false;f.ctx.provide('droyLifecycle',{get stopping(){return stopping;}});
+  const token='fictional-companion-exit-admission-token',previousToken=process.env.DROY_WEB_TOKEN;process.env.DROY_WEB_TOKEN=token;
+  t.after(()=>{if(previousToken===undefined)delete process.env.DROY_WEB_TOKEN;else process.env.DROY_WEB_TOKEN=previousToken;});
+  const handler=createCompanionHandler({ctx:f.ctx,runtime:f.runtime,store:f.store}),server=createServer((req,res)=>{started.resolve();void handler(req,res);});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+  const body=JSON.stringify({clientId:'old-http-body',text:'An accepted request whose body arrives late'});
+  let request;
+  const pending=new Promise((resolve,reject)=>{
+    request=httpRequest('http://127.0.0.1:'+server.address().port+'/droy/companions/kaka/messages',{
+      method:'POST',headers:{cookie:'droy_session='+token,'content-type':'application/json','content-length':Buffer.byteLength(body)}},res=>{
+      let data='';res.on('data',part=>{data+=part;});res.on('end',()=>resolve({status:res.statusCode,value:JSON.parse(data)}));
+    });request.on('error',reject);request.write(body.slice(0,20));
+  });
+  await started.promise;stopping=true;request.end(body.slice(20));const res=await pending;
+  assert.equal(res.status,503);assert.equal(res.value.error,'DROY_STOPPING');
+  assert.equal(await f.store.getMessage('kaka','old-http-body'),null);assert.equal(f.calls.agents.length,0);
+  await assert.rejects(f.runtime.startWork('kaka',{title:'Late work',goal:'Must be rejected'}),code('DROY_STOPPING'));
+  await assert.rejects(f.runtime.resumeWork({companionId:'kaka',sessionId:'late-session',taskId:'late-task'}),code('DROY_STOPPING'));
+  await assert.rejects(f.runtime.considerProactive('kaka'),code('DROY_STOPPING'));
+});
+
+test('user writes awaiting ownership resolution are rejected after the idle exit fence',async t=>{
+  const f=await fixture(t),started=Promise.withResolvers(),release=Promise.withResolvers();t.after(()=>release.resolve());
+  let stopping=false;f.ctx.provide('droyLifecycle',{get stopping(){return stopping;}});
+  const profiles=f.store.profiles.bind(f.store);
+  f.store.profiles=async()=>{started.resolve();await release.promise;return profiles();};
+  const creating=f.ctx.sessionController.create({}).then(value=>({value}),error=>({error}));
+  await started.promise;stopping=true;release.resolve();
+  assert.equal((await creating).error.code,'DROY_STOPPING');
+  await assert.rejects(f.ctx.sessionController.prompt({sessionId:'user-fixture'}),code('DROY_STOPPING'));
+  assert.deepEqual(f.calls.controller,[]);
 });
 
 test('restart completes an older saved multi-part reply without replaying the user',async t=>{
