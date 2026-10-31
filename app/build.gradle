@@ -239,6 +239,7 @@ android {
     sourceSets.main {
         jniLibs.srcDirs += [new File(nodeRuntimeDir, 'jniLibs'), '../runtime/generated/jniLibs']
         assets.srcDirs += [new File(nodeRuntimeDir, 'assets'), '../runtime/generated/assets', '../runtime/mobile/assets']
+        assets.srcDirs += [layout.buildDirectory.dir('generated/companion-artwork').get().asFile]
     }
     packaging {
         jniLibs { useLegacyPackaging = true; keepDebugSymbols += ['**/*.so'] }
@@ -297,4 +298,13 @@ dependencies {
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }
+
+// Native and runtime consumers use the same artwork sources. Only public raster assets are copied.
+def prepareCompanionArtwork = tasks.register('prepareCompanionArtwork', Sync) {
+    from(rootProject.file('runtime/mobile/companions/assets')) {
+        include '*.png', '*.webp'
+    }
+    into(layout.buildDirectory.dir('generated/companion-artwork/droy-companion'))
+}
+tasks.named('preBuild').configure { dependsOn prepareCompanionArtwork }
 

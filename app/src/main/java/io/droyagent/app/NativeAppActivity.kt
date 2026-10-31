@@ -31,6 +31,7 @@ import io.droyagent.app.nativeui.media.NativeMediaCoordinator
 import io.droyagent.app.nativeui.schedule.NativeSchedulesViewModel
 import io.droyagent.app.nativeui.setup.NativeOnboardingViewModel
 import io.droyagent.app.nativeui.setup.NativeOnboardingScreen
+import io.droyagent.app.nativeui.setup.NativeStartupGate
 import io.droyagent.app.nativeui.permissions.NativePermissionAction
 import io.droyagent.app.nativeui.memory.NativeMemoryViewModel
 import io.droyagent.app.nativeui.voice.NativeVoiceViewModel
@@ -182,7 +183,7 @@ class NativeAppActivity : ComponentActivity() {
                             else if (result.failed) stringResource(R.string.native_voice_input_album_failed) else null
                         }, dismissNotice = media::dismissCameraAlbumResult,
                     )
-                    if (onboardingState.requiresSetup != false) {
+                    NativeStartupGate(onboardingState.requiresSetup, onboardingState.localError, onboarding::refresh, onboarding = {
                         NativeOnboardingScreen(onboardingState, onboarding, settingsState, settings, companionState, companions,
                             permissionState, permissions::onAction, permissions::setScreenVisible,
                             onCompleted = { onboarding.refresh() }, onExit = ::finish,
@@ -190,7 +191,7 @@ class NativeAppActivity : ComponentActivity() {
                             onAvatarConsumed = { mediaState.avatarFor(null)?.let { media.consumeAvatar(null, it.id) } },
                             mediaError = actions.error, onRetryMedia = actions.retry,
                             onDismissMediaError = actions.dismissError, mediaBusy = mediaState.busy)
-                    } else NativeAppShell(state, model, companionState, companions, settingsState, settings,
+                    }, content = { NativeAppShell(state, model, companionState, companions, settingsState, settings,
                             permissionState, permissions::onAction, permissions::setScreenVisible, scheduleState, schedules,
                             externalNavigation = externalNavigation, transcriptModel = transcriptModel,
                             onOpenAudioAuthorization = { externalNavigation.openAudio(this@NativeAppActivity, it) }, media = actions,
@@ -207,6 +208,7 @@ class NativeAppActivity : ComponentActivity() {
                             onDeleteCompanion = { id -> NativeCompanionDeletion.begin(applicationContext, id, maintenance) },
                             onResumeCompanionDeletion = { NativeCompanionDeletion.resume(applicationContext, maintenance) },
                             onOpenUrl = ::openUrl)
+                    })
                 }
             }
         }
@@ -215,6 +217,8 @@ class NativeAppActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         NativeRuntimeHost.onStarted(this)
+        // Publish the foreground launch intent before observers render a stopped state.
+        if (NativeRuntimeHost.inspect(this).canStart) model.startRuntime()
         standardVoiceModel.attachPermissionLauncher { id -> NativeStandardVoiceHost.openAudioPermission(this, id) }
         model.startObserving()
         companions.startObserving()
@@ -249,8 +253,6 @@ class NativeAppActivity : ComponentActivity() {
         super.onResume()
         maintenance.setForeground(true)
         NativeCompanionDeletion.resume(applicationContext, maintenance)
-        // Opening the app retries a stopped engine once; observers never restart it.
-        if (NativeRuntimeHost.inspect(this).canStart) model.startRuntime()
         permissions.resume()
         externalNavigation.setHostResumed(true)
         HardwareRuntime.onPermissionsChanged(this)

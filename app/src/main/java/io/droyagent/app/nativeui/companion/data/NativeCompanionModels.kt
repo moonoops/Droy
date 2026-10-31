@@ -107,8 +107,12 @@ data class NativeCompanionState(
     val stickerPackImporting: Boolean = false,
     val readingAnchor: NativeCompanionReadingAnchor? = null,
     val draftsByCompanion: Map<String, NativeCompanionDraft> = emptyMap(),
+    val backgroundChoices: Map<String, String> = emptyMap(),
 ) {
     val selectedCompanion: NativeCompanion? get() = companions.firstOrNull { it.id == selectedCompanionId }
+    val selectedBackgroundJson: String? get() = selectedCompanion.let { companion ->
+        if (companion != null) companion.chatBackgroundJson else backgroundChoices[selectedCompanionId]
+    }
     val conversations: List<NativeCompanion> get() = companions.filterNot { it.hidden }
         .sortedWith(compareByDescending<NativeCompanion> { it.pinned }.thenByDescending { it.lastActivityAt ?: it.lastMessage?.createdAt ?: "" })
 }

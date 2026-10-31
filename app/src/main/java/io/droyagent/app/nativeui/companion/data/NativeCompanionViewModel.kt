@@ -33,7 +33,7 @@ import org.json.JSONObject
 
 /** Companion messages remain owned by the existing product service and SQLite store. */
 class NativeCompanionViewModel(application: Application) : AndroidViewModel(application) {
-    private val api = NativeCompanionClient()
+    private val api = NativeCompanionClient(application.assets)
     private val preferences = application.getSharedPreferences("native_companions", 0)
     private val localMedia = NativeDraftMediaStore(application)
     private val histories = mutableMapOf<String, NativeCompanionHistory>()
@@ -61,6 +61,7 @@ class NativeCompanionViewModel(application: Application) : AndroidViewModel(appl
         runtime = NativeRuntimeState(initialRuntime.ready, initialRuntime.active, initialRuntime.canStart, initialRuntime.status, initialRuntime.locale),
         selectedCompanionId = initialId, draft = initialId?.let(::draft) ?: NativeCompanionDraft(),
         error = restoreError,
+        backgroundChoices = if (NativeCompanionWriteBarrier.frozen) emptyMap() else NativeCompanionAppearance.read(preferences.all),
     ))
     val state: StateFlow<NativeCompanionState> = _state.asStateFlow()
 
@@ -80,7 +81,7 @@ class NativeCompanionViewModel(application: Application) : AndroidViewModel(appl
                 draft = if (selected) NativeCompanionDraft() else current.draft,
                 status = if (selected) NativeCompanionStatus() else current.status,
                 readingAnchor = if (selected) null else current.readingAnchor,
-                draftsByCompanion = drafts.toMap())
+                draftsByCompanion = drafts.toMap(), backgroundChoices = current.backgroundChoices - id)
         }
     }
 
@@ -553,7 +554,9 @@ class NativeCompanionViewModel(application: Application) : AndroidViewModel(appl
                     val stickerPacks = value.optJSONArray("stickerPacks").objects().map(NativeCompanionJson::stickerPack)
                     rootLoaded = true
                     val user = NativeCompanionJson.user(value.getJSONObject("userProfile"))
-                    _state.update { it.copy(companions = companions, userProfile = if (userRevision == userProfileRevision) user else it.userProfile,
+                    val backgrounds = NativeCompanionAppearance.snapshot(companions)
+                    NativeCompanionAppearance.save(preferences, backgrounds)
+                    _state.update { it.copy(companions = companions, backgroundChoices = backgrounds, userProfile = if (userRevision == userProfileRevision) user else it.userProfile,
                         models = models, defaultModel = value.optJSONObject("defaultModel")?.let(NativeCompanionJson::model)?.let { route -> models.firstOrNull { it.provider == route.provider && it.id == route.id } ?: route }, stickers = stickers, stickerPacks = stickerPacks, loading = it.selectedCompanionId != null && histories[it.selectedCompanionId]?.loaded != true,
                         draftsByCompanion = companions.associate { profile -> profile.id to draft(profile.id) },
                         error = if (it.error in transientErrors) null else it.error) }

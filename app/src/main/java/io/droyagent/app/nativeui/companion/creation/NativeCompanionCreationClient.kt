@@ -11,9 +11,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-internal class NativeCreationClient(private val files: NativeCreationFileStore) : NativeCreationRepository {
+internal class NativeCreationClient(private val files: NativeCreationFileStore, assets: android.content.res.AssetManager) : NativeCreationRepository {
     private val transport = NativeLocalTransport()
-    private val companions = NativeCompanionClient()
+    private val companions = NativeCompanionClient(assets)
     private val base = "/droy/companions"
     private fun segment(value: String) = NativeApiClient.encodeSegment(value)
     override suspend fun templates() = NativeCreationJson.templates(transport.json("$base/templates"))

@@ -43,6 +43,11 @@ Kotlin compilation uses AGP's built-in Kotlin support. The Compose compiler
 plugin and Kotlin standard library remain at 2.2.21; keep compiler versions
 aligned when updating them. Navigation Compose remains at 2.9.8.
 
+Gradle packages the public PNG/WebP artwork from `runtime/mobile/companions/assets`
+into native assets during `preBuild`. Native companion backgrounds and avatars can
+therefore load before the engine starts; the runtime uses the same source files.
+Private uploaded attachments continue through the authenticated product service.
+
 Migration references: [Material 3 releases](https://developer.android.com/jetpack/androidx/releases/compose-material3#1.5.0-beta02),
 [AGP 9.1 compatibility](https://developer.android.com/build/releases/agp-9-1-0-release-notes),
 and [built-in Kotlin](https://developer.android.com/build/migrate-to-built-in-kotlin).

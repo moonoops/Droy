@@ -12,6 +12,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -20,6 +21,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import org.json.JSONException
 import io.droyagent.app.R
 import io.droyagent.app.nativeui.companion.data.*
 import io.droyagent.app.nativeui.ui.DroyIcon
@@ -36,6 +40,11 @@ fun CompanionMessagesScreen(
     imageLoader: CompanionImageLoader = model::loadImage,
     onAddCompanion: (() -> Unit)? = null,
 ) {
+    PreloadCompanionBackground(state.selectedBackgroundJson, imageLoader)
+    val scope = rememberCoroutineScope()
+    val windowSize = LocalWindowInfo.current.containerSize
+    val currentState by rememberUpdatedState(state)
+    var opening by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
     val haptics = LocalHapticFeedback.current
     var menuId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -85,7 +94,22 @@ fun CompanionMessagesScreen(
                 val draft = state.draftsByCompanion[companion.id]?.takeIf { it.canSend || it.replyTo != null }
                 Row(Modifier.fillMaxWidth().combinedClickable(
                     role = Role.Button,
-                    onClick = { onOpenChat(companion.id) },
+                    enabled = !opening,
+                    onClick = {
+                        opening = true
+                        scope.launch {
+                            try {
+                                val preset = try { companion.chatBackgroundJson?.let(::JSONObject)
+                                    ?.takeIf { it.optString("type") == "preset" }?.let(::companionBackgroundUrl) }
+                                    catch (_: JSONException) { null }
+                                if (preset != null && windowSize.width > 0 && windowSize.height > 0)
+                                    preloadCompanionBackgroundImage(preset, windowSize, imageLoader)
+                                if (currentState.companions.any { it.id == companion.id } &&
+                                    !io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.frozen)
+                                    onOpenChat(companion.id)
+                            } finally { opening = false }
+                        }
+                    },
                     onLongClickLabel = stringResource(R.string.native_companion_conversation_actions),
                     onLongClick = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); menuId = companion.id },
                 ).heightIn(min = 80.dp).padding(horizontal = 20.dp, vertical = 8.dp)

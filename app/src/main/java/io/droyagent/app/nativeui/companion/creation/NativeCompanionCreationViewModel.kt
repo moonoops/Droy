@@ -17,7 +17,7 @@ class NativeCompanionCreationViewModel(application: Application) : AndroidViewMo
     private val workIdentity = UUID.randomUUID().toString()
     private var cleared = false
     private val files = NativeCreationFileStore(application)
-    private val client = NativeCreationClient(files)
+    private val client = NativeCreationClient(files, application.assets)
     private val coordinator = NativeCreationCoordinator(client, NativeCreationPreferences(application), files, viewModelScope,
         activityChanged = { value -> if (!cleared && tracker.update(workIdentity, value)) NativeRuntimeHost.backgroundWorkChanged() })
     val state = coordinator.state

@@ -4,6 +4,8 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntSize
@@ -40,9 +42,19 @@ internal fun companionUploadedBackground(result: NativeAvatarResult): String = J
 
 @Composable
 internal fun CompanionBackgroundImage(url: String, loader: CompanionImageLoader, modifier: Modifier,
-    alignment: Alignment = Alignment.Center) {
+    alignment: Alignment = Alignment.Center, decodeSize: IntSize? = null) {
     BoxWithConstraints(modifier) {
         CompanionImage(url, null, loader, Modifier.fillMaxSize(), alignment = alignment,
-            cropTargetSize = IntSize(constraints.maxWidth.coerceAtLeast(1), constraints.maxHeight.coerceAtLeast(1))) { }
+            cropTargetSize = decodeSize ?: IntSize(constraints.maxWidth.coerceAtLeast(1), constraints.maxHeight.coerceAtLeast(1))) { }
+    }
+}
+
+@Composable
+internal fun PreloadCompanionBackground(raw: String?, loader: CompanionImageLoader) {
+    val target = LocalWindowInfo.current.containerSize
+    LaunchedEffect(raw, target) {
+        val url = try { raw?.let(::JSONObject)?.let(::companionBackgroundUrl) }
+            catch (_: org.json.JSONException) { null }
+        if (url != null && target.width > 0 && target.height > 0) preloadCompanionBackgroundImage(url, target, loader)
     }
 }

@@ -13,6 +13,15 @@ class NativeCompanionRetirementPlanTest {
     private fun manifest(id: String) = JSONObject().put("id", id).put("source", "native-picker").put("consumer", "work").put("items", JSONArray())
     private fun changes(plan: JSONObject) = plan.getJSONArray("changes").let { rows -> (0 until rows.length()).map(rows::getJSONObject) }
 
+    @Test fun retiresOnlyDeletedCompanionsBackgroundHintIncludingPrivateAttachmentReference() {
+        val background = JSONObject().put("type", "upload").put("id", "image")
+            .put("url", "/droy/companions/target/attachments/image").toString()
+        val result = plan(mapOf("native_companions" to mapOf("background:target" to background,
+            "background:target-extra" to "{}")))
+        assertEquals(listOf("background:target"), changes(result).map { it.getString("key") })
+        assertTrue(result.getJSONObject("snapshot").toString().contains("/droy/companions/target/attachments/image"))
+    }
+
     @Test fun retiresVoiceMetadataOnlyForDeletedSession() {
         val result = plan(mapOf("native_workbench" to mapOf(
             "voice-duration:im:target:request" to 3200L,

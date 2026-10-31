@@ -15,7 +15,7 @@ internal data class NativeCompanionPage(
     val nextBefore: String?, val nextAfter: String, val status: NativeCompanionStatus,
 )
 
-internal class NativeCompanionClient {
+internal class NativeCompanionClient(private val assets: android.content.res.AssetManager? = null) {
     private val transport = NativeLocalTransport()
     private val base = "/droy/companions"
     private fun segment(value: String) = NativeApiClient.encodeSegment(value)
@@ -50,12 +50,21 @@ internal class NativeCompanionClient {
         NativeCompanionJson.attachment(transport.json("$base/$owner/uploads", "POST", payload))
     }
     suspend fun media(url: String): ByteArray {
+        val bundled = bundledCompanionAsset(url)
+        if (bundled != null && assets != null) return withContext(Dispatchers.IO) {
+            assets.open("droy-companion/$bundled").use { NativeLocalTransport.boundedBytes(it, 20 * 1024 * 1024) }
+        }
         if (!url.startsWith("$base/") || url.contains('#') || url.contains('\\')) throw NativeApiException("COMPANION_ATTACHMENT_SCOPE")
         val path = try { java.net.URI(url).normalize().path } catch (error: java.net.URISyntaxException) { throw NativeApiException("COMPANION_ATTACHMENT_SCOPE", error) }
         if (!path.startsWith("$base/") || path.split('/').any { it == "." || it == ".." }) throw NativeApiException("COMPANION_ATTACHMENT_SCOPE")
         return transport.bytes(url)
     }
 }
+
+/** Only packaged public artwork can bypass the authenticated attachment transport. */
+internal fun bundledCompanionAsset(url: String): String? =
+    Regex("^/droy/companions/assets/([A-Za-z0-9_-]+\\.(?:png|webp))(?:\\?v=[A-Za-z0-9_.-]+)?$")
+        .matchEntire(url)?.groupValues?.get(1)
 
 internal const val MAX_STICKER_PACK_BYTES = 20 * 1024 * 1024
 

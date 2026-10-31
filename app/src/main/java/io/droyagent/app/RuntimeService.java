@@ -51,6 +51,14 @@ public final class RuntimeService extends Service {
     }
     @Override public IBinder onBind(Intent intent) { return null; }
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        try { return handleStartCommand(intent, flags, startId); }
+        finally {
+            if (intent != null && NativeRuntimeHost.START_NATIVE.equals(intent.getAction()))
+                NativeRuntimeHost.startAcknowledged();
+        }
+    }
+
+    private int handleStartCommand(Intent intent, int flags, int startId) {
         NotificationManagement.refreshAccess(this);
         if (intent != null && STOP.equals(intent.getAction())) {
             HardwareRuntime.stopAll(this);

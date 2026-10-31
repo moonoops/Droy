@@ -11,6 +11,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class NativeRuntimeHost {
     private static final AtomicInteger visible = new AtomicInteger();
     private static volatile boolean companionMaintenance;
+    static final String START_NATIVE = "io.droyagent.START_NATIVE";
+    private static final NativeRuntimeStartRequest startRequest = new NativeRuntimeStartRequest();
     private static final NativeConversationVisibility conversations = new NativeConversationVisibility();
     private static final NativeConversationVisibility companions = new NativeConversationVisibility();
     private NativeRuntimeHost() {}
@@ -20,8 +22,9 @@ public final class NativeRuntimeHost {
         public final String status, locale;
         private Snapshot(Context context) {
             ready = RuntimeService.ready;
-            active = RuntimeService.isStartingOrRunning();
-            canStart = RuntimeService.canStart();
+            boolean requested = startRequest.pending(android.os.SystemClock.elapsedRealtime());
+            active = requested || RuntimeService.isStartingOrRunning();
+            canStart = !requested && RuntimeService.canStart();
             status = NativeLocale.generatedStatus(RuntimeService.status);
             locale = NativeLocale.active();
         }
@@ -91,10 +94,13 @@ public final class NativeRuntimeHost {
         }
         if (!RuntimeService.canStart()) return;
         if (NativeCompanionDeletion.pending(context)) { companionMaintenance = true; return; }
-        context.startForegroundService(new Intent(context, RuntimeService.class));
+        startRequest.launch(android.os.SystemClock.elapsedRealtime(),
+            () -> context.startForegroundService(new Intent(context, RuntimeService.class).setAction(START_NATIVE)));
     }
 
-    public static void stop(Context context) { RuntimeService.requestStop(context); }
+    static void startAcknowledged() { startRequest.acknowledge(); }
+
+    public static void stop(Context context) { startRequest.acknowledge(); RuntimeService.requestStop(context); }
 
     public static void resumeNotificationManagement(Context context) {
         BackgroundRuntime.startedByUser(context);
@@ -106,7 +112,7 @@ public final class NativeRuntimeHost {
     public static void onStarted(Context context) {
         visible.incrementAndGet();
         SetupManager.initialize(context);
-        // Native onResume owns its one foreground start attempt, after setup initialization.
+        // Native onStart owns its one foreground start attempt, after setup initialization.
         BackgroundRuntime.activityStarted(context, false);
     }
 

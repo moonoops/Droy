@@ -32,7 +32,7 @@ internal object NativeCompanionRetirementPlan {
                 pref == "native_workbench" && (key.startsWith("attachments:") || key.startsWith("pending:"))
             require(!structured || value is JSONObject || value is JSONArray) { "COMPANION_MAINTENANCE_STORAGE" }
             when {
-                pref == "native_companions" && (key in setOf("draft:$companion", "pending:$companion", "anchor:$companion") || key in externalKeys || key.startsWith("pending:$companion:") ||
+                pref == "native_companions" && (key in setOf("draft:$companion", "pending:$companion", "anchor:$companion", "background:$companion") || key in externalKeys || key.startsWith("pending:$companion:") ||
                     key.startsWith("media-delivered:$companion:") || key == "selectedCompanionId" && old == companion) -> {
                     record(source, value, true); change(pref, key, old, null)
                 }

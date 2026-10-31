@@ -5,6 +5,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,6 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -73,9 +75,12 @@ fun CompanionChatScreen(
     pendingVoiceKey: String? = null,
     pendingVoiceBubble: (@Composable () -> Unit)? = null,
 ) {
+    // Keep the wallpaper outside Scaffold padding: IME and composer changes only resize content.
+    Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+    key(state.selectedCompanionId) { CompanionChatBackground(state.selectedBackgroundJson, imageLoader) }
     val companion = state.selectedCompanion
     if (companion == null) {
-        Scaffold(modifier.fillMaxSize().testTag("native-companion-chat"), contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        Scaffold(Modifier.fillMaxSize().testTag("native-companion-chat"), containerColor = Color.Transparent, contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = { CompanionTopBar(stringResource(R.string.native_companion_messages), onBack) }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 CompanionRuntime(state.runtime, model::startRuntime)
@@ -83,7 +88,7 @@ fun CompanionChatScreen(
                 CompanionError(state.error, model::dismissError, model::refresh)
             }
         }
-        return
+        return@Box
     }
     var replyNoticeDismissed by rememberSaveable(companion.id, state.status.error, state.status.phase, state.messages.lastOrNull()?.id) { mutableStateOf(false) }
     val list = rememberLazyListState()
@@ -171,7 +176,7 @@ fun CompanionChatScreen(
     }
 
 
-    Scaffold(modifier.fillMaxSize().testTag("native-companion-chat"), containerColor = MaterialTheme.colorScheme.surface,
+    Scaffold(Modifier.fillMaxSize().testTag("native-companion-chat"), containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0), snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             Surface(color = MaterialTheme.colorScheme.surface) {
@@ -214,7 +219,6 @@ fun CompanionChatScreen(
                     actionLabel = stringResource(if (needsModel) R.string.native_companion_model else R.string.native_companion_regenerate))
             }
             Box(Modifier.fillMaxWidth().weight(1f)) {
-                CompanionChatBackground(companion.chatBackgroundJson, imageLoader)
                 LazyColumn(state = list, reverseLayout = true, modifier = Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { focus.clearFocus(); keyboard?.hide() }) }.testTag("native-companion-history"),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (pendingVoiceKey != null && pendingVoiceBubble != null) item(key = "message:$pendingVoiceKey") {
@@ -349,6 +353,7 @@ fun CompanionChatScreen(
         }
     }
     imageUrl?.let { CompanionImageDialog(it, imageLabel, imageLoader, onClose = { imageUrl = null }) }
+    }
 }
 
 @Composable
@@ -423,5 +428,5 @@ private fun BoxScope.CompanionChatBackground(raw: String?, loader: CompanionImag
         } catch (_: JSONException) { null }
     }
     if (background != null) CompanionBackgroundImage(background.first, loader,
-        Modifier.matchParentSize().testTag("native-companion-chat-background"), alignment = background.second)
+        Modifier.matchParentSize().testTag("native-companion-chat-background"), alignment = background.second, decodeSize = LocalWindowInfo.current.containerSize)
 }

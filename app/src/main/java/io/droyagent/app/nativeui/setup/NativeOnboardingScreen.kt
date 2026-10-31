@@ -293,7 +293,7 @@ private fun SetupIdentity(state: NativeOnboardingState, model: NativeOnboardingV
 }
 
 @Composable
-private fun SetupError(code: String, onRetry: () -> Unit) {
+internal fun SetupError(code: String, onRetry: () -> Unit) {
     val text = stringResource(when (code) {
         "storage_error" -> R.string.native_setup_error_storage
         "setup_state_unavailable", "SETUP_STATE_UNAVAILABLE", "NATIVE_SETUP_STATE_UNAVAILABLE" -> R.string.native_setup_error_state

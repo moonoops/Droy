@@ -91,41 +91,16 @@ internal fun cachedCompanionImageSize(url: String): Pair<Int, Int>? =
 
 private data class ImageResult(val bitmap: ImageBitmap? = null, val loading: Boolean = true, val gif: CompanionGifData? = null)
 
-@Composable
-internal fun CompanionImage(
-    url: String,
-    label: String?,
-    loader: CompanionImageLoader,
-    modifier: Modifier = Modifier,
-    contentScale: ContentScale = ContentScale.Crop,
-    maximumDimension: Int = 1024,
-    alignment: Alignment = Alignment.Center,
-    cropTargetPixels: Int? = null,
-    cropTargetSize: IntSize? = null,
-    onImageSize: ((Int, Int) -> Unit)? = null,
-    fallback: @Composable (Boolean) -> Unit,
-) {
-    val currentLoader by rememberUpdatedState(loader)
-    val currentImageSize by rememberUpdatedState(onImageSize)
-    val access by io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.imageAccess.collectAsState()
-    val key = "$url@$maximumDimension@$cropTargetPixels" + (cropTargetSize?.let { "@${it.width}x${it.height}" } ?: "")
-    val cached = remember(key, access) { synchronized(CompanionImages) {
-        if (access.frozen || access.generation != io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.imageGeneration) null
-        else CompanionImages.cache.get(key)?.asImageBitmap()
-    } }
-    val cachedGif = remember(key, access) { synchronized(CompanionImages) {
-        if (access.frozen || access.generation != io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.imageGeneration) null
-        else CompanionImages.gifs.get(url)
-    } }
-    var result by remember(key, access) { mutableStateOf(ImageResult(cached, cached == null && cachedGif == null, cachedGif)) }
-    LaunchedEffect(key, access) {
-        if (cached != null || cachedGif != null || access.frozen) return@LaunchedEffect
-        val generation = access.generation
-        result = withContext(Dispatchers.IO) { withCompanionImageLoad(key) {
+private suspend fun loadCompanionImage(url: String, key: String, generation: Long,
+    loader: CompanionImageLoader, maximumDimension: Int, cropTargetPixels: Int?, cropTargetSize: IntSize?): ImageResult {
+    return withContext(Dispatchers.IO) { withCompanionImageLoad(key) {
+            if (io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.frozen ||
+                generation != io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.imageGeneration)
+                return@withCompanionImageLoad ImageResult(loading = false)
             CompanionImages.cache.get(key)?.let { return@withCompanionImageLoad ImageResult(it.asImageBitmap(), loading = false) }
             CompanionImages.gifs.get(url)?.let { return@withCompanionImageLoad ImageResult(loading = false, gif = it) }
             val bitmap = try {
-                val bytes = currentLoader(url)
+                val bytes = loader(url)
                 if (companionIsGif(bytes)) {
                     val gif = CompanionGifData(bytes, companionGifSize(bytes))
                     val admitted = synchronized(CompanionImages) {
@@ -182,6 +157,52 @@ internal fun CompanionImage(
                 generation != io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.imageGeneration) ImageResult(loading = false)
             else ImageResult(bitmap?.asImageBitmap(), loading = false)
         } }
+}
+
+internal suspend fun preloadCompanionBackgroundImage(url: String, target: IntSize, loader: CompanionImageLoader) {
+    val access = io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.imageAccess.value
+    if (access.frozen) return
+    loadCompanionImage(url, "$url@1024@null@${target.width}x${target.height}", access.generation, loader, 1024, null, target)
+}
+
+@Composable
+internal fun CompanionImage(
+    url: String,
+    label: String?,
+    loader: CompanionImageLoader,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+    maximumDimension: Int = 1024,
+    alignment: Alignment = Alignment.Center,
+    cropTargetPixels: Int? = null,
+    cropTargetSize: IntSize? = null,
+    onImageSize: ((Int, Int) -> Unit)? = null,
+    fallback: @Composable (Boolean) -> Unit,
+) {
+    val currentLoader by rememberUpdatedState(loader)
+    val currentImageSize by rememberUpdatedState(onImageSize)
+    val access by io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.imageAccess.collectAsState()
+    val key = "$url@$maximumDimension@$cropTargetPixels" + (cropTargetSize?.let { "@${it.width}x${it.height}" } ?: "")
+    val cached = remember(key, access) { synchronized(CompanionImages) {
+        if (access.frozen || access.generation != io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.imageGeneration) null
+        else CompanionImages.cache.get(key)?.asImageBitmap()
+    } }
+    val cachedGif = remember(key, access) { synchronized(CompanionImages) {
+        if (access.frozen || access.generation != io.droyagent.app.nativeui.companion.maintenance.NativeCompanionWriteBarrier.imageGeneration) null
+        else CompanionImages.gifs.get(url)
+    } }
+    // A new decode size must not erase the same resource while its replacement loads.
+    // Resource changes and deletion generations still discard the displayed image immediately.
+    var result by remember(url, access) { mutableStateOf(ImageResult(cached, cached == null && cachedGif == null, cachedGif)) }
+    LaunchedEffect(key, access) {
+        if (access.frozen) return@LaunchedEffect
+        if (cached != null || cachedGif != null) {
+            result = ImageResult(cached, loading = false, gif = cachedGif)
+            return@LaunchedEffect
+        }
+        val generation = access.generation
+        val replacement = loadCompanionImage(url, key, generation, currentLoader, maximumDimension, cropTargetPixels, cropTargetSize)
+        if (replacement.bitmap != null || replacement.gif != null || result.bitmap == null && result.gif == null) result = replacement
     }
     if (onImageSize != null) LaunchedEffect(key, result.bitmap, result.gif) {
         result.bitmap?.let { currentImageSize?.invoke(it.width, it.height) }
