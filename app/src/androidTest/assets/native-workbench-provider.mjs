@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises';
 import { existsSync, realpath as callbackRealpath } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -8,8 +8,9 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { promisify } from 'node:util';
 export const name = 'droy-native-workbench-fixture';
-export const inject = ['llm', 'tools', 'approval', 'userQuestions', 'credentialsController'];
+export const inject = ['llm', 'tools', 'approval', 'userQuestions', 'credentialsController', 'webServer'];
 export async function apply(ctx) {
+  await installInitialWorkspaceCatalogFixture(ctx);
   await installNativeProxyFixture(ctx);
   const transcriptFixture = await installNativeTranscriptFixture(ctx);
   const { LlmAdapter } = await import(pathToFileURL(join(process.env.DROY_RUNTIME_DIR,
@@ -342,6 +343,34 @@ export async function apply(ctx) {
     } });
   });
   await writeFile(join(process.env.DSH_HOME, 'native-fixture-ready.json'), '{"ready":true}');
+}
+
+/** Only the first-catalog test opts into this owned, temporary HTTP failure. */
+async function installInitialWorkspaceCatalogFixture(ctx) {
+  const home = process.env.DSH_HOME, held = join(home, 'native-fixture-workspaces-held');
+  if (!existsSync(held)) return;
+  const ownership = JSON.parse(await readFile(join(dirname(home), 'native-workbench-fixture.json'), 'utf8'));
+  if (ownership.fixture !== 'native-isolated-runtime-v1' || ownership.phase !== 'running')
+    throw new Error('Invalid isolated first-catalog fixture ownership');
+  const { requireMobileSession } = await import(pathToFileURL(join(process.env.DROY_RUNTIME_DIR,
+    'node_modules/@droyagent/mobile/auth.mjs')).href);
+  const release = ctx.webServer.register({ kind: 'exact', path: '/droy/native/workspaces', async handler(req, res) {
+    if (!requireMobileSession(req, res)) return;
+    await writeFile(join(home, 'native-fixture-workspaces-gate-hit'), 'held');
+    res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ ok: false, error: { code: 'runtime_unavailable' } }));
+  } });
+  const control = ctx.webServer.register({ kind: 'exact', path: '/droy/native/fixture/workspaces/release', async handler(req, res) {
+    if (!requireMobileSession(req, res)) return;
+    if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+    await unlink(held);
+    release();
+    await writeFile(join(home, 'native-fixture-workspaces-gate.json'), '{"held":false}');
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ ok: true, result: { held: false } }));
+  } });
+  ctx.effect(() => () => { release(); control(); });
+  await writeFile(join(home, 'native-fixture-workspaces-gate.json'), '{"held":true}');
 }
 
 /** An explicitly selected adb-reversed loopback port reuses the host's existing proxy for public-source tests. */

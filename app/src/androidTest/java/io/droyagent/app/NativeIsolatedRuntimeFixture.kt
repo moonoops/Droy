@@ -19,7 +19,8 @@ import org.junit.rules.ExternalResource
 /** Compose's rule must wrap this rule; the shared marker also blocks legacy fixture overlap. */
 class NativeIsolatedRuntimeFixture(private val destination: String = "workbench", private val allowRoot: Boolean? = null,
     private val providerAsset: String = "native-workbench-provider.mjs",
-    private val afterPreferencesRestored: (() -> Unit)? = null) : ExternalResource() {
+    private val afterPreferencesRestored: (() -> Unit)? = null,
+    private val beforeLaunch: ((NativeIsolatedRuntimeFixture) -> Unit)? = null) : ExternalResource() {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
     val context: Context get() = instrumentation.targetContext
     val runtimeTransport = NativeLocalTransport()
@@ -100,6 +101,7 @@ class NativeIsolatedRuntimeFixture(private val destination: String = "workbench"
             allowRoot?.let { product.putBoolean("allowRoot", it) }
             assertTrue(product.commit())
             marker.writeText(record("running").toString())
+            beforeLaunch?.invoke(this)
             launch(destination)
             // Native foreground entry now starts the engine. Never depend on the retired
             // explicit-stop preference to hold an opened Activity offline.

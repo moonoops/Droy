@@ -33,7 +33,11 @@ public class LegacyProfileUpgradeDeviceTest {
         runtime = files.toPath().resolve("runtime");
         profile = files.toPath().resolve("dsh-home/profiles/mobile");
         Files.createDirectories(profile);
-        write(runtime.resolve("node_modules/@droyagent/mobile/package.json"), "{\"name\":\"@droyagent/mobile\",\"version\":\"0.1.0\"}");
+        for (String name : new String[]{"@droyagent/mobile", "@droyagent/media-input", "@droyagent/voice",
+                "@droyagent/privacy", "@droyagent/execution", "@droyagent/memory"}) {
+            write(runtime.resolve("node_modules/" + name + "/package.json"),
+                new JSONObject().put("name", name).put("version", "0.1.0").toString());
+        }
         write(runtime.resolve("old-runtime-sentinel"), "old runtime must survive failed migration");
         Files.createSymbolicLink(profile.resolve("node_modules"), runtime.resolve("node_modules"));
         originalManifest = "{\"name\":\"fixture-profile\",\"private\":true,\"description\":\"keep user settings\","
@@ -71,7 +75,8 @@ public class LegacyProfileUpgradeDeviceTest {
 
     @Test public void incompleteMigrationPreservesTheOldRuntimeAndCanBeRetried() throws Exception {
         IOException failed = assertThrows(IOException.class, () -> RuntimeInstaller.install(context));
-        assertTrue(failed.getMessage().contains("旧运行包尚未替换"));
+        assertEquals(NativeLocale.text("插件迁移失败，旧运行包尚未替换，请检查插件安装后重试",
+            "Plugin migration failed. The old runtime has not been replaced. Check plugin installation and retry"), failed.getMessage());
         assertEquals("old runtime must survive failed migration", read(runtime.resolve("old-runtime-sentinel")));
         assertTrue(Files.isSymbolicLink(profile.resolve("node_modules")));
         assertEquals(originalManifest, read(profile.resolve("package.json")));

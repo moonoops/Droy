@@ -31,7 +31,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Synthetic presentation only; the shared fixture isolates and restores app data without starting its engine. */
+/** Synthetic presentation while the shared fixture owns and restores the real Host lifecycle. */
 @RunWith(AndroidJUnit4::class)
 class NativeEngineUiDeviceTest {
     @get:Rule(order = 0) val compose = createEmptyComposeRule()
@@ -58,6 +58,7 @@ class NativeEngineUiDeviceTest {
         compose.onAllNodesWithText(copy(language, R.string.native_engine_details)).onFirst().performScrollTo().performClick()
         compose.onNodeWithTag("native-engine-preset-document").assertIsDisplayed()
         systemBack()
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("native-engine-preset-document").fetchSemanticsNodes(false).isEmpty() }
         compose.onNodeWithTag("native-engine-preset-document").assertDoesNotExist()
         assertEquals(0, back.get())
         compose.onNodeWithContentDescription(copy(language, R.string.native_engine_back)).performClick()
@@ -74,10 +75,10 @@ class NativeEngineUiDeviceTest {
         render(language) { NativeEngineSessionSelector(fake(language), { actions.add(it) }) }
         compose.onNodeWithText(copy(language, R.string.native_engine_workspace_write)).performClick()
         compose.onNodeWithText(copy(language, R.string.native_engine_full_access)).performClick()
-        compose.onNodeWithText(copy(language, R.string.native_engine_confirm)).assertIsNotEnabled()
+        compose.onNodeWithText(copy(language, R.string.native_engine_enable_full)).assertIsNotEnabled()
         assertTrue(actions.none { it is NativeEngineAction.SessionPermission })
         compose.onNode(isToggleable()).performClick()
-        compose.onNodeWithText(copy(language, R.string.native_engine_confirm)).assertIsEnabled().performClick()
+        compose.onNodeWithText(copy(language, R.string.native_engine_enable_full)).assertIsEnabled().performClick()
         compose.runOnIdle {
             val action = actions.filterIsInstance<NativeEngineAction.SessionPermission>().single()
             assertEquals("danger-full-access", action.id); assertTrue(action.acceptRisk)
@@ -114,6 +115,7 @@ class NativeEngineUiDeviceTest {
         compose.onNodeWithText(copy("en", R.string.native_engine_standard)).performClick()
         compose.onNodeWithText(copy("en", R.string.native_engine_presets)).assertIsDisplayed()
         systemBack()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText(copy("en", R.string.native_engine_presets)).fetchSemanticsNodes(false).isEmpty() }
         compose.onNodeWithText(copy("en", R.string.native_engine_presets)).assertDoesNotExist()
         compose.onNodeWithTag("native-engine-session-controls").assertIsDisplayed()
         fixture.scenario.onActivity { assertFalse("Dialog Back must not finish its Activity", it.isFinishing) }

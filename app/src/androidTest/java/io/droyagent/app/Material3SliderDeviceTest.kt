@@ -73,7 +73,7 @@ class Material3SliderDeviceTest {
                 }
             }
         }
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(1)
+        compose.onNode(hasScrollToIndexAction()).performScrollToKey("position")
         val sliders = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
         sliders.assertCountEquals(2)
         fun assertAxes(x: Float, y: Float) {
@@ -133,7 +133,7 @@ class Material3SliderDeviceTest {
         val slider = compose.onNodeWithTag("native-voice-rate")
         slider.performScrollTo().assertRangeInfoEquals(ProgressBarRangeInfo(1.5f, 0.5f..2f))
         slider.performSemanticsAction(SemanticsActions.SetProgress) { assertTrue(it(1.75f)) }
-        compose.onNodeWithText(localized.getString(R.string.native_voice_rate_value, 1.75)).performClick()
+        compose.onNodeWithText(localized.getString(R.string.native_voice_reset_rate)).performScrollTo().performClick()
         slider.assertRangeInfoEquals(ProgressBarRangeInfo(1f, 0.5f..2f))
         compose.runOnIdle { state.value = state.value.copy(ttsDraft = state.value.ttsDraft!!.copy(rate = 0.75)) }
         slider.assertRangeInfoEquals(ProgressBarRangeInfo(0.75f, 0.5f..2f))

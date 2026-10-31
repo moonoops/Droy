@@ -1,7 +1,10 @@
 package io.droyagent.app
 
 import android.content.res.Configuration
-import android.net.Uri
+import android.content.ContentValues
+import android.content.Intent
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.ViewModelProvider
@@ -10,6 +13,7 @@ import io.droyagent.app.nativeui.data.NativeApiException
 import io.droyagent.app.nativeui.data.NativeSession
 import io.droyagent.app.nativeui.data.NativeWorkbenchViewModel
 import io.droyagent.app.nativeui.media.NativeDraftMediaStore
+import io.droyagent.app.nativeui.settings.NativeSettingsViewModel
 import java.io.File
 import java.util.Locale
 import java.util.UUID
@@ -21,13 +25,22 @@ import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestName
 import org.junit.runner.RunWith
 
-/** The real stopped Host leaves a deterministic first-catalog window; no model, microphone or camera is used. */
+/** A held real HTTP catalog leaves a deterministic first-catalog window; no model, microphone or camera is used. */
 @RunWith(AndroidJUnit4::class)
 class NativeInitialWorkspaceDeviceTest {
     @get:Rule(order = 0) val compose = createEmptyComposeRule()
-    @get:Rule(order = 1) val fixture = NativeIsolatedRuntimeFixture()
+    @get:Rule(order = 1) val testName = TestName()
+    @get:Rule(order = 2) val fixture = NativeIsolatedRuntimeFixture(beforeLaunch = { isolated ->
+        if (testName.methodName == "offlineTypingAndPersistedAttachmentBindToDefaultWithTheSameIdentityAfterColdRecreation") {
+            File(isolated.home, "native-fixture-workspaces-held").writeText("first-catalog")
+            // Install the owned HTTP gate before an Activity can request its first catalog.
+            isolated.startRuntime()
+            assertTrue(File(isolated.home, "native-fixture-workspaces-gate.json").isFile)
+        }
+    })
     private lateinit var work: NativeWorkbenchViewModel
     private val preferences get() = fixture.context.getSharedPreferences("native_workbench", 0)
 
@@ -36,9 +49,14 @@ class NativeInitialWorkspaceDeviceTest {
         val draftId = work.state.value.draftId
         val marker = "EARLY_OFFLINE_DRAFT"
         for (language in listOf("en", "zh")) {
-            assertTrue(fixture.context.getSharedPreferences("product", 0).edit().putString("languagePreference", language).commit())
+            lateinit var settings: NativeSettingsViewModel
+            fixture.scenario.onActivity { settings = ViewModelProvider(it)[NativeSettingsViewModel::class.java] }
+            compose.waitUntil(30_000) { settings.state.value.loaded && settings.state.value.writable && !settings.state.value.loading }
+            fixture.scenario.onActivity { settings.setLanguage(language) }
+            compose.waitUntil(20_000) { settings.state.value.locale == language && !settings.state.value.saving }
             fixture.relaunch(); models()
             compose.waitUntil(10_000) { work.state.value.runtime.locale == language }
+            compose.waitUntil(10_000) { File(fixture.home, "native-fixture-workspaces-gate-hit").isFile }
             assertFalse(work.state.value.workspaceResolved)
             compose.onNodeWithText(text(language, R.string.native_workspace_resolving)).assertIsDisplayed()
             compose.onNodeWithTag("native-composer").assertIsEnabled().performTextReplacement(marker)
@@ -59,9 +77,16 @@ class NativeInitialWorkspaceDeviceTest {
         assertTrue(preferences.all.keys.none { it.startsWith("voice-target:") || it.startsWith("pending:") })
         val importId = UUID.randomUUID().toString()
         val store = NativeDraftMediaStore(fixture.context)
-        val file = File(fixture.home, "early-persisted-attachment.txt").apply { writeText("Fictional persisted attachment") }
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, "native-initial-$importId.txt")
+            put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DroyNativeFixture")
+        }
+        val source = requireNotNull(fixture.context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
         try {
-            val attachments = store.importSelection(importId, listOf(Uri.fromFile(file)), false, 10)
+            requireNotNull(fixture.context.contentResolver.openOutputStream(source)).use { it.write("Fictional persisted attachment".toByteArray()) }
+            fixture.context.grantUriPermission(fixture.context.packageName, source, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val attachments = store.importSelection(importId, listOf(source), false, 10)
             // Seed an already-persisted local attachment, rather than bypassing the disabled target capture entry.
             assertTrue(preferences.edit().putString("attachments:$draftId", JSONArray(attachments.map { it.json() }).toString()).commit())
             fixture.relaunch(); models()
@@ -69,7 +94,9 @@ class NativeInitialWorkspaceDeviceTest {
             assertEquals(draftId, work.state.value.draftId)
             assertEquals(marker, work.state.value.draft)
             assertEquals(attachments, work.state.value.draftAttachments)
+            assertFalse(native("/droy/native/fixture/workspaces/release", JSONObject()).getBoolean("held"))
             fixture.startRuntime()
+            fixture.scenario.onActivity { work.refresh() }
             awaitResolved()
             val default = requireNotNull(work.state.value.defaultWorkspaceId)
             assertEquals(default, work.state.value.selectedWorkspaceId)
@@ -87,8 +114,13 @@ class NativeInitialWorkspaceDeviceTest {
             assertEquals(0, catalog().getJSONArray("sessions").length())
             assertNoModelCalls()
         } finally {
-            assertTrue(preferences.edit().remove("attachments:$draftId").commit())
-            store.removeImport(importId)
+            try {
+                assertTrue(preferences.edit().remove("attachments:$draftId").commit())
+                store.removeImport(importId)
+            } finally {
+                fixture.context.revokeUriPermission(source, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                assertEquals("Remove only this fixture's MediaStore row", 1, fixture.context.contentResolver.delete(source, null, null))
+            }
         }
     }
 
